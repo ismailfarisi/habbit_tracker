@@ -255,6 +255,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: s.madhab,
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Asr calculation', border: OutlineInputBorder()),
                 items: const [
                   DropdownMenuItem(value: 'shafi', child: Text("Standard (Shafi'i, Maliki, Hanbali)")),
@@ -325,7 +326,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               OutlinedButton(
                 onPressed: () async {
                   final ok = await state.notifications.requestPermissions();
-                  await state.notifications.reschedule(s, state.logs);
+                  await state.rescheduleNow();
                   _snack(ok ? 'Notifications allowed.' : 'Notifications are blocked. Enable them in system settings.');
                 },
                 child: const Text('Grant permissions'),

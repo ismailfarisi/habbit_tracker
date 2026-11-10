@@ -22,6 +22,11 @@ Future<void> notificationActionBackground(NotificationResponse r) async {
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
   final storage = await Storage.open();
+  if (r.payload!.startsWith('task:')) {
+    final tasks = storage.loadTasks();
+    if (applyTaskDoneAction(r.payload!, tasks)) await storage.saveTasks(tasks);
+    return;
+  }
   final logs = storage.loadLogs();
   if (applyDoneAction(r.payload!, logs, DateTime.now())) {
     await storage.saveLogs(logs);
@@ -115,6 +120,7 @@ class NotificationService {
       ReminderKind.wake => "I'm up",
       ReminderKind.prayer => 'Prayed',
       ReminderKind.training => 'Open coach',
+      ReminderKind.task => 'Done',
     };
     final actions = [
       AndroidNotificationAction(
@@ -151,6 +157,7 @@ class NotificationService {
       ReminderKind.wake => ('wake', 'Wake-up reminder'),
       ReminderKind.prayer => ('prayer', 'Prayer reminders'),
       ReminderKind.training => ('training', 'Training reminders'),
+      ReminderKind.task => ('tasks', 'Task reminders'),
     };
     return NotificationDetails(
       android: AndroidNotificationDetails(
@@ -166,13 +173,13 @@ class NotificationService {
   }
 
   /// Replaces all pending reminders with a fresh plan.
-  Future<void> reschedule(Settings s, Map<String, DayLog> logs) async {
+  Future<void> reschedule(Settings s, Map<String, DayLog> logs, List<Task> tasks) async {
     if (!_ready) return;
     await _plugin.cancelAllPendingNotifications();
     if (!s.remindersEnabled) return;
 
     final exact = _android == null || (await _android!.canScheduleExactNotifications() ?? false);
-    for (final r in planReminders(s, logs, DateTime.now())) {
+    for (final r in planReminders(s, logs, DateTime.now(), tasks: tasks).take(maxPending)) {
       final mode = !exact
           ? AndroidScheduleMode.inexactAllowWhileIdle
           : r.kind == ReminderKind.wake

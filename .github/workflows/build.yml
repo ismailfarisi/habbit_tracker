@@ -9,9 +9,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -25,7 +25,15 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
-      - run: flutter build apk --release
+      # Retry: the Gradle distribution download from GitHub occasionally times out.
+      - name: Build APK
+        run: |
+          for attempt in 1 2 3; do
+            flutter build apk --release && exit 0
+            echo "Build attempt $attempt failed; retrying in 30s"
+            sleep 30
+          done
+          exit 1
 
       - uses: actions/upload-artifact@v4
         with:

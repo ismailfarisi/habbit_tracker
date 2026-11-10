@@ -10,6 +10,7 @@ import '../models.dart';
 class Storage {
   static const _settingsKey = 'settings.v1';
   static const _logsKey = 'logs.v1';
+  static const _tasksKey = 'tasks.v1';
   static const _apiKeyKey = 'openrouter_api_key';
   static const _secure = FlutterSecureStorage();
 
@@ -52,6 +53,19 @@ class Storage {
         }),
       );
 
+  List<Task> loadTasks() {
+    final raw = prefs.getString(_tasksKey);
+    if (raw == null) return [];
+    try {
+      return (jsonDecode(raw) as List).map((e) => Task.fromJson((e as Map).cast<String, dynamic>())).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveTasks(List<Task> tasks) =>
+      prefs.setString(_tasksKey, jsonEncode(tasks.map((t) => t.toJson()).toList()));
+
   Future<String> loadApiKey() async {
     try {
       return await _secure.read(key: _apiKeyKey) ?? '';
@@ -69,6 +83,7 @@ class Storage {
         'version': 1,
         'settings': loadSettings().toJson(),
         'logs': jsonDecode(prefs.getString(_logsKey) ?? '{}'),
+        'tasks': jsonDecode(prefs.getString(_tasksKey) ?? '[]'),
       });
 
   /// Restores a backup made by [exportJson]. Throws [FormatException] on bad input.
@@ -81,13 +96,18 @@ class Storage {
     final logs = (j['logs'] as Map).map(
       (k, v) => MapEntry(k as String, DayLog.fromJson((v as Map).cast<String, dynamic>())),
     );
+    final tasks = ((j['tasks'] as List?) ?? const [])
+        .map((e) => Task.fromJson((e as Map).cast<String, dynamic>()))
+        .toList();
     await saveSettings(settings);
     await saveLogs(logs);
+    await saveTasks(tasks);
   }
 
   Future<void> clearAll() async {
     await prefs.remove(_settingsKey);
     await prefs.remove(_logsKey);
+    await prefs.remove(_tasksKey);
     await saveApiKey('');
   }
 }

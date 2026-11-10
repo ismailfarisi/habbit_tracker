@@ -1,8 +1,9 @@
 import '../logic/stats.dart';
+import '../logic/tasks.dart';
 import '../models.dart';
 import 'prayer_service.dart';
 
-enum ReminderKind { wake, prayer, training }
+enum ReminderKind { wake, prayer, training, task }
 
 class PlannedReminder {
   final int id;
@@ -11,7 +12,8 @@ class PlannedReminder {
   final String title;
   final String body;
 
-  /// "wake|2026-11-08", "prayer:Fajr|2026-11-08", "train|2026-11-08"
+  /// "wake|2026-11-08", "prayer:Fajr|2026-11-08", "train|2026-11-08",
+  /// "task:ID|2026-11-08"
   final String payload;
 
   const PlannedReminder({
@@ -24,15 +26,25 @@ class PlannedReminder {
   });
 }
 
-/// How many days ahead to schedule. iOS keeps at most 64 pending
-/// notifications; 8 days x 7 reminders = 56 keeps us under that.
+/// How many days ahead to plan.
 const scheduleDays = 8;
+
+/// iOS keeps at most 64 pending notifications, so only the soonest
+/// [maxPending] reminders are scheduled at a time.
+const maxPending = 60;
 
 /// Stable notification id for a date and slot (0 = wake, 1-5 = prayers,
 /// 6 = training), so a given day's reminder keeps its id across reschedules.
 int reminderId(DateTime date, int slot) {
   final dayNumber = DateTime.utc(date.year, date.month, date.day).millisecondsSinceEpoch ~/ 86400000;
   return 100 + (dayNumber % 100000) * 10 + slot;
+}
+
+/// Stable notification id for a task on a date. Kept in a separate range
+/// (>= 1e9) from habit reminders and below 2^31.
+int taskReminderId(Task t, DateTime date) {
+  final dayNumber = DateTime.utc(date.year, date.month, date.day).millisecondsSinceEpoch ~/ 86400000;
+  return 1000000000 + (dayNumber % 1000) * 100000 + t.seq % 100000;
 }
 
 /// Every reminder from [now] through the next [days] days, skipping ones
@@ -42,6 +54,7 @@ List<PlannedReminder> planReminders(
   Map<String, DayLog> logs,
   DateTime now, {
   int days = scheduleDays,
+  List<Task> tasks = const [],
 }) {
   final out = <PlannedReminder>[];
   for (var d = 0; d < days; d++) {
@@ -86,10 +99,39 @@ List<PlannedReminder> planReminders(
         payload: 'train|$key',
       ));
     }
+
+    for (final t in tasks) {
+      if (!t.isScheduledOn(date) || t.isDoneOn(date)) continue;
+      final when = t.reminderOn(date);
+      if (when == null) continue;
+      out.add(PlannedReminder(
+        id: taskReminderId(t, date),
+        when: when,
+        kind: ReminderKind.task,
+        title: '📝 ${t.title}',
+        body: t.notes.isEmpty ? 'Task due now. Tap "Done" when finished.' : t.notes,
+        payload: 'task:${t.id}|$key',
+      ));
+    }
   }
   out.removeWhere((r) => !r.when.isAfter(now));
   out.sort((a, b) => a.when.compareTo(b.when));
   return out;
+}
+
+/// Applies a "Done" action for a task notification. Returns false if the
+/// payload isn't a task payload or the task no longer exists.
+bool applyTaskDoneAction(String payload, List<Task> tasks) {
+  final parts = payload.split('|');
+  if (parts.length != 2 || !parts[0].startsWith('task:')) return false;
+  final id = parts[0].substring(5);
+  for (final t in tasks) {
+    if (t.id == id) {
+      t.doneDates.add(parts[1]);
+      return true;
+    }
+  }
+  return false;
 }
 
 /// Applies a "mark done" action from a notification payload to [logs].

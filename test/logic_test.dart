@@ -148,10 +148,10 @@ void main() {
 
   group('openrouter', () {
     test('parses SSE lines', () {
-      expect(parseSseLine(': OPENROUTER PROCESSING'), isNull);
-      expect(parseSseLine('data: [DONE]'), isNull);
-      expect(parseSseLine('data: {"choices":[{"delta":{"content":"Hi"}}]}'), 'Hi');
-      expect(() => parseSseLine('data: {"error":{"message":"boom"}}'), throwsA(isA<OpenRouterException>()));
+      expect(parseSseDelta(': OPENROUTER PROCESSING'), isNull);
+      expect(parseSseDelta('data: [DONE]'), isNull);
+      expect(parseSseDelta('data: {"choices":[{"delta":{"content":"Hi"}}]}')?['content'], 'Hi');
+      expect(() => parseSseDelta('data: {"error":{"message":"boom"}}'), throwsA(isA<OpenRouterException>()));
     });
 
     test('streams a reply and sends auth', () async {

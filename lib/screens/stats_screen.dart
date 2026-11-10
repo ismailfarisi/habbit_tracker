@@ -34,13 +34,15 @@ class StatsScreen extends StatelessWidget {
           children: [
             Text('Progress', style: t.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
-            GridView.count(
-              crossAxisCount: 2,
+            GridView(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-              childAspectRatio: 1.7,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                mainAxisExtent: 112,
+              ),
               children: [
                 _StreakTile('☀️ Early rising', streak(logs, wake), bestStreak(logs, wake)),
                 _StreakTile('🕌 All 5 prayers', streak(logs, prayersDone), bestStreak(logs, prayersDone)),

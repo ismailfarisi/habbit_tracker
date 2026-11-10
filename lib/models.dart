@@ -151,3 +151,71 @@ class DayLog {
         trainingMinutes: (j['trainingMinutes'] as num?)?.toInt() ?? 0,
       );
 }
+
+enum Repeat { none, daily, weekly }
+
+const weekdayShort = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+/// A user- or AI-created task. One-off tasks have an optional [date];
+/// repeating tasks use [date] as an optional start date.
+class Task {
+  final String id;
+
+  /// Small sequential number used to derive stable notification ids.
+  final int seq;
+  String title;
+  String notes;
+  String? date; // yyyy-MM-dd
+  String? time; // HH:mm, enables a reminder
+  Repeat repeat;
+  List<int> weekdays; // 1 = Monday .. 7 = Sunday, for weekly
+  Set<String> doneDates;
+  final DateTime createdAt;
+  final bool createdByAi;
+
+  Task({
+    required this.id,
+    required this.seq,
+    required this.title,
+    this.notes = '',
+    this.date,
+    this.time,
+    this.repeat = Repeat.none,
+    List<int>? weekdays,
+    Set<String>? doneDates,
+    DateTime? createdAt,
+    this.createdByAi = false,
+  })  : weekdays = weekdays ?? [],
+        doneDates = doneDates ?? <String>{},
+        createdAt = createdAt ?? DateTime.now();
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'seq': seq,
+        'title': title,
+        'notes': notes,
+        'date': date,
+        'time': time,
+        'repeat': repeat.name,
+        'weekdays': weekdays,
+        'doneDates': doneDates.toList(),
+        'createdAt': createdAt.toIso8601String(),
+        'createdByAi': createdByAi,
+      };
+
+  factory Task.fromJson(Map<String, dynamic> j) => Task(
+        id: j['id'] as String,
+        seq: (j['seq'] as num?)?.toInt() ?? 0,
+        title: j['title'] as String? ?? '',
+        notes: j['notes'] as String? ?? '',
+        date: j['date'] as String?,
+        time: j['time'] as String?,
+        repeat: Repeat.values.firstWhere((r) => r.name == j['repeat'], orElse: () => Repeat.none),
+        weekdays: ((j['weekdays'] as List?) ?? const []).map((e) => (e as num).toInt()).toList(),
+        doneDates: ((j['doneDates'] as List?) ?? const []).cast<String>().toSet(),
+        createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime.now(),
+        createdByAi: j['createdByAi'] as bool? ?? false,
+      );
+
+  Task copy() => Task.fromJson(toJson());
+}

@@ -15,6 +15,14 @@ Guidelines:
 - Encourage the user, but be honest about what to improve.
 ''';
 
+const coachTaskPrompt = '''
+You can also manage the user's tasks with tools (create_task, list_tasks,
+update_task, complete_task, delete_task). When the user asks you to schedule
+practice, build a plan, or remind them of something, create the tasks with
+sensible times, so they get reminders. Avoid clashing with prayer times.
+Call list_tasks before changing or deleting a task.
+''';
+
 enum ExerciseType {
   twister('Tongue twisters', readAloud: true),
   reading('Reading passage', readAloud: true),

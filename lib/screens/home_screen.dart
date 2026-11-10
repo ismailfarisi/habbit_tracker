@@ -3,11 +3,12 @@ import 'package:flutter/material.dart';
 import '../app_state.dart';
 import 'settings_screen.dart';
 import 'stats_screen.dart';
+import 'tasks_screen.dart';
 import 'today_screen.dart';
 import 'train_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  static const todayTab = 0, trainTab = 1, statsTab = 2, settingsTab = 3;
+  static const todayTab = 0, tasksTab = 1, trainTab = 2, statsTab = 3, settingsTab = 4;
 
   final AppState state;
   const HomeScreen({super.key, required this.state});
@@ -54,6 +55,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final pages = [
       TodayScreen(state: widget.state, onNavigate: goTo),
+      TasksScreen(state: widget.state),
       TrainScreen(state: widget.state, onNavigate: goTo),
       StatsScreen(state: widget.state),
       SettingsScreen(state: widget.state),
@@ -65,6 +67,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         onDestinationSelected: goTo,
         destinations: const [
           NavigationDestination(icon: Icon(Icons.today_outlined), selectedIcon: Icon(Icons.today), label: 'Today'),
+          NavigationDestination(icon: Icon(Icons.checklist_outlined), selectedIcon: Icon(Icons.checklist), label: 'Tasks'),
           NavigationDestination(icon: Icon(Icons.record_voice_over_outlined), selectedIcon: Icon(Icons.record_voice_over), label: 'Train'),
           NavigationDestination(icon: Icon(Icons.insights_outlined), selectedIcon: Icon(Icons.insights), label: 'Stats'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),

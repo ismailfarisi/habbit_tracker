@@ -8,6 +8,8 @@ import '../logic/stats.dart';
 import '../models.dart';
 import '../services/prayer_service.dart';
 import '../services/reminders.dart';
+import '../logic/tasks.dart';
+import '../widgets/task_editor.dart';
 import 'home_screen.dart';
 
 class TodayScreen extends StatefulWidget {
@@ -43,7 +45,7 @@ class _TodayScreenState extends State<TodayScreen> {
 
   Future<void> _enableNotifications() async {
     await widget.state.notifications.requestPermissions();
-    await widget.state.notifications.reschedule(widget.state.settings, widget.state.logs);
+    await widget.state.rescheduleNow();
     await _checkNotifications();
   }
 
@@ -78,6 +80,7 @@ class _TodayScreenState extends State<TodayScreen> {
             _WakeCard(state: widget.state, log: log),
             _PrayerCard(state: widget.state, log: log, now: now),
             _TrainingCard(state: widget.state, log: log, onStart: () => widget.onNavigate(HomeScreen.trainTab)),
+            _TasksCard(state: widget.state, now: now, onOpen: () => widget.onNavigate(HomeScreen.tasksTab)),
             _UpcomingCard(state: widget.state, now: now),
           ],
         );
@@ -275,6 +278,37 @@ class _TrainingCard extends StatelessWidget {
   }
 }
 
+class _TasksCard extends StatelessWidget {
+  final AppState state;
+  final DateTime now;
+  final VoidCallback onOpen;
+  const _TasksCard({required this.state, required this.now, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = tasksForDay(state.tasks, now, today: now);
+    final done = tasks.where((t) => t.isDoneOn(now)).length;
+    return _SectionCard(
+      title: '📝  Tasks',
+      trailing: Chip(label: Text('$done/${tasks.length}'), visualDensity: VisualDensity.compact),
+      children: [
+        if (tasks.isEmpty) const Text('No tasks for today.'),
+        for (final t in tasks.take(8)) TaskTile(state: state, task: t, day: now),
+        if (tasks.length > 8) Text('+${tasks.length - 8} more'),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, children: [
+          FilledButton.tonalIcon(onPressed: onOpen, icon: const Icon(Icons.auto_awesome), label: const Text('Plan with AI')),
+          OutlinedButton.icon(
+            onPressed: () => showTaskEditor(context, state, initialDate: now),
+            icon: const Icon(Icons.add),
+            label: const Text('Add'),
+          ),
+        ]),
+      ],
+    );
+  }
+}
+
 class _UpcomingCard extends StatelessWidget {
   final AppState state;
   final DateTime now;
@@ -283,7 +317,7 @@ class _UpcomingCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = state.settings;
-    final upcoming = planReminders(s, state.logs, now, days: 2).take(4).toList();
+    final upcoming = planReminders(s, state.logs, now, days: 2, tasks: state.tasks).take(5).toList();
     return _SectionCard(
       title: '⏰  Upcoming reminders',
       children: [
@@ -300,6 +334,7 @@ class _UpcomingCard extends StatelessWidget {
                 ReminderKind.wake => Icons.alarm,
                 ReminderKind.prayer => Icons.mosque_outlined,
                 ReminderKind.training => Icons.record_voice_over_outlined,
+                ReminderKind.task => Icons.task_alt,
               }),
               title: Text(r.title),
               trailing: Text(

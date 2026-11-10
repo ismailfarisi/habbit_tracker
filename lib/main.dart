@@ -27,7 +27,7 @@ Future<void> main() async {
   final launch = await notifications.launchResponse();
   if (launch != null) handle(launch);
 
-  await notifications.reschedule(state.settings, state.logs);
+  await state.rescheduleNow();
   runApp(DailyDisciplineApp(state: state));
 }
 

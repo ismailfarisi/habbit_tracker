@@ -8,7 +8,8 @@ import '../app_state.dart';
 import '../logic/speech_metrics.dart';
 import '../services/coach_prompts.dart';
 import '../services/openrouter.dart';
-import '../widgets/simple_markdown.dart';
+import '../services/task_tools.dart';
+import '../widgets/assistant_chat.dart';
 import 'home_screen.dart';
 
 const _warmups = [
@@ -18,13 +19,6 @@ const _warmups = [
   'Over-articulate: "pa-ta-ka" 10 times slowly, then 10 times quickly but crisply.',
   'Breath: inhale 4 s into your belly, then exhale on a steady "sss" for as long as you can.',
 ];
-
-class _Msg {
-  final String role;
-  String text;
-  final bool error;
-  _Msg(this.role, this.text, {this.error = false});
-}
 
 class TrainScreen extends StatefulWidget {
   final AppState state;
@@ -61,10 +55,10 @@ class _TrainScreenState extends State<TrainScreen> {
   SpeechMetrics? _metrics;
 
   // Chat
-  final _messages = <_Msg>[];
-  final _chatInput = TextEditingController();
-  final _scroll = ScrollController();
-  bool _thinking = false;
+  late final _chat = AssistantChat(
+    widget.state,
+    systemPrompt: () => '$coachSystemPrompt\n$coachTaskPrompt\n${plannerContext(widget.state.settings, DateTime.now())}',
+  );
 
   @override
   void initState() {
@@ -78,10 +72,10 @@ class _TrainScreenState extends State<TrainScreen> {
     _ticker?.cancel();
     _speech.cancel();
     _tts.stop();
-    for (final c in [_focus, _exercise, _transcript, _chatInput]) {
+    _chat.dispose();
+    for (final c in [_focus, _exercise, _transcript]) {
       c.dispose();
     }
-    _scroll.dispose();
     super.dispose();
   }
 
@@ -133,12 +127,6 @@ class _TrainScreenState extends State<TrainScreen> {
     return OpenRouterClient(apiKey: key, model: widget.state.settings.model);
   }
 
-  List<ChatMessage> _history() => [
-        const ChatMessage('system', coachSystemPrompt),
-        for (final m in _messages)
-          if (!m.error && m.text.isNotEmpty) ChatMessage(m.role, m.text),
-      ];
-
   Future<void> _generate() async {
     final client = _client();
     if (client == null) return;
@@ -156,47 +144,13 @@ class _TrainScreenState extends State<TrainScreen> {
       ], temperature: 0.9)) {
         setState(() => _exercise.text += t);
       }
-      _messages.add(_Msg('assistant', 'Here is your ${_type.label.toLowerCase()} exercise:\n\n${_exercise.text}'));
+      _chat.addAssistantNote('Here is your ${_type.label.toLowerCase()} exercise:\n\n${_exercise.text}');
     } catch (e) {
       _showError(e);
     } finally {
       client.close();
       if (mounted) setState(() => _generating = false);
     }
-  }
-
-  Future<void> _ask(String userText) async {
-    final client = _client();
-    if (client == null) return;
-    final reply = _Msg('assistant', '');
-    setState(() {
-      _messages.add(_Msg('user', userText));
-      _thinking = true;
-    });
-    final history = _history();
-    setState(() => _messages.add(reply));
-    _scrollToEnd();
-    try {
-      await for (final t in client.stream(history)) {
-        setState(() => reply.text += t);
-        _scrollToEnd();
-      }
-    } catch (e) {
-      setState(() {
-        _messages.remove(reply);
-        _messages.add(_Msg('assistant', e.toString(), error: true));
-      });
-    } finally {
-      client.close();
-      if (mounted) setState(() => _thinking = false);
-      _scrollToEnd();
-    }
-  }
-
-  void _scrollToEnd() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
-    });
   }
 
   void _showError(Object e) {
@@ -285,7 +239,7 @@ class _TrainScreenState extends State<TrainScreen> {
       transcript: _transcript.text,
       metrics: _metrics!,
     );
-    await _ask(prompt);
+    await _chat.send(prompt, display: '🎙️ Please review my practice (transcript + metrics sent)');
   }
 
   Future<void> _speak() async {
@@ -342,6 +296,7 @@ class _TrainScreenState extends State<TrainScreen> {
           _card('2. Exercise', children: [
             DropdownButtonFormField<ExerciseType>(
               initialValue: _type,
+              isExpanded: true,
               decoration: const InputDecoration(labelText: 'Type', border: OutlineInputBorder()),
               items: [for (final x in ExerciseType.values) DropdownMenuItem(value: x, child: Text(x.label))],
               onChanged: (v) => setState(() => _type = v ?? _type),
@@ -351,6 +306,7 @@ class _TrainScreenState extends State<TrainScreen> {
               Expanded(
                 child: DropdownButtonFormField<String>(
                   initialValue: _level,
+                  isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Level', border: OutlineInputBorder()),
                   items: const [
                     DropdownMenuItem(value: 'beginner', child: Text('Beginner')),
@@ -431,52 +387,32 @@ class _TrainScreenState extends State<TrainScreen> {
             ],
             const SizedBox(height: 12),
             FilledButton.icon(
-              onPressed: _thinking || _recording ? null : _getFeedback,
+              onPressed: _recording ? null : _getFeedback,
               icon: const Icon(Icons.rate_review_outlined),
               label: const Text('Get AI feedback'),
             ),
           ]),
           _card('4. Coach chat',
-              trailing: _messages.isEmpty
-                  ? null
-                  : IconButton(icon: const Icon(Icons.delete_outline), onPressed: () => setState(_messages.clear)),
+              trailing: ListenableBuilder(
+                listenable: _chat,
+                builder: (_, _) => _chat.isEmpty
+                    ? const SizedBox.shrink()
+                    : IconButton(icon: const Icon(Icons.delete_outline), onPressed: _chat.clear),
+              ),
               children: [
-                if (_messages.isEmpty)
-                  Text('Ask anything: "How do I stop mumbling?", "Give me a drill for the R sound"…',
-                      style: TextStyle(color: t.colorScheme.onSurfaceVariant)),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 420),
-                  child: ListView(
-                    controller: _scroll,
-                    shrinkWrap: true,
-                    children: [for (final m in _messages) _Bubble(m)],
-                  ),
+                AssistantChatView(
+                  chat: _chat,
+                  hint: 'Message your coach',
+                  suggestions: const [
+                    'How do I stop mumbling?',
+                    'Give me a drill for the R sound',
+                    'Schedule a 10-minute drill every evening at 9pm',
+                  ],
                 ),
-                if (_thinking) const LinearProgressIndicator(),
-                const SizedBox(height: 8),
-                Row(children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _chatInput,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _sendChat(),
-                      decoration: const InputDecoration(hintText: 'Message your coach', border: OutlineInputBorder()),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(onPressed: _thinking ? null : _sendChat, icon: const Icon(Icons.send)),
-                ]),
               ]),
         ],
       ),
     );
-  }
-
-  void _sendChat() {
-    final text = _chatInput.text.trim();
-    if (text.isEmpty || _thinking) return;
-    _chatInput.clear();
-    _ask(text);
   }
 
   Widget _card(String title, {Widget? trailing, required List<Widget> children}) => Card(
@@ -539,38 +475,5 @@ class _MetricsRow extends StatelessWidget {
       if (metrics.accuracy != null)
         tile('clarity match', '${(metrics.accuracy! * 100).round()}%', hint: 'Share of the exercise words the recognizer understood'),
     ]);
-  }
-}
-
-class _Bubble extends StatelessWidget {
-  final _Msg m;
-  const _Bubble(this.m);
-
-  @override
-  Widget build(BuildContext context) {
-    final c = Theme.of(context).colorScheme;
-    final user = m.role == 'user';
-    // Long generated prompts (feedback requests) are collapsed to keep the chat readable.
-    final text = user && m.text.startsWith('Please review my articulation practice')
-        ? '🎙️ Please review my practice (transcript + metrics sent)'
-        : m.text;
-    return Align(
-      alignment: user ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.8),
-        decoration: BoxDecoration(
-          color: m.error ? c.errorContainer : (user ? c.primary : c.surfaceContainerHighest),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: m.text.isEmpty
-            ? const SizedBox(width: 24, height: 16, child: LinearProgressIndicator())
-            : SimpleMarkdown(
-                text,
-                style: TextStyle(color: m.error ? c.onErrorContainer : (user ? c.onPrimary : c.onSurface)),
-              ),
-      ),
-    );
   }
 }
