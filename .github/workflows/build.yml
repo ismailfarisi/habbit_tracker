@@ -5,6 +5,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -35,7 +38,24 @@ jobs:
           done
           exit 1
 
+      - name: Name the APK
+        run: cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/daily-discipline.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: daily-discipline-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/daily-discipline.apk
+
+      # Publish a direct download link (Releases page) for pushes, not PRs.
+      - name: Publish latest build
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-build
+          name: Latest build
+          prerelease: true
+          make_latest: false
+          body: |
+            Latest Android build of Daily Discipline from commit ${{ github.sha }}.
+            Download `daily-discipline.apk` on your phone and open it to install.
+          files: build/app/outputs/flutter-apk/daily-discipline.apk

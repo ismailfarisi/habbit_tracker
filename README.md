@@ -41,7 +41,11 @@ The model defaults to `openai/gpt-4o-mini`, which is cheap and good enough. You 
 
 ### Get the APK without installing Flutter
 
-Every push runs the **Build Android APK** GitHub Action. Open the run under the repo's **Actions** tab and download the `daily-discipline-apk` artifact.
+Every push builds the app with GitHub Actions and publishes it to the **Latest build** release:
+
+<https://github.com/ismailfarisi/habbit_tracker/releases/tag/latest-build>
+
+Open that page on your phone, download `daily-discipline.apk`, and open it to install. Android asks you to allow installs from your browser the first time.
 
 ## Project layout
 
