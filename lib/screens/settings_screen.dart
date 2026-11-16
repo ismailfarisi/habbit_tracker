@@ -10,18 +10,11 @@ import '../logic/sleep.dart';
 import '../services/backup_service.dart';
 import '../services/diagnostics.dart';
 import '../services/openrouter.dart';
+import '../services/openrouter_models.dart';
 import 'reminders_screen.dart';
 import 'wake_challenge_screen.dart';
 import '../services/storage.dart';
 import 'diagnostics_screen.dart';
-
-const _suggestedModels = [
-  'openai/gpt-4o-mini',
-  'anthropic/claude-sonnet-4.5',
-  'google/gemini-2.5-flash',
-  'deepseek/deepseek-chat',
-  'meta-llama/llama-3.3-70b-instruct:free',
-];
 
 class SettingsScreen extends StatefulWidget {
   final AppState state;
@@ -779,7 +772,10 @@ Future<void> openSettings(BuildContext context, AppState state, {bool aiKeyOnly 
 class AiKeySection extends StatefulWidget {
   final AppState state;
   final bool showModel;
-  const AiKeySection({super.key, required this.state, this.showModel = true});
+
+  /// Overrides the OpenRouter model list fetch (tests).
+  final Future<List<OpenRouterModel>> Function()? loadModels;
+  const AiKeySection({super.key, required this.state, this.showModel = true, this.loadModels});
 
   @override
   State<AiKeySection> createState() => _AiKeySectionState();
@@ -889,23 +885,10 @@ class _AiKeySectionState extends State<AiKeySection> {
           ),
           if (widget.showModel) ...[
             const SizedBox(height: 12),
-            TextField(
+            ModelPicker(
               controller: _model,
-              autocorrect: false,
-              onSubmitted: (v) => state.updateSettings((x) => x.model = v.trim().isEmpty ? x.model : v.trim()),
-              decoration: InputDecoration(
-                labelText: 'Model',
-                helperText: 'Any model ID from openrouter.ai/models',
-                border: const OutlineInputBorder(),
-                suffixIcon: PopupMenuButton<String>(
-                  icon: const Icon(Icons.arrow_drop_down),
-                  onSelected: (v) {
-                    _model.text = v;
-                    state.updateSettings((x) => x.model = v);
-                  },
-                  itemBuilder: (_) => [for (final m in _suggestedModels) PopupMenuItem(value: m, child: Text(m))],
-                ),
-              ),
+              loadModels: widget.loadModels,
+              onSelected: (v) => state.updateSettings((x) => x.model = v.trim().isEmpty ? x.model : v.trim()),
             ),
           ],
           const SizedBox(height: 8),
@@ -924,6 +907,177 @@ class _AiKeySectionState extends State<AiKeySection> {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// Model ID field that autocompletes from OpenRouter's live model list, with
+/// free models first and a "Free only" filter. Any typed ID is still accepted.
+class ModelPicker extends StatefulWidget {
+  final TextEditingController controller;
+  final ValueChanged<String> onSelected;
+  final Future<List<OpenRouterModel>> Function()? loadModels;
+
+  const ModelPicker({super.key, required this.controller, required this.onSelected, this.loadModels});
+
+  @override
+  State<ModelPicker> createState() => _ModelPickerState();
+}
+
+class _ModelPickerState extends State<ModelPicker> {
+  final _focus = FocusNode();
+  List<OpenRouterModel> _models = fallbackModels;
+  bool _loading = true;
+  bool _freeOnly = false;
+
+  @override
+  void initState() {
+    super.initState();
+    (widget.loadModels ?? fetchOpenRouterModels)().then(
+      (m) {
+        if (!mounted) return;
+        setState(() {
+          _models = m;
+          _loading = false;
+        });
+      },
+      onError: (_) {
+        if (mounted) setState(() => _loading = false);
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  Iterable<OpenRouterModel> _options(String query) {
+    final pool = _freeOnly ? _models.where((m) => m.free) : _models;
+    // Show everything when the field still holds the saved, unedited ID.
+    final exact = _models.any((m) => m.id == query.trim());
+    return pool.where((m) => exact || m.matches(query)).take(60);
+  }
+
+  void _pick(String id) {
+    widget.controller.text = id;
+    widget.onSelected(id);
+  }
+
+  void _toggleFree(bool v) {
+    setState(() => _freeOnly = v);
+    _focus.requestFocus();
+    // Nudge RawAutocomplete to recompute options for the new filter.
+    final c = widget.controller;
+    final text = c.text;
+    c.value = c.value.copyWith(text: '$text ');
+    c.value = c.value.copyWith(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final freeCount = _models.where((m) => m.free).length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          // Part of the field's tap region so tapping it keeps the list open.
+          child: TextFieldTapRegion(
+            child: FilterChip(
+              key: const Key('free-only'),
+              label: Text('Free only${freeCount > 0 ? ' ($freeCount)' : ''}'),
+              selected: _freeOnly,
+              onSelected: _toggleFree,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        RawAutocomplete<OpenRouterModel>(
+          textEditingController: widget.controller,
+          focusNode: _focus,
+          displayStringForOption: (m) => m.id,
+          optionsBuilder: (v) => _options(v.text),
+          onSelected: (m) => _pick(m.id),
+          fieldViewBuilder: (context, controller, focus, onSubmit) => TextField(
+            key: const Key('model-field'),
+            controller: controller,
+            focusNode: focus,
+            autocorrect: false,
+            enableSuggestions: false,
+            onSubmitted: (v) {
+              onSubmit();
+              widget.onSelected(v);
+            },
+            decoration: InputDecoration(
+              labelText: 'Model',
+              helperText: _loading
+                  ? 'Loading models from OpenRouter…'
+                  : '${_models.length} models, $freeCount free. Type to search, or paste any ID.',
+              border: const OutlineInputBorder(),
+              suffixIcon: _loading
+                  ? const Padding(
+                      padding: EdgeInsets.all(14),
+                      child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                    )
+                  : IconButton(
+                      tooltip: 'Show models',
+                      icon: const Icon(Icons.arrow_drop_down),
+                      onPressed: () {
+                        controller.selection = TextSelection(baseOffset: 0, extentOffset: controller.text.length);
+                        focus.requestFocus();
+                      },
+                    ),
+            ),
+          ),
+          optionsViewBuilder: (context, onSelected, options) => Align(
+            alignment: Alignment.topLeft,
+            child: Material(
+              elevation: 4,
+              borderRadius: BorderRadius.circular(8),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 280, maxWidth: 520),
+                child: ListView.builder(
+                  padding: EdgeInsets.zero,
+                  shrinkWrap: true,
+                  itemCount: options.length,
+                  itemBuilder: (context, i) {
+                    final m = options.elementAt(i);
+                    final highlighted = AutocompleteHighlightedOption.of(context) == i;
+                    return ListTile(
+                      dense: true,
+                      selected: highlighted,
+                      title: Text(m.id, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text(
+                        [
+                          if (m.name.isNotEmpty && m.name != m.id) m.name,
+                          if (m.contextLength > 0) '${(m.contextLength / 1000).round()}k ctx',
+                          if (!m.tools) "can't build habits (no tools)",
+                        ].join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: m.free
+                          ? Chip(
+                              label: const Text('Free'),
+                              visualDensity: VisualDensity.compact,
+                              backgroundColor: t.colorScheme.secondaryContainer,
+                            )
+                          : null,
+                      onTap: () => onSelected(m),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
