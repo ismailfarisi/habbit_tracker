@@ -45,3 +45,17 @@ String fmtSleep(Duration d) {
 
 /// "7.5 h", "8 h".
 String fmtSleepHours(double h) => '${h == h.roundToDouble() ? h.toInt() : h} h';
+
+/// Whether [now] is in the evening window (from an hour before wind-down
+/// until 6 hours after bedtime) of a night with no bedtime logged yet.
+bool bedtimeCheckInDue(Settings s, Map<String, DayLog> logs, DateTime now) {
+  final night = nightOf(now);
+  if (logs[dayKey(night)]?.bedtimeAt != null) return false;
+  return isBedtimeWindow(s, now);
+}
+
+bool isBedtimeWindow(Settings s, DateTime now) {
+  final night = nightOf(now);
+  return now.isAfter(windDownFor(s, night).subtract(const Duration(hours: 1))) &&
+      now.isBefore(bedtimeFor(s, night).add(const Duration(hours: 6)));
+}

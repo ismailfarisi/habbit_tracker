@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../app_state.dart';
 import '../habits/habit.dart';
 import '../logic/prayer_status.dart';
+import '../logic/sleep.dart';
 import '../logic/stats.dart';
 import '../models.dart';
 import '../services/prayer_service.dart';
@@ -37,7 +38,9 @@ class TodayItem {
 
 /// Today's cards in time-of-day order: unfinished items first, the next due
 /// first, untimed habits after the timed ones; finished items last (shown
-/// collapsed under "Done"). Wake is due at the wake goal, prayers at the
+/// collapsed under "Done"). Wake is due at the wake goal and comes back in
+/// the evening until bedtime is logged; prayers stay open while an enabled
+/// optional prayer is unticked. Prayers are due at the
 /// first prayer not yet prayed, habits at their reminder and tasks at the
 /// next unfinished timed task.
 List<TodayItem> todayItems(AppState state, DateTime now) {
@@ -47,11 +50,15 @@ List<TodayItem> todayItems(AppState state, DateTime now) {
   final nextPrayer = prayerNames.where((p) => !log.prayers.contains(p)).firstOrNull;
   DateTime at(TimeOfDay t) => DateTime(now.year, now.month, now.day, t.hour, t.minute);
   final items = [
-    TodayItem(TodayKind.wake, due: at(s.wakeTime), done: log.wakeAt != null),
+    TodayItem(
+      TodayKind.wake,
+      due: log.wakeAt == null ? at(s.wakeTime) : windDownFor(s, nightOf(now)),
+      done: log.wakeAt != null && !bedtimeCheckInDue(s, state.logs, now),
+    ),
     TodayItem(
       TodayKind.prayers,
       due: nextPrayer == null ? times[prayerNames.last] : times[nextPrayer],
-      done: nextPrayer == null,
+      done: nextPrayer == null && optionalPrayersOn(s, now).every((p) => log.habits[p.id]?.done ?? false),
     ),
     for (final h in state.activeHabits)
       if (h.isScheduledOn(now))
@@ -160,7 +167,7 @@ class _TodayScreenState extends State<TodayScreen> {
         key: const ValueKey('today-tasks'),
         state: state,
         now: now,
-        onOpen: () => widget.onNavigate(HomeScreen.tasksTab),
+        onOpen: () => widget.onNavigate(HomeScreen.planTab),
       ),
     };
   }

@@ -17,9 +17,9 @@ import 'habit_detail_screen.dart';
 /// The Progress tab: streak tiles (current streak, rule, "N of last 30",
 /// freezes left), the weekly review and a 30-day grid of every tracked item
 /// whose cells open the day editor.
-class StatsScreen extends StatelessWidget {
+class ProgressScreen extends StatelessWidget {
   final AppState state;
-  const StatsScreen({super.key, required this.state});
+  const ProgressScreen({super.key, required this.state});
 
   @override
   Widget build(BuildContext context) {

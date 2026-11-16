@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:habit_tracker/agent/habit_templates.dart';
 import 'package:habit_tracker/app_state.dart';
 import 'package:habit_tracker/habits/habit.dart';
+import 'package:habit_tracker/logic/prayer_status.dart';
 import 'package:habit_tracker/logic/stats.dart';
 import 'package:habit_tracker/logic/tasks.dart';
 import 'package:habit_tracker/models.dart';
@@ -65,6 +66,28 @@ void main() {
   Finder inRow(String key, Finder f) => find.descendant(of: find.byKey(ValueKey(key)), matching: f);
 
   group('todayItems ordering', () {
+    test('wake comes back in the evening until bedtime is logged', () async {
+      await state.setWake(now, DateTime(2026, 5, 5, 5));
+      TodayItem wake(DateTime at) => todayItems(state, at).firstWhere((i) => i.kind == TodayKind.wake);
+      expect(wake(now).done, isTrue);
+      final evening = DateTime(2026, 5, 5, 21);
+      expect(wake(evening).done, isFalse);
+      await state.setBedtime(DateTime(2026, 5, 5), evening);
+      expect(wake(evening).done, isTrue);
+    });
+
+    test('prayers stay open while an enabled optional prayer is unticked', () async {
+      for (final p in prayerNames) {
+        await state.setPrayerStatus(now, p, prayerOnTime);
+      }
+      TodayItem prayers() => todayItems(state, now).firstWhere((i) => i.kind == TodayKind.prayers);
+      expect(prayers().done, isTrue);
+      await state.updateSettings((x) => x.sunnahWitr = true);
+      expect(prayers().done, isFalse);
+      await state.logHabit(now, sunnahWitr.id, HabitEntry(done: true));
+      expect(prayers().done, isTrue);
+    });
+
     test('next due first, untimed after timed, done last', () async {
       final water = await add(waterTemplate);
       final quran = await add(quranTemplate, reminder: '07:00');

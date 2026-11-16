@@ -20,6 +20,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:home_widget/home_widget.dart';
 
 import '../habits/habit.dart';
+import '../logic/prayer_status.dart';
 import '../logic/stats.dart';
 import '../models.dart';
 import 'notification_service.dart';
@@ -49,7 +50,7 @@ class WidgetSlot {
   Map<String, dynamic> toJson() => {
         'from': from.millisecondsSinceEpoch,
         'label': due ? 'Pray now' : (tomorrow ? 'Next prayer, tomorrow' : 'Next prayer'),
-        'prayer': prayer,
+        'prayer': prayerLabel(prayer, at),
         'time': '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}',
         'score': 'Today $score',
         if (payload != null) 'payload': payload,

@@ -598,6 +598,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: const Text('Try it'),
               ),
       ),
+      _header('Sleep & bedtime'),
       ListTile(
         leading: const Icon(Icons.bedtime_outlined),
         title: const Text('Sleep goal'),

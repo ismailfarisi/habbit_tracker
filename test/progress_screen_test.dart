@@ -7,7 +7,7 @@ import 'package:habit_tracker/logic/stats.dart';
 import 'package:habit_tracker/logic/weekly_review.dart';
 import 'package:habit_tracker/models.dart';
 import 'package:habit_tracker/screens/habit_detail_screen.dart';
-import 'package:habit_tracker/screens/stats_screen.dart';
+import 'package:habit_tracker/screens/progress_screen.dart';
 import 'package:habit_tracker/services/openrouter.dart';
 import 'package:habit_tracker/widgets/charts.dart';
 import 'package:habit_tracker/widgets/day_editor.dart';
@@ -30,7 +30,7 @@ void main() {
     tester.view.physicalSize = const Size(420, 3000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: StatsScreen(state: state))));
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ProgressScreen(state: state))));
     await tester.pump();
   }
 

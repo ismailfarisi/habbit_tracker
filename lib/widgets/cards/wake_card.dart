@@ -75,8 +75,7 @@ class _WakeCardState extends State<WakeCard> {
 
     final night = nightOf(now);
     final bedAt = state.logFor(night).bedtimeAt;
-    final windDown = windDownFor(s, night);
-    final evening = now.isAfter(windDown.subtract(const Duration(hours: 1))) && now.isBefore(bedtimeFor(s, night).add(const Duration(hours: 6)));
+    final evening = isBedtimeWindow(s, now);
 
     return SectionCard(
       title: '☀️  Wake up early',

@@ -8,7 +8,7 @@ import '../logic/stats.dart';
 import '../models.dart';
 import '../widgets/charts.dart';
 import '../widgets/coach_sheet.dart';
-import 'stats_screen.dart' show ruleLabel;
+import 'progress_screen.dart' show ruleLabel;
 
 /// A habit's own screen: its A2UI surface for [day] (today by default),
 /// streak and consistency, charts of its metrics over time (per practice

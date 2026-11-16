@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../app_state.dart';
 import 'plan_screen.dart';
 import 'settings_screen.dart';
-import 'stats_screen.dart';
+import 'progress_screen.dart';
 import 'today_screen.dart';
 
 class HomeTab {
@@ -20,13 +20,12 @@ class HomeTab {
 /// `AppState.requestedTab`) opens it too.
 class HomeScreen extends StatefulWidget {
   static const todayTab = 0, planTab = 1, progressTab = 2;
-  static const tasksTab = planTab, statsTab = progressTab;
   static const settingsTab = 3;
 
   static final tabs = <HomeTab>[
     HomeTab('Today', Icons.today_outlined, Icons.today, (s, goTo) => TodayScreen(state: s, onNavigate: goTo)),
     HomeTab('Plan', Icons.event_note_outlined, Icons.event_note, (s, _) => PlanScreen(state: s)),
-    HomeTab('Progress', Icons.insights_outlined, Icons.insights, (s, _) => StatsScreen(state: s)),
+    HomeTab('Progress', Icons.insights_outlined, Icons.insights, (s, _) => ProgressScreen(state: s)),
   ];
 
   final AppState state;
