@@ -9,6 +9,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../habits/habit.dart';
 import '../models.dart';
+import 'diagnostics.dart';
 import 'reminders.dart';
 import 'storage.dart';
 
@@ -23,6 +24,7 @@ Future<void> notificationActionBackground(NotificationResponse r) async {
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
   final storage = await Storage.open();
+  await Diagnostics(storage.prefs).count(Diagnostics.backgroundActions);
   if (r.payload!.startsWith('task:')) {
     final tasks = storage.loadTasks();
     if (applyTaskDoneAction(r.payload!, tasks)) await storage.saveTasks(tasks);
@@ -185,6 +187,7 @@ class NotificationService {
     if (!s.remindersEnabled) return;
 
     final exact = _android == null || (await _android!.canScheduleExactNotifications() ?? false);
+    var scheduled = 0, failed = 0;
     for (final r in planReminders(s, logs, DateTime.now(), tasks: tasks, habits: habits).take(maxPending)) {
       final mode = !exact
           ? AndroidScheduleMode.inexactAllowWhileIdle
@@ -201,10 +204,15 @@ class NotificationService {
           body: r.body,
           payload: r.payload,
         );
+        scheduled++;
       } catch (e) {
+        failed++;
         debugPrint('Failed to schedule ${r.payload}: $e');
       }
     }
+    await Diagnostics.global?.count(Diagnostics.reschedules);
+    await Diagnostics.global?.count(Diagnostics.remindersScheduled, scheduled);
+    await Diagnostics.global?.count(Diagnostics.remindersFailed, failed);
   }
 
   Future<void> cancel(int id) async {

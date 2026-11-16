@@ -3,6 +3,8 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'app_state.dart';
 import 'screens/home_screen.dart';
+import 'services/backup_service.dart';
+import 'services/diagnostics.dart';
 import 'services/notification_service.dart';
 import 'services/storage.dart';
 
@@ -11,8 +13,12 @@ Future<void> main() async {
   final notifications = NotificationService.instance;
   await notifications.init();
   final state = await AppState.load(await Storage.open(), notifications);
+  final diagnostics = Diagnostics.global = Diagnostics(state.storage.prefs)..installErrorHandlers();
+  await diagnostics.count(Diagnostics.appOpens);
+  BackupService(state.storage).startAutomatic();
 
   void handle(NotificationResponse r) {
+    diagnostics.count(r.actionId == null ? Diagnostics.opensFromNotification : Diagnostics.notificationActions);
     final payload = r.payload ?? '';
     if (payload.startsWith('habit:')) {
       state.requestedHabit.value = payload.substring(6).split('|').first;

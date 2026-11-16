@@ -110,9 +110,13 @@ class Storage {
       ? _secure.delete(key: _apiKeyKey)
       : _secure.write(key: _apiKeyKey, value: key);
 
-  String exportJson() => const JsonEncoder.withIndent('  ').convert({
+  /// True when there is nothing worth backing up (fresh install or reset).
+  bool get hasNoData => loadLogs().isEmpty && loadTasks().isEmpty && loadHabits().isEmpty;
+
+  String exportJson({DateTime? at}) => const JsonEncoder.withIndent('  ').convert({
         'app': 'daily-discipline',
         'version': backupVersion,
+        'exportedAt': (at ?? DateTime.now()).toIso8601String(),
         'settings': loadSettings().toJson(),
         'logs': {for (final e in loadLogs().entries) e.key: e.value.toJson()},
         'tasks': jsonDecode(prefs.getString(_tasksKey) ?? '[]'),
@@ -123,10 +127,7 @@ class Storage {
   /// build (version 1, no `habits`; they are derived from the training
   /// data). Throws [FormatException] on bad input.
   Future<void> importJson(String raw) async {
-    final j = jsonDecode(raw);
-    if (j is! Map || j['app'] != 'daily-discipline') {
-      throw const FormatException('Not a Daily Discipline backup');
-    }
+    final j = _decodeBackup(raw);
     final settings = Settings.fromJson((j['settings'] as Map).cast<String, dynamic>());
     final logs = (j['logs'] as Map).map(
       (k, v) => MapEntry(k as String, DayLog.fromJson((v as Map).cast<String, dynamic>())),
@@ -144,6 +145,40 @@ class Storage {
     await saveHabits(habits);
   }
 
+  /// Checks [raw] without restoring it, for a confirmation prompt.
+  /// Throws [FormatException] like [importJson].
+  static BackupSummary describeBackup(String raw) {
+    final j = _decodeBackup(raw);
+    final logs = j['logs'];
+    final tasks = j['tasks'];
+    final habits = j['habits'];
+    if (logs is! Map || j['settings'] is! Map) throw const FormatException('The backup is incomplete');
+    return BackupSummary(
+      version: (j['version'] as num?)?.toInt() ?? 1,
+      exportedAt: DateTime.tryParse('${j['exportedAt'] ?? ''}'),
+      days: logs.length,
+      tasks: tasks is List ? tasks.length : 0,
+      habits: habits is List ? habits.length : null,
+    );
+  }
+
+  static Map _decodeBackup(String raw) {
+    final Object? j;
+    try {
+      j = jsonDecode(raw.trim());
+    } on FormatException {
+      throw const FormatException('Not a Daily Discipline backup (the file is not JSON)');
+    }
+    if (j is! Map || j['app'] != 'daily-discipline') {
+      throw const FormatException('Not a Daily Discipline backup');
+    }
+    final v = j['version'];
+    if (v is num && v > backupVersion) {
+      throw const FormatException('This backup was made by a newer version of the app. Update the app first.');
+    }
+    return j;
+  }
+
   Future<void> clearAll() async {
     await prefs.remove(_settingsKey);
     await prefs.remove(_logsKey);
@@ -151,6 +186,23 @@ class Storage {
     await saveHabits([]);
     await saveApiKey('');
   }
+}
+
+/// What a backup holds; [habits] is null for a version 1 backup (they are
+/// derived from its training data on import).
+class BackupSummary {
+  final int version;
+  final DateTime? exportedAt;
+  final int days;
+  final int tasks;
+  final int? habits;
+  const BackupSummary({required this.version, this.exportedAt, required this.days, required this.tasks, this.habits});
+
+  String describe() => [
+        '$days ${days == 1 ? 'day' : 'days'} of history',
+        '$tasks ${tasks == 1 ? 'task' : 'tasks'}',
+        if (habits != null) '$habits ${habits == 1 ? 'habit' : 'habits'}',
+      ].join(', ');
 }
 
 /// Habits for data written before habits existed: an install that already
