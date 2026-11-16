@@ -70,9 +70,19 @@ Rules for habits:
 
 A2uiRequestProcessor? _processor;
 
+/// Basic-catalog components the model is taught (to keep the prompt small).
+/// Stored surfaces are still validated against the full catalogs.
+const promptBasicComponents = ['Column', 'Row', 'Card', 'Text', 'Divider', 'Button', 'TextField'];
+
 A2uiRequestProcessor _agentProcessor() => _processor ??= A2uiGenerator(
-      catalogs: [for (final c in habitCatalogs()) CatalogConfig(c)],
-      inferenceFormatFactory: const DirectJsonFormatFactory(),
+      catalogs: [
+        CatalogConfig(
+          habitCatalogs().first,
+          transformers: [ComponentPruningTransformer(promptBasicComponents), FunctionPruningTransformer()],
+        ),
+        CatalogConfig(habitCatalog()),
+      ],
+      inferenceFormatFactory: const DirectJsonFormatFactory(allowedMessages: ['createSurface']),
     ).createProcessor(
       A2uiRendererCapabilities.forCatalogIds(
         [basicCatalogId, habitCatalogId],
@@ -90,7 +100,10 @@ String habitAgentPrompt(AppState state, DateTime now) {
   final list = habits.isEmpty
       ? 'none yet'
       : habits.map((h) => '${h.title} (id ${h.id}, ${h.kind.name}, ${h.describeSchedule()})').join('; ');
-  return '$_coachInstructions\nThe user\'s habits: $list.\n\n${a2uiPromptSnippet()}';
+  return '$_coachInstructions\nThe user\'s habits: $list.\n\n'
+      'Reference for the "ui" argument (A2UI format and component catalogs):\n${a2uiPromptSnippet()}\n'
+      'Reminder: in this app the component list goes in the "ui" tool argument as {"components": [...]}. '
+      'Do not put <a2ui-json> blocks in your reply.';
 }
 
 /// Splits model text into plain text and any A2UI surfaces it wrote inline

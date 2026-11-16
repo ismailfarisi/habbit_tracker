@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:habit_tracker/agent/habit_catalog.dart';
-import 'package:habit_tracker/agent/habit_components.dart';
 import 'package:habit_tracker/agent/habit_surface.dart';
 import 'package:habit_tracker/agent/habit_templates.dart';
 import 'package:habit_tracker/agent/speech_engine.dart';

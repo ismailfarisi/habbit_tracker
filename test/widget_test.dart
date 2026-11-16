@@ -79,4 +79,48 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('OpenRouter API key'), findsOneWidget);
   });
+
+  testWidgets('add habits from templates on Today and log them', (tester) async {
+    tester.view.physicalSize = const Size(420, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final state = await pumpApp(tester);
+    expect(state.habits, isEmpty);
+
+    await tester.tap(find.text('Add habit'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Drink water'));
+    await tester.pumpAndSettle();
+    final water = state.habits.single;
+    expect(find.text('💧  Drink water'), findsOneWidget);
+    expect(find.text('0/8 glasses'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    expect(state.habitEntry(DateTime.now(), water.id).value, 1);
+    expect(find.text('1/8 glasses'), findsOneWidget);
+    expect(find.text('0/7'), findsOneWidget, reason: 'the daily score now counts the habit');
+
+    await tester.tap(find.text('Add habit'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Articulation practice'));
+    await tester.pumpAndSettle();
+    expect(find.text('0/15 min'), findsOneWidget);
+    await tester.tap(find.text('+5 min'));
+    await tester.pumpAndSettle();
+    expect(find.text('5/15 min'), findsOneWidget);
+
+    await tester.tap(find.text('Practise'));
+    await tester.pumpAndSettle();
+    expect(find.text('Read aloud'), findsOneWidget);
+    expect(find.text('Today: 5 / 15 min'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Progress').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Drink water'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
 }
