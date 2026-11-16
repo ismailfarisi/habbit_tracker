@@ -36,7 +36,8 @@ class HabitCard extends StatelessWidget {
     final timed = habit.kind == HabitKind.duration || habit.kind == HabitKind.practice;
     final compact = timed && !(habit.createdByAi && habit.uiSurface != null);
     return SectionCard(
-      title: '${habit.emoji}  ${habit.title}',
+      emoji: habit.emoji,
+      title: habit.title,
       onTitleTap: () => _open(context),
       trailing: Chip(label: Text(progressLabel(habit, entry)), visualDensity: VisualDensity.compact),
       children: [

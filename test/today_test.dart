@@ -182,7 +182,7 @@ void main() {
     testWidgets('asks about the missed prayer and fixes it in one tap', (tester) async {
       await seedHistory();
       await pumpToday(tester, now);
-      expect(find.text('🌙  Yesterday: did you pray Isha?'), findsOneWidget);
+      expect(find.text('Yesterday: did you pray Isha?'), findsOneWidget);
       await tester.tap(inRow('missed-prayer:Isha', find.text('Prayed')));
       await tester.pumpAndSettle();
       expect(state.logFor(yesterday).prayerStatus['Isha'], prayerOnTime);
@@ -195,7 +195,7 @@ void main() {
       final gym = await addRoutine('Gym');
       expect(missedYesterday(state, now).map((i) => i.id), ['prayer:Isha', 'habit:${quran.id}', 'task:${gym.id}']);
       await pumpToday(tester, now);
-      expect(find.text('🌙  Yesterday: 3 things not logged'), findsOneWidget);
+      expect(find.text('Yesterday: 3 things not logged'), findsOneWidget);
 
       await tester.tap(inRow('missed-habit:${quran.id}', find.text('Done')));
       await tester.pumpAndSettle();

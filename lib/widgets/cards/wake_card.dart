@@ -78,7 +78,8 @@ class _WakeCardState extends State<WakeCard> {
     final evening = isBedtimeWindow(s, now);
 
     return SectionCard(
-      title: '☀️  Wake up early',
+      emoji: '☀️',
+      title: 'Wake up early',
       trailing: Chip(label: Text(target), visualDensity: VisualDensity.compact),
       children: [
         Text(status),

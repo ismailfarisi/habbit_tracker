@@ -187,7 +187,7 @@ void main() {
     await tester.tap(find.text('Drink water'));
     await tester.pumpAndSettle();
     final water = state.habits.single;
-    expect(find.text('💧  Drink water'), findsOneWidget);
+    expect(find.text('Drink water'), findsOneWidget);
     expect(find.text('0/8 glasses'), findsOneWidget);
 
     await tester.tap(find.byTooltip('More'));

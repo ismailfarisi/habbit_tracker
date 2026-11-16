@@ -42,7 +42,8 @@ class TasksCard extends StatelessWidget {
     final tasks = ordered(state, now);
     final done = tasks.where((t) => t.isDoneOn(now)).length;
     return SectionCard(
-      title: '📝  Tasks',
+      emoji: '📝',
+      title: 'Tasks',
       trailing: Chip(label: Text('$done/${tasks.length}'), visualDensity: VisualDensity.compact),
       children: [
         if (tasks.isEmpty) const Text('No tasks for today.'),

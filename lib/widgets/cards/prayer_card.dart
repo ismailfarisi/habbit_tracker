@@ -83,7 +83,8 @@ class PrayerCard extends StatelessWidget {
     final small = Theme.of(context).textTheme.bodySmall?.copyWith(color: c.onSurfaceVariant);
     String hm(DateTime t) => DateFormat.jm().format(t);
     return SectionCard(
-      title: '🕌  Five daily prayers',
+      emoji: '🕌',
+      title: 'Five daily prayers',
       trailing: Chip(
         label: Text(done > 0 && onTime < done ? '$done/5 · $onTime on time' : '$done/5'),
         visualDensity: VisualDensity.compact,

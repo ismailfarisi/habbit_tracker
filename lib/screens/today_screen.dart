@@ -187,7 +187,7 @@ class _TodayScreenState extends State<TodayScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             _Header(now: now, score: score, hijri: '${hijriToday(s, now)}'),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             if (_notifOn == false)
               _Banner(
                 icon: Icons.notifications_off_outlined,
@@ -206,7 +206,7 @@ class _TodayScreenState extends State<TodayScreen> {
             for (final i in pending) _card(i, now),
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: OutlinedButton.icon(
+              child: FilledButton.tonalIcon(
                 onPressed: () => showAddHabitSheet(context, widget.state),
                 icon: const Icon(Icons.add),
                 label: const Text('Add habit'),
@@ -240,40 +240,86 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
+    final dark = t.brightness == Brightness.dark;
     final greeting = now.hour < 12 ? 'Good morning' : (now.hour < 17 ? 'Good afternoon' : 'Good evening');
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(greeting, style: t.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-              Text(
-                DateFormat('EEEE, d MMMM').format(now),
-                style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
-              ),
-              Text(hijri, key: const ValueKey('hijri-date'), style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
-            ],
-          ),
+    const fg = Colors.white;
+    final dim = fg.withValues(alpha: 0.78);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 18, 16, 18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: dark
+              ? const [Color(0xFF0F4F4A), Color(0xFF0F766E)]
+              : const [Color(0xFF0F766E), Color(0xFF14B8A6)],
         ),
-        SizedBox(
-          width: 64,
-          height: 64,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              CircularProgressIndicator(
-                value: score.fraction,
-                strokeWidth: 6,
-                backgroundColor: t.colorScheme.surfaceContainerHighest,
-              ),
-              Center(
-                child: Text('$score', style: const TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ],
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F766E).withValues(alpha: dark ? 0.25 : 0.3),
+            blurRadius: 24,
+            offset: const Offset(0, 10),
           ),
-        ),
-      ],
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  greeting,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.textTheme.titleLarge?.copyWith(color: fg, fontSize: 22, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 2),
+                Text(DateFormat('EEEE, d MMMM').format(now), style: t.textTheme.bodyMedium?.copyWith(color: dim)),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: fg.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                  child: Text(
+                    hijri,
+                    key: const ValueKey('hijri-date'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.textTheme.labelSmall?.copyWith(color: fg, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 64,
+            height: 64,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                CircularProgressIndicator(
+                  value: score.fraction,
+                  strokeWidth: 6,
+                  strokeCap: StrokeCap.round,
+                  color: fg,
+                  backgroundColor: fg.withValues(alpha: 0.2),
+                ),
+                Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text('$score', style: t.textTheme.titleMedium?.copyWith(color: fg, fontWeight: FontWeight.w800)),
+                    Text('today', style: t.textTheme.labelSmall?.copyWith(color: dim)),
+                  ]),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -291,13 +337,13 @@ class _Banner extends StatelessWidget {
     return Card(
       color: c.tertiaryContainer,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+        padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
         child: Row(
           children: [
             Icon(icon, color: c.onTertiaryContainer),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(text, style: TextStyle(color: c.onTertiaryContainer)),
+              child: Text(text, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: c.onTertiaryContainer)),
             ),
             TextButton(onPressed: onTap, child: Text(action)),
           ],

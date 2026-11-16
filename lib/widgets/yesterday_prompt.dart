@@ -114,7 +114,8 @@ class _YesterdayPromptState extends State<YesterdayPrompt> {
     final shown = _all ? items : items.take(_shown).toList();
     return SectionCard(
       key: const ValueKey('yesterday-prompt'),
-      title: '🌙  ${yesterdayQuestion(items)}',
+      emoji: '🌙',
+      title: yesterdayQuestion(items),
       children: [
         for (final i in shown)
           ListTile(
