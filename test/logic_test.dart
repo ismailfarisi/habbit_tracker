@@ -48,14 +48,15 @@ void main() {
 
   group('settings', () {
     test('round-trips through JSON', () {
-      final s = Settings(latitude: 11.25, longitude: 75.78, calcMethod: 'karachi', madhab: 'hanafi', model: 'x/y');
+      final s = Settings(latitude: 11.25, longitude: 75.78, calcMethod: 'karachi', madhab: 'hanafi', model: 'x/y', themeMode: 'dark');
       final r = Settings.fromJson(jsonDecode(jsonEncode(s.toJson())) as Map<String, dynamic>);
       expect(r.toJson(), s.toJson());
     });
     test('tolerates junk', () {
-      final r = Settings.fromJson({'wakeTime': 'nope', 'calcMethod': 'bogus'});
+      final r = Settings.fromJson({'wakeTime': 'nope', 'calcMethod': 'bogus', 'themeMode': 'neon'});
       expect(r.wakeTime, const TimeOfDay(hour: 5, minute: 0));
       expect(r.calcMethod, 'muslim_world_league');
+      expect(r.themeMode, 'system');
     });
   });
 

@@ -14,7 +14,7 @@
         android:layout_height="wrap_content"
         android:maxLines="1"
         android:text="@string/prayer_widget_name"
-        android:textColor="#FFF5B942"
+        android:textColor="#FF5EEAD4"
         android:textSize="13sp"
         android:textStyle="bold" />
 
@@ -70,7 +70,7 @@
             android:paddingEnd="16dp"
             android:text="@string/prayer_widget_done"
             android:textAllCaps="false"
-            android:textColor="#FF2A2112"
+            android:textColor="#FFFFFFFF"
             android:textSize="14sp"
             android:textStyle="bold"
             android:visibility="gone" />

@@ -89,6 +89,9 @@ class Settings {
   /// First-run onboarding finished (or skipped by an existing install).
   bool onboarded;
 
+  /// 'system' | 'light' | 'dark'.
+  String themeMode;
+
   // Wake challenge and sleep goal.
   WakeChallenge wakeChallenge;
   double sleepHours;
@@ -124,6 +127,7 @@ class Settings {
     this.speechLocale = '',
     this.freezesPerMonth = 2,
     this.onboarded = false,
+    this.themeMode = 'system',
     this.wakeChallenge = WakeChallenge.off,
     this.sleepHours = 7.5,
     this.windDownMinutes = 30,
@@ -161,6 +165,7 @@ class Settings {
         'speechLocale': speechLocale,
         'freezesPerMonth': freezesPerMonth,
         'onboarded': onboarded,
+        'themeMode': themeMode,
         'wakeChallenge': wakeChallenge.name,
         'sleepHours': sleepHours,
         'windDownMinutes': windDownMinutes,
@@ -201,6 +206,7 @@ class Settings {
       speechLocale: j['speechLocale'] as String? ?? '',
       freezesPerMonth: (j['freezesPerMonth'] as num?)?.toInt() ?? d.freezesPerMonth,
       onboarded: j['onboarded'] as bool? ?? true,
+      themeMode: const ['system', 'light', 'dark'].contains(j['themeMode']) ? j['themeMode'] as String : d.themeMode,
       wakeChallenge: WakeChallenge.values.firstWhere((c) => c.name == j['wakeChallenge'], orElse: () => d.wakeChallenge),
       sleepHours: ((j['sleepHours'] as num?)?.toDouble() ?? d.sleepHours).clamp(3.0, 12.0),
       windDownMinutes: ((j['windDownMinutes'] as num?)?.toInt() ?? d.windDownMinutes).clamp(0, 180),

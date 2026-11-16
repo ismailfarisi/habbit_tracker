@@ -280,6 +280,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
             ),
           ),
+          _header('Appearance'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: SegmentedButton<String>(
+              key: const Key('theme-mode'),
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: 'system', label: Text('System')),
+                ButtonSegment(value: 'light', label: Text('Light')),
+                ButtonSegment(value: 'dark', label: Text('Dark')),
+              ],
+              selected: {s.themeMode},
+              onSelectionChanged: (v) => state.updateSettings((x) => x.themeMode = v.first),
+            ),
+          ),
           _header('Wake up'),
           ListTile(
             leading: const Icon(Icons.alarm),
