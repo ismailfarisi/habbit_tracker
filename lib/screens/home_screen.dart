@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import 'plan_screen.dart';
 import 'settings_screen.dart';
 import 'stats_screen.dart';
-import 'tasks_screen.dart';
 import 'today_screen.dart';
 
 class HomeTab {
@@ -15,15 +15,18 @@ class HomeTab {
 }
 
 /// The app shell. [tabs] is the one place that lists the bottom tabs; keep
-/// the `*Tab` indexes in step with it.
+/// the `*Tab` indexes in step with it. Settings is not a tab: it opens from
+/// the gear in the app bar, and [settingsTab] (passed to `goTo` or
+/// `AppState.requestedTab`) opens it too.
 class HomeScreen extends StatefulWidget {
-  static const todayTab = 0, tasksTab = 1, statsTab = 2, settingsTab = 3;
+  static const todayTab = 0, planTab = 1, progressTab = 2;
+  static const tasksTab = planTab, statsTab = progressTab;
+  static const settingsTab = 3;
 
   static final tabs = <HomeTab>[
     HomeTab('Today', Icons.today_outlined, Icons.today, (s, goTo) => TodayScreen(state: s, onNavigate: goTo)),
-    HomeTab('Tasks', Icons.checklist_outlined, Icons.checklist, (s, _) => TasksScreen(state: s)),
+    HomeTab('Plan', Icons.event_note_outlined, Icons.event_note, (s, _) => PlanScreen(state: s)),
     HomeTab('Progress', Icons.insights_outlined, Icons.insights, (s, _) => StatsScreen(state: s)),
-    HomeTab('Settings', Icons.settings_outlined, Icons.settings, (s, _) => SettingsScreen(state: s)),
   ];
 
   final AppState state;
@@ -41,7 +44,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.state.requestedTab.addListener(_onTabRequest);
-    _onTabRequest();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onTabRequest());
   }
 
   @override
@@ -59,22 +62,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _onTabRequest() {
     final t = widget.state.requestedTab.value;
-    if (t != null) {
-      setState(() => _tab = t.clamp(0, HomeScreen.tabs.length - 1));
-      widget.state.requestedTab.value = null;
-    }
+    if (t == null || !mounted) return;
+    widget.state.requestedTab.value = null;
+    goTo(t);
   }
 
-  void goTo(int tab) => setState(() => _tab = tab);
+  void goTo(int tab) {
+    if (tab == HomeScreen.settingsTab) {
+      openSettings(context, widget.state);
+      return;
+    }
+    setState(() => _tab = tab.clamp(0, HomeScreen.tabs.length - 1));
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('Daily Discipline'),
+        actions: [
+          IconButton(
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => openSettings(context, widget.state),
+          ),
+        ],
+      ),
       body: SafeArea(
-        child: IndexedStack(
-          index: _tab,
-          children: [for (final t in HomeScreen.tabs) t.build(widget.state, goTo)],
-        ),
+        top: false,
+        child: IndexedStack(index: _tab, children: [for (final t in HomeScreen.tabs) t.build(widget.state, goTo)]),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,

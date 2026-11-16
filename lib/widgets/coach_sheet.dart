@@ -4,6 +4,7 @@ import '../app_state.dart';
 import '../habits/habit.dart';
 import '../services/coach_prompts.dart';
 import '../services/task_tools.dart';
+import 'ai_key_empty_state.dart';
 import 'assistant_chat.dart';
 
 /// Opens the AI coach in a bottom sheet. With [request] (the context of an
@@ -46,7 +47,7 @@ class _CoachSheetState extends State<_CoachSheet> {
   void initState() {
     super.initState();
     final r = widget.request;
-    if (r != null) {
+    if (r != null && widget.state.apiKey.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _chat.send(sessionFeedbackPrompt(widget.habit?.title ?? 'my habit', r),
             display: '🎙️ Please review my practice');
@@ -69,10 +70,15 @@ class _CoachSheetState extends State<_CoachSheet> {
         Text(h == null ? 'Coach' : 'Coach · ${h.title}',
             style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
-        AssistantChatView(
-          chat: _chat,
-          hint: 'Message your coach',
-          suggestions: const ['How am I doing?', 'Give me a harder drill', 'Build me a new habit'],
+        ListenableBuilder(
+          listenable: widget.state,
+          builder: (context, _) => widget.state.apiKey.isEmpty
+              ? AiKeyEmptyState(state: widget.state)
+              : AssistantChatView(
+                  chat: _chat,
+                  hint: 'Message your coach',
+                  suggestions: const ['How am I doing?', 'Give me a harder drill', 'Build me a new habit'],
+                ),
         ),
       ]),
     );
