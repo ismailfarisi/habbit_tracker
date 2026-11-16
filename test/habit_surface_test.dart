@@ -413,6 +413,9 @@ void main() {
   });
 
   testWidgets('showDayEditor edits a past day: prayer, habit and wake', (tester) async {
+    tester.view.physicalSize = const Size(420, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     final h = await add(quranTemplate);
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
@@ -430,7 +433,7 @@ void main() {
     expect(state.logFor(day).prayers, {'Isha'});
     expect(state.logFor(day).prayerStatus['Isha'], 'onTime');
 
-    await tester.tap(find.textContaining('Read Quran'));
+    await tester.tap(find.text('I read Quran today'));
     await tester.pumpAndSettle();
     expect(habitDone(entry(h), h), isTrue);
 

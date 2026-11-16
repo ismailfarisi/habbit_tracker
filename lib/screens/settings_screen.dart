@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../app_state.dart';
 import '../models.dart';
 import '../services/openrouter.dart';
+import 'reminders_screen.dart';
 
 const _suggestedModels = [
   'openai/gpt-4o-mini',
@@ -301,6 +302,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: const Text('Wake-up alarm, each prayer, habits and tasks'),
             value: s.remindersEnabled,
             onChanged: (v) => state.updateSettings((x) => x.remindersEnabled = v),
+          ),
+          ListTile(
+            leading: const Icon(Icons.schedule),
+            title: const Text('Upcoming reminders'),
+            subtitle: const Text('Everything planned for the next days'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => RemindersScreen(state: state)),
+            ),
           ),
           ListTile(
             leading: const Icon(Icons.more_time),
