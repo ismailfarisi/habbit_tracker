@@ -45,7 +45,7 @@ void main() {
     expect(find.byType(DayEditor), findsOneWidget);
     expect(find.text(DateFormat('EEEE, d MMMM').format(ago(2))), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(CheckboxListTile, 'Fajr'));
+    await tester.tap(find.descendant(of: find.byKey(const ValueKey('prayer-Fajr')), matching: find.text('On time')));
     await tester.pumpAndSettle();
     expect(state.logFor(ago(2)).prayers, contains('Fajr'));
     expect(state.logFor(ago(2)).prayerStatus['Fajr'], prayerOnTime);
