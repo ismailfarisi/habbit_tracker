@@ -41,6 +41,9 @@ TimeOfDay parseHm(String s, {TimeOfDay fallback = const TimeOfDay(hour: 0, minut
   return TimeOfDay(hour: h, minute: min);
 }
 
+/// Anti-snooze check before "I'm up" counts.
+enum WakeChallenge { off, readAloud, math }
+
 class Settings {
   TimeOfDay wakeTime;
   int wakeGraceMin;
@@ -70,8 +73,11 @@ class Settings {
   /// First-run onboarding finished (or skipped by an existing install).
   bool onboarded;
 
-  /// Sleep goal in hours, asked during onboarding.
+  // Wake challenge and sleep goal.
+  WakeChallenge wakeChallenge;
   double sleepHours;
+  int windDownMinutes;
+  bool bedtimeReminder;
 
   Settings({
     this.wakeTime = const TimeOfDay(hour: 5, minute: 0),
@@ -92,7 +98,10 @@ class Settings {
     this.speechLocale = '',
     this.freezesPerMonth = 2,
     this.onboarded = false,
+    this.wakeChallenge = WakeChallenge.off,
     this.sleepHours = 7.5,
+    this.windDownMinutes = 30,
+    this.bedtimeReminder = true,
   }) : manualTimes = manualTimes ?? Map.of(defaultManualTimes);
 
   bool get hasLocation => latitude != null && longitude != null;
@@ -116,7 +125,10 @@ class Settings {
         'speechLocale': speechLocale,
         'freezesPerMonth': freezesPerMonth,
         'onboarded': onboarded,
+        'wakeChallenge': wakeChallenge.name,
         'sleepHours': sleepHours,
+        'windDownMinutes': windDownMinutes,
+        'bedtimeReminder': bedtimeReminder,
       };
 
   factory Settings.fromJson(Map<String, dynamic> j) {
@@ -143,7 +155,10 @@ class Settings {
       speechLocale: j['speechLocale'] as String? ?? '',
       freezesPerMonth: (j['freezesPerMonth'] as num?)?.toInt() ?? d.freezesPerMonth,
       onboarded: j['onboarded'] as bool? ?? true,
-      sleepHours: (j['sleepHours'] as num?)?.toDouble() ?? d.sleepHours,
+      wakeChallenge: WakeChallenge.values.firstWhere((c) => c.name == j['wakeChallenge'], orElse: () => d.wakeChallenge),
+      sleepHours: ((j['sleepHours'] as num?)?.toDouble() ?? d.sleepHours).clamp(3.0, 12.0),
+      windDownMinutes: ((j['windDownMinutes'] as num?)?.toInt() ?? d.windDownMinutes).clamp(0, 180),
+      bedtimeReminder: j['bedtimeReminder'] as bool? ?? d.bedtimeReminder,
     );
   }
 

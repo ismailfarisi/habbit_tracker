@@ -5,8 +5,10 @@ import 'package:intl/intl.dart';
 
 import '../app_state.dart';
 import '../models.dart';
+import '../logic/sleep.dart';
 import '../services/openrouter.dart';
 import 'reminders_screen.dart';
+import 'wake_challenge_screen.dart';
 
 const _suggestedModels = [
   'openai/gpt-4o-mini',
@@ -206,6 +208,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             value: s.wakeAlarmLoud,
             onChanged: (v) => state.updateSettings((x) => x.wakeAlarmLoud = v),
           ),
+          ..._wakeChallengeAndSleep(),
 
           _header('Prayer times'),
           Padding(
@@ -375,6 +378,98 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  static const _challengeLabels = {
+    WakeChallenge.off: 'Off',
+    WakeChallenge.readAloud: 'Read a sentence aloud',
+    WakeChallenge.math: 'Solve 2 math problems',
+  };
+
+  Future<double?> _pickHours(String title, double value) {
+    var v = value;
+    return showDialog<double>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, set) => AlertDialog(
+          title: Text(title),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(fmtSleepHours(v), style: Theme.of(c).textTheme.headlineMedium),
+            Slider(value: v, min: 5, max: 10, divisions: 20, onChanged: (x) => set(() => v = x)),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(c, v), child: const Text('Save')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _wakeChallengeAndSleep() {
+    final night = DateTime.now();
+    return [
+      ListTile(
+        leading: const Icon(Icons.verified_user_outlined),
+        title: const Text('Wake challenge'),
+        subtitle: Text(s.wakeChallenge == WakeChallenge.off
+            ? 'Off. "I\'m up" counts right away'
+            : '${_challengeLabels[s.wakeChallenge]} before "I\'m up" counts'),
+        onTap: () async {
+          final v = await showDialog<WakeChallenge>(
+            context: context,
+            builder: (c) => SimpleDialog(
+              title: const Text('Prove you\'re up'),
+              children: [
+                for (final e in _challengeLabels.entries)
+                  SimpleDialogOption(
+                    onPressed: () => Navigator.pop(c, e.key),
+                    child: Row(children: [
+                      Icon(e.key == s.wakeChallenge ? Icons.radio_button_checked : Icons.radio_button_unchecked),
+                      const SizedBox(width: 12),
+                      Text(e.value),
+                    ]),
+                  ),
+              ],
+            ),
+          );
+          if (v != null) await state.updateSettings((x) => x.wakeChallenge = v);
+        },
+        trailing: s.wakeChallenge == WakeChallenge.off
+            ? null
+            : TextButton(
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => WakeChallengeScreen(state: state, mode: s.wakeChallenge, practice: true),
+                )),
+                child: const Text('Try it'),
+              ),
+      ),
+      ListTile(
+        leading: const Icon(Icons.bedtime_outlined),
+        title: const Text('Sleep goal'),
+        subtitle: Text('${fmtSleepHours(s.sleepHours)} a night, bed by ${_fmt(TimeOfDay.fromDateTime(bedtimeFor(s, night)))}'),
+        onTap: () async {
+          final v = await _pickHours('Sleep goal', s.sleepHours);
+          if (v != null) await state.updateSettings((x) => x.sleepHours = v);
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.self_improvement),
+        title: const Text('Wind-down time'),
+        subtitle: Text('${s.windDownMinutes} min before bed'),
+        onTap: () async {
+          final v = await _pickNumber('Wind down before bed', s.windDownMinutes, 0, 120);
+          if (v != null) await state.updateSettings((x) => x.windDownMinutes = v);
+        },
+      ),
+      SwitchListTile(
+        secondary: const Icon(Icons.nights_stay_outlined),
+        title: const Text('Bedtime reminder'),
+        subtitle: Text('Every night at ${_fmt(TimeOfDay.fromDateTime(windDownFor(s, night)))} with a "Going to bed" button'),
+        value: s.bedtimeReminder,
+        onChanged: (v) => state.updateSettings((x) => x.bedtimeReminder = v),
+      ),
+    ];
   }
 
   Widget _header(String text) => Padding(

@@ -89,7 +89,7 @@ void main() {
       final logs = {dayKey(now): DayLog(prayers: {'Asr'})};
       final plan = planReminders(s, logs, now);
       final today = plan.where((r) => dayKey(r.when) == dayKey(now)).map((r) => r.payload).toList();
-      expect(today, ['prayer:Maghrib|2026-06-01', 'prayer:Isha|2026-06-01']);
+      expect(today, ['prayer:Maghrib|2026-06-01', 'prayer:Isha|2026-06-01', 'bed|2026-06-01']);
       expect(plan.length, lessThanOrEqualTo(64));
       expect(plan.map((r) => r.id).toSet().length, plan.length, reason: 'ids are unique');
     });

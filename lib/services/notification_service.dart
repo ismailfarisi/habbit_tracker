@@ -13,6 +13,10 @@ import 'reminders.dart';
 import 'storage.dart';
 
 const _doneAction = 'done';
+
+/// Wake action used while the wake challenge is on: opens the app to the
+/// challenge instead of marking the wake-up in the background.
+const wakeChallengeAction = 'wake_challenge';
 const _habitCategory = 'habit';
 
 /// Runs in a background isolate when the user taps "Mark done" / "I'm up"
@@ -28,6 +32,7 @@ Future<void> notificationActionBackground(NotificationResponse r) async {
     if (applyTaskDoneAction(r.payload!, tasks)) await storage.saveTasks(tasks);
     return;
   }
+  if (r.payload!.startsWith('wake|') && storage.loadSettings().wakeChallenge != WakeChallenge.off) return;
   final logs = storage.loadLogs();
   if (applyDoneAction(r.payload!, logs, DateTime.now())) {
     await storage.saveLogs(logs);
@@ -43,6 +48,19 @@ class NotificationService {
 
   /// Called for notification taps / actions while the app is running.
   void Function(NotificationResponse)? onResponse;
+
+  /// Set to the day key of a wake notification the user tapped (or answered
+  /// with [wakeChallengeAction]); the wake card opens the challenge for it
+  /// and clears it.
+  final ValueNotifier<String?> wakeChallengeRequest = ValueNotifier(null);
+
+  void _noteWakeTap(NotificationResponse r) {
+    final payload = r.payload ?? '';
+    if (!payload.startsWith('wake|')) return;
+    if (r.actionId == null || r.actionId == wakeChallengeAction) {
+      wakeChallengeRequest.value = payload.substring(5);
+    }
+  }
 
   bool get _supported =>
       !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
@@ -82,7 +100,10 @@ class NotificationService {
           ],
         ),
       ),
-      onDidReceiveNotificationResponse: (r) => onResponse?.call(r),
+      onDidReceiveNotificationResponse: (r) {
+        _noteWakeTap(r);
+        onResponse?.call(r);
+      },
       onDidReceiveBackgroundNotificationResponse: notificationActionBackground,
     );
     _ready = true;
@@ -92,7 +113,9 @@ class NotificationService {
   Future<NotificationResponse?> launchResponse() async {
     if (!_ready) return null;
     final d = await _plugin.getNotificationAppLaunchDetails();
-    return (d?.didNotificationLaunchApp ?? false) ? d!.notificationResponse : null;
+    final r = (d?.didNotificationLaunchApp ?? false) ? d!.notificationResponse : null;
+    if (r != null) _noteWakeTap(r);
+    return r;
   }
 
   /// Asks for notification, exact-alarm and full-screen permissions.
@@ -117,21 +140,23 @@ class NotificationService {
   }
 
   NotificationDetails _details(ReminderKind kind, Settings s) {
+    final challenge = kind == ReminderKind.wake && s.wakeChallenge != WakeChallenge.off;
     final doneLabel = switch (kind) {
       ReminderKind.wake => "I'm up",
       ReminderKind.prayer => 'Prayed',
       ReminderKind.habit => 'Open',
       ReminderKind.task => 'Done',
+      ReminderKind.bedtime => 'Going to bed',
     };
     final actions = [
       AndroidNotificationAction(
-        _doneAction,
+        challenge ? wakeChallengeAction : _doneAction,
         doneLabel,
-        showsUserInterface: kind == ReminderKind.habit,
+        showsUserInterface: kind == ReminderKind.habit || challenge,
       ),
     ];
     final ios = DarwinNotificationDetails(
-      categoryIdentifier: kind == ReminderKind.habit ? null : _habitCategory,
+      categoryIdentifier: kind == ReminderKind.habit || challenge ? null : _habitCategory,
       interruptionLevel: kind == ReminderKind.wake ? InterruptionLevel.timeSensitive : InterruptionLevel.active,
     );
     if (kind == ReminderKind.wake && s.wakeAlarmLoud) {
@@ -159,6 +184,7 @@ class NotificationService {
       ReminderKind.prayer => ('prayer', 'Prayer reminders'),
       ReminderKind.habit => ('habits', 'Habit reminders'),
       ReminderKind.task => ('tasks', 'Task reminders'),
+      ReminderKind.bedtime => ('bedtime', 'Bedtime reminder'),
     };
     return NotificationDetails(
       android: AndroidNotificationDetails(
