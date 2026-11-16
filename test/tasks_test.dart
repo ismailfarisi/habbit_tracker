@@ -106,6 +106,18 @@ void main() {
   });
 
   group('task reminders', () {
+    test('anytime one-off with a time reminds once, at its next occurrence', () {
+      final s = Settings(useManualPrayer: true, remindersEnabled: true);
+      final at = DateTime(2026, 11, 10, 12, 0);
+      List<PlannedReminder> plan(Task t) =>
+          planReminders(s, {}, at, tasks: [t]).where((r) => r.kind == ReminderKind.task).toList();
+      final later = plan(task('later', time: '20:00', seq: 1));
+      expect(later.map((r) => r.when), [DateTime(2026, 11, 10, 20, 0)]);
+      final tomorrow = plan(task('tomorrow', time: '09:35', seq: 2));
+      expect(tomorrow.map((r) => r.when), [DateTime(2026, 11, 11, 9, 35)]);
+      expect(plan(task('done', time: '20:00', seq: 3)..doneDates.add('2026-11-09')), isEmpty);
+    });
+
     test('scheduled for timed, unfinished tasks only', () {
       final s = Settings(useManualPrayer: true, remindersEnabled: true);
       final tasks = [

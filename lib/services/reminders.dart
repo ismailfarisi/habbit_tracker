@@ -137,9 +137,15 @@ List<PlannedReminder> planReminders(
     }
 
     for (final t in tasks) {
-      if (!t.isScheduledOn(date) || t.isDoneOn(date)) continue;
       final when = t.reminderOn(date);
       if (when == null) continue;
+      final anytime = !t.isRepeating && t.date == null && !t.isOneOffDone;
+      if (anytime) {
+        final previous = t.reminderOn(DateTime(date.year, date.month, date.day - 1))!;
+        if (!when.isAfter(now) || previous.isAfter(now)) continue;
+      } else if (!t.isScheduledOn(date) || t.isDoneOn(date)) {
+        continue;
+      }
       out.add(PlannedReminder(
         id: taskReminderId(t, date),
         when: when,

@@ -19,11 +19,25 @@ class PrayerCard extends StatelessWidget {
   final DateTime now;
   const PrayerCard({super.key, required this.state, required this.log, required this.now});
 
-  Future<void> _tap(String name) => state.setPrayerStatus(
-        now,
-        name,
-        log.prayers.contains(name) ? null : autoPrayerStatus(state.settings, now, name, now),
-      );
+  Future<void> _tap(BuildContext context, String name) async {
+    if (!log.prayers.contains(name)) {
+      final start = prayerTimesFor(state.settings, now).times[name]!;
+      if (now.isBefore(start)) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+            content: Text("${prayerLabel(name, now)} starts at ${DateFormat.jm().format(start)}. "
+                'Long-press to set a status by hand.'),
+          ));
+        return;
+      }
+    }
+    await state.setPrayerStatus(
+      now,
+      name,
+      log.prayers.contains(name) ? null : autoPrayerStatus(state.settings, now, name, now),
+    );
+  }
 
   Future<void> _choose(BuildContext context, String name) async {
     final current = prayerStatusOf(log, name);
@@ -98,7 +112,7 @@ class PrayerCard extends StatelessWidget {
                 : ramadan && p == 'Fajr'
                     ? 'Suhoor ends'
                     : null,
-            onTap: () => _tap(p),
+            onTap: () => _tap(context, p),
             onLongPress: () => _choose(context, p),
           ),
           for (final o in optional)
