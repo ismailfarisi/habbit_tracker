@@ -4,6 +4,7 @@ import 'habits/habit.dart';
 import 'logic/stats.dart';
 import 'logic/tasks.dart';
 import 'models.dart';
+import 'services/home_widget_service.dart';
 import 'services/notification_service.dart';
 import 'services/reminders.dart';
 import 'services/storage.dart';
@@ -63,7 +64,10 @@ class AppState extends ChangeNotifier implements TaskBackend {
 
   DayLog _mutableDay(DateTime d) => logs.putIfAbsent(dayKey(d), DayLog.new);
 
-  Future<void> _reschedule() => notifications.reschedule(settings, logs, tasks, habits: habits);
+  Future<void> _reschedule() async {
+    await notifications.reschedule(settings, logs, tasks, habits: habits);
+    await HomeWidgetService.publish(settings, logs, habits: habits, tasks: tasks);
+  }
 
   Future<void> _commit({bool reschedule = true}) async {
     notifyListeners();

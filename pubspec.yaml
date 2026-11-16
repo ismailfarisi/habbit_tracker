@@ -49,6 +49,7 @@ dependencies:
   a2ui_core: ^0.7.0
   a2ui_agent: ^0.3.0
   json_schema_builder: ^0.1.7
+  home_widget: ^0.9.4
 
 dev_dependencies:
   flutter_test:
