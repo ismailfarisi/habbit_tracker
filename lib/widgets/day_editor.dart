@@ -54,8 +54,7 @@ class _DayEditorState extends State<DayEditor> {
 
   void _shift(int days) => setState(() => _day = DateTime(_day.year, _day.month, _day.day + days));
 
-  String? _statusOf(DayLog log, String p) =>
-      log.prayers.contains(p) ? (log.prayerStatus[p] ?? prayerOnTime) : null;
+  String? _statusOf(DayLog log, String p) => log.prayers.contains(p) ? (log.prayerStatus[p] ?? prayerOnTime) : null;
 
   Future<void> _pickWake(DayLog log) async {
     final picked = await showTimePicker(
@@ -86,22 +85,35 @@ class _DayEditorState extends State<DayEditor> {
             shrinkWrap: true,
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
             children: [
-              Row(children: [
-                IconButton(tooltip: 'Previous day', icon: const Icon(Icons.chevron_left), onPressed: () => _shift(-1)),
-                Expanded(
-                  child: Column(children: [
-                    Text(DateFormat('EEEE, d MMMM').format(day),
-                        textAlign: TextAlign.center,
-                        style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                    Text('$score done', style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
-                  ]),
-                ),
-                IconButton(
-                  tooltip: 'Next day',
-                  icon: const Icon(Icons.chevron_right),
-                  onPressed: day.isBefore(_today) ? () => _shift(1) : null,
-                ),
-              ]),
+              Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Previous day',
+                    icon: const Icon(Icons.chevron_left),
+                    onPressed: () => _shift(-1),
+                  ),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(
+                          DateFormat('EEEE, d MMMM').format(day),
+                          textAlign: TextAlign.center,
+                          style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          '$score done',
+                          style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Next day',
+                    icon: const Icon(Icons.chevron_right),
+                    onPressed: day.isBefore(_today) ? () => _shift(1) : null,
+                  ),
+                ],
+              ),
               _Heading('Wake up'),
               ListTile(
                 key: const ValueKey('day-wake'),
@@ -114,15 +126,22 @@ class _DayEditorState extends State<DayEditor> {
                   WakeResult.late => 'Later than the goal',
                 }),
                 onTap: () => _pickWake(log),
-                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                  if (log.wakeAt != null)
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (log.wakeAt != null)
+                      IconButton(
+                        tooltip: 'Clear wake time',
+                        icon: const Icon(Icons.clear),
+                        onPressed: () => state.setWake(day, null),
+                      ),
                     IconButton(
-                      tooltip: 'Clear wake time',
-                      icon: const Icon(Icons.clear),
-                      onPressed: () => state.setWake(day, null),
+                      tooltip: 'Set wake time',
+                      icon: const Icon(Icons.schedule),
+                      onPressed: () => _pickWake(log),
                     ),
-                  IconButton(tooltip: 'Set wake time', icon: const Icon(Icons.schedule), onPressed: () => _pickWake(log)),
-                ]),
+                  ],
+                ),
               ),
               _Heading('Prayers'),
               for (final p in prayerNames)
@@ -134,7 +153,8 @@ class _DayEditorState extends State<DayEditor> {
                   onChanged: (s) => state.setPrayerStatus(day, p, s),
                 ),
               if (habits.isNotEmpty) _Heading('Habits'),
-              for (final h in habits) _HabitEditor(key: ValueKey('day-habit-${h.id}-${dayKey(day)}'), state: state, habit: h, day: day),
+              for (final h in habits)
+                _HabitEditor(key: ValueKey('day-habit-${h.id}-${dayKey(day)}'), state: state, habit: h, day: day),
               if (tasks.isNotEmpty) _Heading('Routines'),
               for (final task in tasks)
                 CheckboxListTile(
@@ -164,7 +184,10 @@ class _Heading extends StatelessWidget {
     final t = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.only(top: 16, bottom: 4),
-      child: Text(text, style: t.textTheme.titleSmall?.copyWith(color: t.colorScheme.primary, fontWeight: FontWeight.w600)),
+      child: Text(
+        text,
+        style: t.textTheme.titleSmall?.copyWith(color: t.colorScheme.primary, fontWeight: FontWeight.w600),
+      ),
     );
   }
 }
@@ -183,28 +206,44 @@ class _PrayerRow extends StatelessWidget {
     final c = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        InkWell(
-          onTap: () => onChanged(status == null ? prayerOnTime : null),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(children: [
-              Expanded(child: Text(name, style: const TextStyle(fontWeight: FontWeight.w600))),
-              if (time != null) Text(DateFormat.jm().format(time!), style: TextStyle(fontSize: 12, color: c.onSurfaceVariant)),
-            ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: () => onChanged(status == null ? prayerOnTime : null),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                  if (time != null)
+                    Text(DateFormat.jm().format(time!), style: TextStyle(fontSize: 12, color: c.onSurfaceVariant)),
+                ],
+              ),
+            ),
           ),
-        ),
-        SegmentedButton<String?>(
-          showSelectedIcon: false,
-          style: const ButtonStyle(visualDensity: VisualDensity.compact, tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-          segments: [
-            for (final e in prayerStatusLabels.entries)
-              ButtonSegment(value: e.key, label: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis)),
-          ],
-          selected: {status},
-          onSelectionChanged: (s) => onChanged(s.first),
-        ),
-      ]),
+          SegmentedButton<String?>(
+            showSelectedIcon: false,
+            style: const ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 4)),
+              textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 13)),
+            ),
+            segments: [
+              for (final e in prayerStatusLabels.entries)
+                ButtonSegment(
+                  value: e.key,
+                  label: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            selected: {status},
+            onSelectionChanged: (s) => onChanged(s.first),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -225,21 +264,28 @@ class _HabitEditor extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Row(children: [
-            Expanded(child: Text('${habit.emoji}  ${habit.title}', style: const TextStyle(fontWeight: FontWeight.w600))),
-            Icon(
-              habitDone(entry, habit) ? Icons.check_circle : Icons.radio_button_unchecked,
-              color: habitDone(entry, habit) ? Theme.of(context).colorScheme.primary : null,
-              size: 20,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text('${habit.emoji}  ${habit.title}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                ),
+                Icon(
+                  habitDone(entry, habit) ? Icons.check_circle : Icons.radio_button_unchecked,
+                  color: habitDone(entry, habit) ? Theme.of(context).colorScheme.primary : null,
+                  size: 20,
+                ),
+              ],
             ),
-          ]),
-          const SizedBox(height: 4),
-          if (timed)
-            HabitFallback(habit: habit, entry: entry, onChanged: (e) => state.logHabit(day, habit.id, e))
-          else
-            HabitSurface(state, habit, day),
-        ]),
+            const SizedBox(height: 4),
+            if (timed)
+              HabitFallback(habit: habit, entry: entry, onChanged: (e) => state.logHabit(day, habit.id, e))
+            else
+              HabitSurface(state, habit, day),
+          ],
+        ),
       ),
     );
   }
