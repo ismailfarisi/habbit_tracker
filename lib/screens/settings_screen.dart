@@ -4,6 +4,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 
 import '../app_state.dart';
+import '../logic/prayer_status.dart';
 import '../models.dart';
 import '../logic/sleep.dart';
 import '../services/openrouter.dart';
@@ -293,6 +294,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
 
+          ..._muslimSection(),
+
           _header('Streaks'),
           ListTile(
             leading: const Icon(Icons.ac_unit),
@@ -468,6 +471,124 @@ class _SettingsScreenState extends State<SettingsScreen> {
         subtitle: Text('Every night at ${_fmt(TimeOfDay.fromDateTime(windDownFor(s, night)))} with a "Going to bed" button'),
         value: s.bedtimeReminder,
         onChanged: (v) => state.updateSettings((x) => x.bedtimeReminder = v),
+      ),
+    ];
+  }
+
+  // ---------- Ramadan, Jumu'ah & sunnah prayers ----------
+  Future<void> _pickJumuahTime() async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (c) => SimpleDialog(title: const Text("Jumu'ah time"), children: [
+        SimpleDialogOption(onPressed: () => Navigator.pop(c, ''), child: const Text('Same as Dhuhr')),
+        SimpleDialogOption(onPressed: () => Navigator.pop(c, '13:15'), child: const Text('1:15 PM (UAE mosques)')),
+        SimpleDialogOption(onPressed: () => Navigator.pop(c, 'pick'), child: const Text('Pick a time…')),
+      ]),
+    );
+    if (choice == null) return;
+    var v = choice;
+    if (choice == 'pick') {
+      final t = await _pickTime(s.jumuahTime.isEmpty ? const TimeOfDay(hour: 13, minute: 0) : parseHm(s.jumuahTime));
+      if (t == null) return;
+      v = fmtHm(t);
+    }
+    await state.updateSettings((x) => x.jumuahTime = v);
+  }
+
+  List<Widget> _muslimSection() {
+    final now = DateTime.now();
+    final ramadanNow = isRamadan(s, now);
+    return [
+      _header("Ramadan, Jumu'ah & sunnah"),
+      ListTile(
+        leading: const Icon(Icons.calendar_month_outlined),
+        title: const Text('Hijri date adjustment'),
+        subtitle: Text('Today: ${hijriToday(s, now)}'
+            '${s.hijriOffsetDays == 0 ? '' : ' (${s.hijriOffsetDays > 0 ? '+' : ''}${s.hijriOffsetDays} days)'}'),
+        onTap: () async {
+          final v = await _pickNumber('Hijri date adjustment', s.hijriOffsetDays, -2, 2, unit: 'days');
+          if (v != null) await state.updateSettings((x) => x.hijriOffsetDays = v);
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.nightlight_outlined),
+        title: const Text('Ramadan mode'),
+        subtitle: Text(switch (s.ramadanMode) {
+          'on' => 'On',
+          'off' => 'Off',
+          _ => 'Automatic during Ramadan${ramadanNow ? ' (active now)' : ''}',
+        }),
+        trailing: DropdownButton<String>(
+          value: s.ramadanMode,
+          underline: const SizedBox.shrink(),
+          items: const [
+            DropdownMenuItem(value: 'auto', child: Text('Auto')),
+            DropdownMenuItem(value: 'on', child: Text('On')),
+            DropdownMenuItem(value: 'off', child: Text('Off')),
+          ],
+          onChanged: (v) => state.updateSettings((x) => x.ramadanMode = v ?? x.ramadanMode),
+        ),
+      ),
+      SwitchListTile(
+        secondary: const Icon(Icons.alarm_on_outlined),
+        title: const Text('Suhoor wake alarm'),
+        subtitle: Text('In Ramadan, ${s.suhoorMinutes} min before Fajr'),
+        value: s.suhoorReminder,
+        onChanged: (v) => state.updateSettings((x) => x.suhoorReminder = v),
+      ),
+      if (s.suhoorReminder)
+        ListTile(
+          contentPadding: const EdgeInsets.only(left: 72, right: 16),
+          title: const Text('Suhoor alarm before Fajr'),
+          trailing: Text('${s.suhoorMinutes} min'),
+          onTap: () async {
+            final v = await _pickNumber('Suhoor alarm before Fajr', s.suhoorMinutes, 10, 120);
+            if (v != null) await state.updateSettings((x) => x.suhoorMinutes = v);
+          },
+        ),
+      SwitchListTile(
+        secondary: const Icon(Icons.star_outline),
+        title: const Text('Taraweeh'),
+        subtitle: const Text('Optional item after Isha in Ramadan'),
+        value: s.taraweeh,
+        onChanged: (v) => state.updateSettings((x) => x.taraweeh = v),
+      ),
+      ListTile(
+        leading: const Icon(Icons.mosque_outlined),
+        title: const Text("Jumu'ah time"),
+        subtitle: Text(s.jumuahTime.isEmpty ? 'Same as Dhuhr' : _fmt(parseHm(s.jumuahTime))),
+        onTap: _pickJumuahTime,
+      ),
+      SwitchListTile(
+        secondary: const Icon(Icons.notifications_outlined),
+        title: const Text("Early Jumu'ah reminder"),
+        subtitle: Text('Fridays, ${s.jumuahReminderMinutes} min before'),
+        value: s.jumuahReminder,
+        onChanged: (v) => state.updateSettings((x) => x.jumuahReminder = v),
+      ),
+      if (s.jumuahReminder)
+        ListTile(
+          contentPadding: const EdgeInsets.only(left: 72, right: 16),
+          title: const Text("Remind me before Jumu'ah"),
+          trailing: Text('${s.jumuahReminderMinutes} min'),
+          onTap: () async {
+            final v = await _pickNumber("Remind me before Jumu'ah", s.jumuahReminderMinutes, 10, 120);
+            if (v != null) await state.updateSettings((x) => x.jumuahReminderMinutes = v);
+          },
+        ),
+      SwitchListTile(
+        secondary: const Icon(Icons.wb_sunny_outlined),
+        title: const Text('Duha prayer'),
+        subtitle: const Text('Optional, not counted in the 5-prayer streak'),
+        value: s.sunnahDuha,
+        onChanged: (v) => state.updateSettings((x) => x.sunnahDuha = v),
+      ),
+      SwitchListTile(
+        secondary: const Icon(Icons.bedtime_outlined),
+        title: const Text('Witr prayer'),
+        subtitle: const Text('Optional, not counted in the 5-prayer streak'),
+        value: s.sunnahWitr,
+        onChanged: (v) => state.updateSettings((x) => x.sunnahWitr = v),
       ),
     ];
   }
