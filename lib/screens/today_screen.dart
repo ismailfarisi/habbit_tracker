@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../app_state.dart';
+import '../logic/prayer_status.dart';
 import '../logic/stats.dart';
 import '../services/reminders.dart';
 import '../widgets/add_habit_sheet.dart';
@@ -78,7 +79,7 @@ class _TodayScreenState extends State<TodayScreen> {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            _Header(now: now, score: score),
+            _Header(now: now, score: score, hijri: '${hijriToday(s, now)}'),
             const SizedBox(height: 12),
             if (_notifOn == false)
               _Banner(
@@ -118,7 +119,8 @@ class _TodayScreenState extends State<TodayScreen> {
 class _Header extends StatelessWidget {
   final DateTime now;
   final DayScore score;
-  const _Header({required this.now, required this.score});
+  final String hijri;
+  const _Header({required this.now, required this.score, required this.hijri});
 
   @override
   Widget build(BuildContext context) {
@@ -132,6 +134,7 @@ class _Header extends StatelessWidget {
             children: [
               Text(greeting, style: t.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
               Text(DateFormat('EEEE, d MMMM').format(now), style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+              Text(hijri, key: const ValueKey('hijri-date'), style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
             ],
           ),
         ),

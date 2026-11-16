@@ -1,4 +1,5 @@
 import '../habits/habit.dart';
+import '../logic/prayer_status.dart';
 import '../logic/stats.dart';
 import '../logic/tasks.dart';
 import '../models.dart';
@@ -34,8 +35,8 @@ const scheduleDays = 8;
 /// [maxPending] reminders are scheduled at a time.
 const maxPending = 60;
 
-/// Stable notification id for a date and slot (0 = wake, 1-5 = prayers;
-/// 6-9 are free for other built-in reminders), so a given day's reminder keeps its id across reschedules.
+/// Stable notification id for a date and slot (0 = wake, 1-5 = prayers,
+/// 8 = Ramadan suhoor, 9 = early Jumu'ah; 6-7 are free for other built-in reminders), so a given day's reminder keeps its id across reschedules.
 int reminderId(DateTime date, int slot) {
   final dayNumber = DateTime.utc(date.year, date.month, date.day).millisecondsSinceEpoch ~/ 86400000;
   return 100 + (dayNumber % 100000) * 10 + slot;
@@ -92,11 +93,13 @@ List<PlannedReminder> planReminders(
         id: reminderId(date, 1 + i),
         when: at.subtract(Duration(minutes: offset)),
         kind: ReminderKind.prayer,
-        title: offset > 0 ? '🕌 $name in $offset min' : '🕌 Time for $name',
+        title: prayerReminderTitle(s, name, date, offset),
         body: 'Prayer time ${_hm(at)}. Tap "Prayed" once you\'re done.',
         payload: 'prayer:$name|$key',
       ));
     }
+
+    out.addAll(muslimReminders(s, date, log, times));
 
     for (final h in habits) {
       if (h.archived || h.reminder == null || !h.isScheduledOn(date)) continue;
@@ -156,6 +159,7 @@ bool applyDoneAction(String payload, Map<String, DayLog> logs, DateTime now) {
   final parts = payload.split('|');
   if (parts.length != 2) return false;
   final what = parts[0], key = parts[1];
+  if (what == 'suhoor') return true;
   final log = logs.putIfAbsent(key, DayLog.new);
   if (what == 'wake') {
     log.wakeAt ??= now;
@@ -165,6 +169,7 @@ bool applyDoneAction(String payload, Map<String, DayLog> logs, DateTime now) {
     final name = what.substring(7);
     if (!prayerNames.contains(name)) return false;
     log.prayers.add(name);
+    log.prayerStatus[name] ??= prayerOnTime;
     return true;
   }
   return false;
@@ -172,3 +177,46 @@ bool applyDoneAction(String payload, Map<String, DayLog> logs, DateTime now) {
 
 String _hm(DateTime t) =>
     '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+// ---------- Prayer: Jumu'ah and Ramadan ----------
+
+String prayerReminderTitle(Settings s, String name, DateTime date, int offset) {
+  final label = prayerLabel(name, date);
+  if (name == 'Maghrib' && isRamadan(s, date)) {
+    return offset > 0 ? '🌙 Iftar (Maghrib) in $offset min' : '🌙 Iftar time · Maghrib';
+  }
+  return offset > 0 ? '🕌 $label in $offset min' : '🕌 Time for $label';
+}
+
+/// The Ramadan suhoor wake alarm (Fajr minus [Settings.suhoorMinutes]) and
+/// the early Friday reminder ([Settings.jumuahReminderMinutes] before
+/// Jumu'ah) for [date].
+List<PlannedReminder> muslimReminders(Settings s, DateTime date, DayLog? log, Map<String, DateTime> times) {
+  final key = dayKey(date);
+  final out = <PlannedReminder>[];
+  final fajr = times['Fajr']!;
+  if (s.suhoorReminder && s.suhoorMinutes > 0 && isRamadan(s, date) && log?.wakeAt == null &&
+      !(log?.prayers.contains('Fajr') ?? false)) {
+    out.add(PlannedReminder(
+      id: reminderId(date, 8),
+      when: fajr.subtract(Duration(minutes: s.suhoorMinutes)),
+      kind: ReminderKind.wake,
+      title: '🌙 Suhoor time',
+      body: 'Fajr (end of suhoor) at ${_hm(fajr)}. Eat and drink before then.',
+      payload: 'suhoor|$key',
+    ));
+  }
+  final dhuhr = times['Dhuhr']!;
+  if (s.jumuahReminder && s.jumuahReminderMinutes > s.prayerOffsetMin && date.weekday == DateTime.friday &&
+      !(log?.prayers.contains('Dhuhr') ?? false)) {
+    out.add(PlannedReminder(
+      id: reminderId(date, 9),
+      when: dhuhr.subtract(Duration(minutes: s.jumuahReminderMinutes)),
+      kind: ReminderKind.prayer,
+      title: "🕌 Jumu'ah in ${s.jumuahReminderMinutes} min",
+      body: "Jumu'ah at ${_hm(dhuhr)}. Time for ghusl and to head to the mosque.",
+      payload: 'prayer:Dhuhr|$key',
+    ));
+  }
+  return out;
+}

@@ -53,6 +53,22 @@ class Settings {
   bool useManualPrayer;
   Map<String, String> manualTimes;
 
+  /// Ramadan: 'auto' (Hijri month 9), 'on' or 'off'.
+  String ramadanMode;
+  bool suhoorReminder;
+  /// The suhoor wake alarm rings this long before Fajr.
+  int suhoorMinutes;
+  bool taraweeh;
+  bool jumuahReminder;
+  /// Extra Friday reminder this long before Jumu'ah.
+  int jumuahReminderMinutes;
+  /// Local Jumu'ah time 'HH:mm' (e.g. '13:15' in the UAE); '' = Dhuhr time.
+  String jumuahTime;
+  bool sunnahDuha;
+  bool sunnahWitr;
+  /// Days added to the Umm al-Qura Hijri date to match local moon sighting.
+  int hijriOffsetDays;
+
   bool remindersEnabled;
   int prayerOffsetMin;
   bool wakeAlarmLoud;
@@ -77,6 +93,16 @@ class Settings {
     this.madhab = 'shafi',
     this.useManualPrayer = false,
     Map<String, String>? manualTimes,
+    this.ramadanMode = 'auto',
+    this.suhoorReminder = true,
+    this.suhoorMinutes = 45,
+    this.taraweeh = true,
+    this.jumuahReminder = true,
+    this.jumuahReminderMinutes = 45,
+    this.jumuahTime = '',
+    this.sunnahDuha = false,
+    this.sunnahWitr = false,
+    this.hijriOffsetDays = 0,
     this.remindersEnabled = true,
     this.prayerOffsetMin = 0,
     this.wakeAlarmLoud = true,
@@ -99,6 +125,16 @@ class Settings {
         'madhab': madhab,
         'useManualPrayer': useManualPrayer,
         'manualTimes': manualTimes,
+        'ramadanMode': ramadanMode,
+        'suhoorReminder': suhoorReminder,
+        'suhoorMinutes': suhoorMinutes,
+        'taraweeh': taraweeh,
+        'jumuahReminder': jumuahReminder,
+        'jumuahReminderMinutes': jumuahReminderMinutes,
+        'jumuahTime': jumuahTime,
+        'sunnahDuha': sunnahDuha,
+        'sunnahWitr': sunnahWitr,
+        'hijriOffsetDays': hijriOffsetDays,
         'remindersEnabled': remindersEnabled,
         'prayerOffsetMin': prayerOffsetMin,
         'wakeAlarmLoud': wakeAlarmLoud,
@@ -124,6 +160,16 @@ class Settings {
         ...defaultManualTimes,
         ...?(j['manualTimes'] as Map?)?.map((k, v) => MapEntry(k as String, v as String)),
       },
+      ramadanMode: const ['auto', 'on', 'off'].contains(j['ramadanMode']) ? j['ramadanMode'] as String : d.ramadanMode,
+      suhoorReminder: j['suhoorReminder'] as bool? ?? d.suhoorReminder,
+      suhoorMinutes: (j['suhoorMinutes'] as num?)?.toInt() ?? d.suhoorMinutes,
+      taraweeh: j['taraweeh'] as bool? ?? d.taraweeh,
+      jumuahReminder: j['jumuahReminder'] as bool? ?? d.jumuahReminder,
+      jumuahReminderMinutes: (j['jumuahReminderMinutes'] as num?)?.toInt() ?? d.jumuahReminderMinutes,
+      jumuahTime: RegExp(r'^\d{1,2}:\d{2}$').hasMatch(j['jumuahTime'] as String? ?? '') ? j['jumuahTime'] as String : '',
+      sunnahDuha: j['sunnahDuha'] as bool? ?? d.sunnahDuha,
+      sunnahWitr: j['sunnahWitr'] as bool? ?? d.sunnahWitr,
+      hijriOffsetDays: ((j['hijriOffsetDays'] as num?)?.toInt() ?? 0).clamp(-2, 2),
       remindersEnabled: j['remindersEnabled'] as bool? ?? true,
       prayerOffsetMin: (j['prayerOffsetMin'] as num?)?.toInt() ?? 0,
       wakeAlarmLoud: j['wakeAlarmLoud'] as bool? ?? true,
