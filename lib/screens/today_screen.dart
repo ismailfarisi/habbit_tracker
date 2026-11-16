@@ -208,6 +208,7 @@ class _UpcomingCard extends StatelessWidget {
                 ReminderKind.prayer => Icons.mosque_outlined,
                 ReminderKind.habit => Icons.repeat,
                 ReminderKind.task => Icons.task_alt,
+                ReminderKind.bedtime => Icons.bedtime_outlined,
               }),
               title: Text(r.title),
               trailing: Text(

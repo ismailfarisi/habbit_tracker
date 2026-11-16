@@ -41,6 +41,9 @@ TimeOfDay parseHm(String s, {TimeOfDay fallback = const TimeOfDay(hour: 0, minut
   return TimeOfDay(hour: h, minute: min);
 }
 
+/// Anti-snooze check before "I'm up" counts.
+enum WakeChallenge { off, readAloud, math }
+
 class Settings {
   TimeOfDay wakeTime;
   int wakeGraceMin;
@@ -67,6 +70,12 @@ class Settings {
   /// Missed days per calendar month that don't break the perfect-day streak.
   int freezesPerMonth;
 
+  // Wake challenge and sleep goal.
+  WakeChallenge wakeChallenge;
+  double sleepHours;
+  int windDownMinutes;
+  bool bedtimeReminder;
+
   Settings({
     this.wakeTime = const TimeOfDay(hour: 5, minute: 0),
     this.wakeGraceMin = 30,
@@ -85,6 +94,10 @@ class Settings {
     this.model = 'openai/gpt-4o-mini',
     this.speechLocale = '',
     this.freezesPerMonth = 2,
+    this.wakeChallenge = WakeChallenge.off,
+    this.sleepHours = 7.5,
+    this.windDownMinutes = 30,
+    this.bedtimeReminder = true,
   }) : manualTimes = manualTimes ?? Map.of(defaultManualTimes);
 
   bool get hasLocation => latitude != null && longitude != null;
@@ -107,6 +120,10 @@ class Settings {
         'model': model,
         'speechLocale': speechLocale,
         'freezesPerMonth': freezesPerMonth,
+        'wakeChallenge': wakeChallenge.name,
+        'sleepHours': sleepHours,
+        'windDownMinutes': windDownMinutes,
+        'bedtimeReminder': bedtimeReminder,
       };
 
   factory Settings.fromJson(Map<String, dynamic> j) {
@@ -132,6 +149,10 @@ class Settings {
       model: (j['model'] as String?)?.trim().isNotEmpty == true ? j['model'] as String : d.model,
       speechLocale: j['speechLocale'] as String? ?? '',
       freezesPerMonth: (j['freezesPerMonth'] as num?)?.toInt() ?? d.freezesPerMonth,
+      wakeChallenge: WakeChallenge.values.firstWhere((c) => c.name == j['wakeChallenge'], orElse: () => d.wakeChallenge),
+      sleepHours: ((j['sleepHours'] as num?)?.toDouble() ?? d.sleepHours).clamp(3.0, 12.0),
+      windDownMinutes: ((j['windDownMinutes'] as num?)?.toInt() ?? d.windDownMinutes).clamp(0, 180),
+      bedtimeReminder: j['bedtimeReminder'] as bool? ?? d.bedtimeReminder,
     );
   }
 

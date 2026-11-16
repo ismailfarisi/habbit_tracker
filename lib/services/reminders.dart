@@ -1,10 +1,11 @@
 import '../habits/habit.dart';
+import '../logic/sleep.dart';
 import '../logic/stats.dart';
 import '../logic/tasks.dart';
 import '../models.dart';
 import 'prayer_service.dart';
 
-enum ReminderKind { wake, prayer, habit, task }
+enum ReminderKind { wake, prayer, habit, task, bedtime }
 
 class PlannedReminder {
   final int id;
@@ -14,7 +15,7 @@ class PlannedReminder {
   final String body;
 
   /// "wake|2026-11-08", "prayer:Fajr|2026-11-08", "habit:ID|2026-11-08",
-  /// "task:ID|2026-11-08"
+  /// "task:ID|2026-11-08", "bed|2026-11-08" (the night of that day)
   final String payload;
 
   const PlannedReminder({
@@ -34,8 +35,8 @@ const scheduleDays = 8;
 /// [maxPending] reminders are scheduled at a time.
 const maxPending = 60;
 
-/// Stable notification id for a date and slot (0 = wake, 1-5 = prayers;
-/// 6-9 are free for other built-in reminders), so a given day's reminder keeps its id across reschedules.
+/// Stable notification id for a date and slot (0 = wake, 1-5 = prayers,
+/// 6 = bedtime; 7-9 are free for other built-in reminders), so a given day's reminder keeps its id across reschedules.
 int reminderId(DateTime date, int slot) {
   final dayNumber = DateTime.utc(date.year, date.month, date.day).millisecondsSinceEpoch ~/ 86400000;
   return 100 + (dayNumber % 100000) * 10 + slot;
@@ -54,6 +55,9 @@ int habitReminderId(HabitDef h, DateTime date) {
   final dayNumber = DateTime.utc(date.year, date.month, date.day).millisecondsSinceEpoch ~/ 86400000;
   return 1200000000 + (dayNumber % 1000) * 100000 + h.seq % 100000;
 }
+
+/// [reminderId] slot of the nightly wind-down reminder.
+const bedtimeSlot = 6;
 
 /// Every reminder from [now] through the next [days] days, skipping ones
 /// that are in the past or for habits already completed.
@@ -116,6 +120,19 @@ List<PlannedReminder> planReminders(
       ));
     }
 
+    if (s.bedtimeReminder && log?.bedtimeAt == null) {
+      final bed = bedtimeFor(s, date);
+      out.add(PlannedReminder(
+        id: reminderId(date, bedtimeSlot),
+        when: windDownFor(s, date),
+        kind: ReminderKind.bedtime,
+        title: '🌙 Time to wind down',
+        body: 'Bed by ${_hm(bed)} for ${fmtSleep(sleepGoal(s))} of sleep before your ${fmtHm(s.wakeTime)} wake-up. '
+            'Tap "Going to bed" when you lie down.',
+        payload: 'bed|$key',
+      ));
+    }
+
     for (final t in tasks) {
       if (!t.isScheduledOn(date) || t.isDoneOn(date)) continue;
       final when = t.reminderOn(date);
@@ -159,6 +176,10 @@ bool applyDoneAction(String payload, Map<String, DayLog> logs, DateTime now) {
   final log = logs.putIfAbsent(key, DayLog.new);
   if (what == 'wake') {
     log.wakeAt ??= now;
+    return true;
+  }
+  if (what == 'bed') {
+    log.bedtimeAt ??= now;
     return true;
   }
   if (what.startsWith('prayer:')) {
