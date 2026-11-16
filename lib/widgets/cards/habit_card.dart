@@ -7,9 +7,9 @@ import '../../logic/stats.dart';
 import '../../screens/habit_detail_screen.dart';
 import 'section_card.dart';
 
-/// One habit on Today for [day]. Check, count and metric habits show their
-/// A2UI surface inline; timed habits (duration, practice) show progress and
-/// open the habit screen to practise.
+/// One habit on Today for [day]. Agent-built habits and check, count and
+/// metric habits show their A2UI surface inline; timed template habits
+/// (duration, practice) show progress and open the habit screen to practise.
 class HabitCard extends StatelessWidget {
   final AppState state;
   final HabitDef habit;
@@ -34,12 +34,13 @@ class HabitCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final entry = state.habitEntry(day, habit.id);
     final timed = habit.kind == HabitKind.duration || habit.kind == HabitKind.practice;
+    final compact = timed && !(habit.createdByAi && habit.uiSurface != null);
     return SectionCard(
       title: '${habit.emoji}  ${habit.title}',
       onTitleTap: () => _open(context),
       trailing: Chip(label: Text(progressLabel(habit, entry)), visualDensity: VisualDensity.compact),
       children: [
-        if (timed) ...[
+        if (compact) ...[
           LinearProgressIndicator(
             value: habitProgress(entry, habit),
             minHeight: 8,

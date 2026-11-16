@@ -4,21 +4,96 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../app_state.dart';
+import '../habits/habit.dart';
 import '../logic/stats.dart';
-import '../services/reminders.dart';
+import '../models.dart';
+import '../services/prayer_service.dart';
 import '../widgets/add_habit_sheet.dart';
 import '../widgets/cards/habit_card.dart';
 import '../widgets/cards/prayer_card.dart';
-import '../widgets/cards/section_card.dart';
 import '../widgets/cards/tasks_card.dart';
 import '../widgets/cards/wake_card.dart';
+import '../widgets/yesterday_prompt.dart';
 import 'habit_detail_screen.dart';
 import 'home_screen.dart';
+
+enum TodayKind { wake, prayers, habit, tasks }
+
+/// One card on Today: when it is next due (null = any time) and whether it
+/// is finished for the day.
+class TodayItem {
+  final TodayKind kind;
+  final DateTime? due;
+  final bool done;
+  final HabitDef? habit;
+  const TodayItem(this.kind, {this.due, required this.done, this.habit});
+
+  String get id => habit?.id ?? kind.name;
+
+  @override
+  String toString() => '$id${done ? ' (done)' : ''}';
+}
+
+/// Today's cards in time-of-day order: unfinished items first, the next due
+/// first, untimed habits after the timed ones; finished items last (shown
+/// collapsed under "Done"). Wake is due at the wake goal, prayers at the
+/// first prayer not yet prayed, habits at their reminder and tasks at the
+/// next unfinished timed task.
+List<TodayItem> todayItems(AppState state, DateTime now) {
+  final s = state.settings;
+  final log = state.logFor(now);
+  final times = prayerTimesFor(s, now).times;
+  final nextPrayer = prayerNames.where((p) => !log.prayers.contains(p)).firstOrNull;
+  DateTime at(TimeOfDay t) => DateTime(now.year, now.month, now.day, t.hour, t.minute);
+  final items = [
+    TodayItem(TodayKind.wake, due: at(s.wakeTime), done: log.wakeAt != null),
+    TodayItem(
+      TodayKind.prayers,
+      due: nextPrayer == null ? times[prayerNames.last] : times[nextPrayer],
+      done: nextPrayer == null,
+    ),
+    for (final h in state.activeHabits)
+      if (h.isScheduledOn(now))
+        TodayItem(
+          TodayKind.habit,
+          habit: h,
+          due: h.reminder == null ? null : at(parseHm(h.reminder!)),
+          done: habitDone(log.habits[h.id], h),
+        ),
+    TodayItem(TodayKind.tasks, due: TasksCard.nextDue(state, now), done: TasksCard.allDone(state, now)),
+  ];
+  int byDue(TodayItem a, TodayItem b) {
+    if (a.due == null || b.due == null) return (a.due == null ? 1 : 0) - (b.due == null ? 1 : 0);
+    return a.due!.compareTo(b.due!);
+  }
+
+  final pending = items.where((i) => !i.done).toList();
+  final done = items.where((i) => i.done).toList();
+  stableSort(pending, byDue);
+  stableSort(done, byDue);
+  return [...pending, ...done];
+}
+
+/// Insertion sort that keeps equal items in order.
+void stableSort<T>(List<T> list, int Function(T a, T b) compare) {
+  for (var i = 1; i < list.length; i++) {
+    final v = list[i];
+    var j = i - 1;
+    while (j >= 0 && compare(list[j], v) > 0) {
+      list[j + 1] = list[j];
+      j--;
+    }
+    list[j + 1] = v;
+  }
+}
 
 class TodayScreen extends StatefulWidget {
   final AppState state;
   final void Function(int tab) onNavigate;
-  const TodayScreen({super.key, required this.state, required this.onNavigate});
+
+  /// Current time; defaults to [DateTime.now] (tests pass a fixed clock).
+  final DateTime Function()? clock;
+  const TodayScreen({super.key, required this.state, required this.onNavigate, this.clock});
 
   @override
   State<TodayScreen> createState() => _TodayScreenState();
@@ -27,6 +102,7 @@ class TodayScreen extends StatefulWidget {
 class _TodayScreenState extends State<TodayScreen> {
   Timer? _tick;
   bool? _notifOn;
+  bool _showDone = false;
 
   @override
   void initState() {
@@ -44,7 +120,9 @@ class _TodayScreenState extends State<TodayScreen> {
     widget.state.requestedHabit.value = null;
     if (widget.state.habitById(id) == null) return;
     Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => HabitDetailScreen(state: widget.state, habitId: id)),
+      MaterialPageRoute<void>(
+        builder: (_) => HabitDetailScreen(state: widget.state, habitId: id),
+      ),
     );
   }
 
@@ -66,15 +144,37 @@ class _TodayScreenState extends State<TodayScreen> {
     await _checkNotifications();
   }
 
+  Widget _card(TodayItem i, DateTime now) {
+    final state = widget.state;
+    return switch (i.kind) {
+      TodayKind.wake => WakeCard(key: const ValueKey('today-wake'), state: state, log: state.logFor(now)),
+      TodayKind.prayers => PrayerCard(
+        key: const ValueKey('today-prayers'),
+        state: state,
+        log: state.logFor(now),
+        now: now,
+      ),
+      TodayKind.habit => HabitCard(key: ValueKey(i.habit!.id), state: state, habit: i.habit!, day: now),
+      TodayKind.tasks => TasksCard(
+        key: const ValueKey('today-tasks'),
+        state: state,
+        now: now,
+        onOpen: () => widget.onNavigate(HomeScreen.tasksTab),
+      ),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: widget.state,
       builder: (context, _) {
         final s = widget.state.settings;
-        final now = DateTime.now();
-        final log = widget.state.today;
+        final now = (widget.clock ?? DateTime.now)();
         final score = dayScore(now, s, widget.state.logs, habits: widget.state.habits, tasks: widget.state.tasks);
+        final items = todayItems(widget.state, now);
+        final pending = items.where((i) => !i.done).toList();
+        final done = items.where((i) => i.done).toList();
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -94,10 +194,8 @@ class _TodayScreenState extends State<TodayScreen> {
                 action: 'Set up',
                 onTap: () => widget.onNavigate(HomeScreen.settingsTab),
               ),
-            WakeCard(state: widget.state, log: log),
-            PrayerCard(state: widget.state, log: log, now: now),
-            for (final h in widget.state.activeHabits)
-              if (h.isScheduledOn(now)) HabitCard(key: ValueKey(h.id), state: widget.state, habit: h, day: now),
+            YesterdayPrompt(state: widget.state, now: now),
+            for (final i in pending) _card(i, now),
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: OutlinedButton.icon(
@@ -106,8 +204,18 @@ class _TodayScreenState extends State<TodayScreen> {
                 label: const Text('Add habit'),
               ),
             ),
-            TasksCard(state: widget.state, now: now, onOpen: () => widget.onNavigate(HomeScreen.tasksTab)),
-            _UpcomingCard(state: widget.state, now: now),
+            if (done.isNotEmpty) ...[
+              ListTile(
+                key: const ValueKey('today-done'),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                leading: const Icon(Icons.check_circle_outline),
+                title: Text('Done (${done.length})', style: const TextStyle(fontWeight: FontWeight.w600)),
+                trailing: Icon(_showDone ? Icons.expand_less : Icons.expand_more),
+                onTap: () => setState(() => _showDone = !_showDone),
+              ),
+              if (_showDone)
+                for (final i in done) _card(i, now),
+            ],
           ],
         );
       },
@@ -131,7 +239,10 @@ class _Header extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(greeting, style: t.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-              Text(DateFormat('EEEE, d MMMM').format(now), style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+              Text(
+                DateFormat('EEEE, d MMMM').format(now),
+                style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
+              ),
             ],
           ),
         ),
@@ -146,7 +257,9 @@ class _Header extends StatelessWidget {
                 strokeWidth: 6,
                 backgroundColor: t.colorScheme.surfaceContainerHighest,
               ),
-              Center(child: Text('$score', style: const TextStyle(fontWeight: FontWeight.bold))),
+              Center(
+                child: Text('$score', style: const TextStyle(fontWeight: FontWeight.bold)),
+              ),
             ],
           ),
         ),
@@ -173,48 +286,13 @@ class _Banner extends StatelessWidget {
           children: [
             Icon(icon, color: c.onTertiaryContainer),
             const SizedBox(width: 12),
-            Expanded(child: Text(text, style: TextStyle(color: c.onTertiaryContainer))),
+            Expanded(
+              child: Text(text, style: TextStyle(color: c.onTertiaryContainer)),
+            ),
             TextButton(onPressed: onTap, child: Text(action)),
           ],
         ),
       ),
-    );
-  }
-}
-
-class _UpcomingCard extends StatelessWidget {
-  final AppState state;
-  final DateTime now;
-  const _UpcomingCard({required this.state, required this.now});
-
-  @override
-  Widget build(BuildContext context) {
-    final s = state.settings;
-    final upcoming = planReminders(s, state.logs, now, days: 2, tasks: state.tasks, habits: state.habits).take(5).toList();
-    return SectionCard(
-      title: '⏰  Upcoming reminders',
-      children: [
-        if (!s.remindersEnabled)
-          const Text('Reminders are turned off in Settings.')
-        else if (upcoming.isEmpty)
-          const Text('Nothing pending. All done!')
-        else
-          for (final r in upcoming)
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              leading: Icon(switch (r.kind) {
-                ReminderKind.wake => Icons.alarm,
-                ReminderKind.prayer => Icons.mosque_outlined,
-                ReminderKind.habit => Icons.repeat,
-                ReminderKind.task => Icons.task_alt,
-              }),
-              title: Text(r.title),
-              trailing: Text(
-                (dateOnly(r.when) == dateOnly(now) ? '' : 'Tomorrow ') + DateFormat.jm().format(r.when),
-              ),
-            ),
-      ],
     );
   }
 }

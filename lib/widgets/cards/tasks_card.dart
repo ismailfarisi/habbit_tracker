@@ -2,19 +2,44 @@ import 'package:flutter/material.dart';
 
 import '../../app_state.dart';
 import '../../logic/tasks.dart';
+import '../../models.dart';
 import '../task_editor.dart';
 import 'section_card.dart';
 
-/// Today's tasks with quick add and the link to the planner.
+/// Today's tasks (unfinished first, in time order) with quick add and the
+/// link to the planner.
 class TasksCard extends StatelessWidget {
   final AppState state;
   final DateTime now;
   final VoidCallback onOpen;
   const TasksCard({super.key, required this.state, required this.now, required this.onOpen});
 
+  /// Today's tasks, unfinished ones first, each group in time order.
+  static List<Task> ordered(AppState state, DateTime now) {
+    final tasks = tasksForDay(state.tasks, now, today: now);
+    return [...tasks.where((t) => !t.isDoneOn(now)), ...tasks.where((t) => t.isDoneOn(now))];
+  }
+
+  /// When the next unfinished task with a time is due, if any.
+  static DateTime? nextDue(AppState state, DateTime now) {
+    DateTime? best;
+    for (final t in tasksForDay(state.tasks, now, today: now)) {
+      if (t.isDoneOn(now)) continue;
+      final at = t.reminderOn(now);
+      if (at != null && (best == null || at.isBefore(best))) best = at;
+    }
+    return best;
+  }
+
+  /// Whether there are tasks today and all are done.
+  static bool allDone(AppState state, DateTime now) {
+    final tasks = tasksForDay(state.tasks, now, today: now);
+    return tasks.isNotEmpty && tasks.every((t) => t.isDoneOn(now));
+  }
+
   @override
   Widget build(BuildContext context) {
-    final tasks = tasksForDay(state.tasks, now, today: now);
+    final tasks = ordered(state, now);
     final done = tasks.where((t) => t.isDoneOn(now)).length;
     return SectionCard(
       title: '📝  Tasks',
