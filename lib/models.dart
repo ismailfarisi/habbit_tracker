@@ -67,6 +67,12 @@ class Settings {
   /// Missed days per calendar month that don't break the perfect-day streak.
   int freezesPerMonth;
 
+  /// First-run onboarding finished (or skipped by an existing install).
+  bool onboarded;
+
+  /// Sleep goal in hours, asked during onboarding.
+  double sleepHours;
+
   Settings({
     this.wakeTime = const TimeOfDay(hour: 5, minute: 0),
     this.wakeGraceMin = 30,
@@ -85,6 +91,8 @@ class Settings {
     this.model = 'openai/gpt-4o-mini',
     this.speechLocale = '',
     this.freezesPerMonth = 2,
+    this.onboarded = false,
+    this.sleepHours = 7.5,
   }) : manualTimes = manualTimes ?? Map.of(defaultManualTimes);
 
   bool get hasLocation => latitude != null && longitude != null;
@@ -107,6 +115,8 @@ class Settings {
         'model': model,
         'speechLocale': speechLocale,
         'freezesPerMonth': freezesPerMonth,
+        'onboarded': onboarded,
+        'sleepHours': sleepHours,
       };
 
   factory Settings.fromJson(Map<String, dynamic> j) {
@@ -132,6 +142,8 @@ class Settings {
       model: (j['model'] as String?)?.trim().isNotEmpty == true ? j['model'] as String : d.model,
       speechLocale: j['speechLocale'] as String? ?? '',
       freezesPerMonth: (j['freezesPerMonth'] as num?)?.toInt() ?? d.freezesPerMonth,
+      onboarded: j['onboarded'] as bool? ?? true,
+      sleepHours: (j['sleepHours'] as num?)?.toDouble() ?? d.sleepHours,
     );
   }
 

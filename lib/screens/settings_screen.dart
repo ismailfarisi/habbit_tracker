@@ -24,21 +24,17 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  late final _apiKey = TextEditingController(text: widget.state.apiKey);
-  late final _model = TextEditingController(text: widget.state.settings.model);
   late final _lat = TextEditingController(text: widget.state.settings.latitude?.toStringAsFixed(4) ?? '');
   late final _lng = TextEditingController(text: widget.state.settings.longitude?.toStringAsFixed(4) ?? '');
   late final _locName = TextEditingController(text: widget.state.settings.locationName);
   bool _locating = false;
-  bool _hideKey = true;
-  String _aiStatus = '';
 
   AppState get state => widget.state;
   Settings get s => state.settings;
 
   @override
   void dispose() {
-    for (final c in [_apiKey, _model, _lat, _lng, _locName]) {
+    for (final c in [_lat, _lng, _locName]) {
       c.dispose();
     }
     super.dispose();
@@ -92,30 +88,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _snack('Location saved. Prayer times updated.');
   }
 
-  Future<void> _testAi() async {
-    await state.setApiKey(_apiKey.text);
-    await state.updateSettings((x) => x.model = _model.text.trim().isEmpty ? 'openai/gpt-4o-mini' : _model.text.trim());
-    setState(() => _aiStatus = 'Testing…');
-    final client = OpenRouterClient(apiKey: state.apiKey, model: s.model);
-    try {
-      final reply = await client.complete([
-        const ChatMessage('user', 'Reply with exactly: Coach ready!'),
-      ], temperature: 0);
-      setState(() => _aiStatus = '✅ ${reply.trim()}');
-    } catch (e) {
-      setState(() => _aiStatus = '❌ $e');
-    } finally {
-      client.close();
-    }
-  }
-
   Future<void> _import() async {
     final ctl = TextEditingController();
     final raw = await showDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('Import backup'),
-        content: TextField(controller: ctl, maxLines: 8, decoration: const InputDecoration(hintText: 'Paste backup JSON here')),
+        content: TextField(
+          controller: ctl,
+          maxLines: 8,
+          decoration: const InputDecoration(hintText: 'Paste backup JSON here'),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(c, ctl.text), child: const Text('Import')),
@@ -147,8 +130,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (ok != true) return;
     await state.resetAll();
-    _apiKey.clear();
-    _model.text = s.model;
     _lat.clear();
     _lng.clear();
     _locName.clear();
@@ -162,10 +143,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (c) => StatefulBuilder(
         builder: (c, set) => AlertDialog(
           title: Text(title),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text('$v $unit', style: Theme.of(c).textTheme.headlineMedium),
-            Slider(value: v.toDouble(), min: min.toDouble(), max: max.toDouble(), divisions: max - min, onChanged: (x) => set(() => v = x.round())),
-          ]),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('$v $unit', style: Theme.of(c).textTheme.headlineMedium),
+              Slider(
+                value: v.toDouble(),
+                min: min.toDouble(),
+                max: max.toDouble(),
+                divisions: max - min,
+                onChanged: (x) => set(() => v = x.round()),
+              ),
+            ],
+          ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
             FilledButton(onPressed: () => Navigator.pop(c, v), child: const Text('Save')),
@@ -184,7 +174,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text('Settings', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+            child: Text(
+              'Settings',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+            ),
           ),
           _header('Wake up'),
           ListTile(
@@ -216,54 +209,67 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _header('Prayer times'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              FilledButton.tonalIcon(
-                onPressed: _locating ? null : _useMyLocation,
-                icon: _locating
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.my_location),
-                label: const Text('Use my current location'),
-              ),
-              const SizedBox(height: 12),
-              TextField(controller: _locName, decoration: const InputDecoration(labelText: 'Place name (optional)', border: OutlineInputBorder())),
-              const SizedBox(height: 8),
-              Row(children: [
-                Expanded(
-                  child: TextField(
-                    controller: _lat,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                    decoration: const InputDecoration(labelText: 'Latitude', border: OutlineInputBorder()),
-                  ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: _locating ? null : _useMyLocation,
+                  icon: _locating
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.my_location),
+                  label: const Text('Use my current location'),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _lng,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                    decoration: const InputDecoration(labelText: 'Longitude', border: OutlineInputBorder()),
-                  ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _locName,
+                  decoration: const InputDecoration(labelText: 'Place name (optional)', border: OutlineInputBorder()),
                 ),
-              ]),
-              Align(alignment: Alignment.centerRight, child: TextButton(onPressed: _saveLocation, child: const Text('Save location'))),
-              DropdownButtonFormField<String>(
-                initialValue: s.calcMethod,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Calculation method', border: OutlineInputBorder()),
-                items: [for (final e in calcMethodLabels.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
-                onChanged: (v) => state.updateSettings((x) => x.calcMethod = v ?? x.calcMethod),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: s.madhab,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Asr calculation', border: OutlineInputBorder()),
-                items: const [
-                  DropdownMenuItem(value: 'shafi', child: Text("Standard (Shafi'i, Maliki, Hanbali)")),
-                  DropdownMenuItem(value: 'hanafi', child: Text('Hanafi')),
-                ],
-                onChanged: (v) => state.updateSettings((x) => x.madhab = v ?? x.madhab),
-              ),
-            ]),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _lat,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                        decoration: const InputDecoration(labelText: 'Latitude', border: OutlineInputBorder()),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: _lng,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                        decoration: const InputDecoration(labelText: 'Longitude', border: OutlineInputBorder()),
+                      ),
+                    ),
+                  ],
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(onPressed: _saveLocation, child: const Text('Save location')),
+                ),
+                DropdownButtonFormField<String>(
+                  initialValue: s.calcMethod,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Calculation method', border: OutlineInputBorder()),
+                  items: [
+                    for (final e in calcMethodLabels.entries) DropdownMenuItem(value: e.key, child: Text(e.value)),
+                  ],
+                  onChanged: (v) => state.updateSettings((x) => x.calcMethod = v ?? x.calcMethod),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: s.madhab,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Asr calculation', border: OutlineInputBorder()),
+                  items: const [
+                    DropdownMenuItem(value: 'shafi', child: Text("Standard (Shafi'i, Maliki, Hanbali)")),
+                    DropdownMenuItem(value: 'hanafi', child: Text('Hanafi')),
+                  ],
+                  onChanged: (v) => state.updateSettings((x) => x.madhab = v ?? x.madhab),
+                ),
+              ],
+            ),
           ),
           SwitchListTile(
             title: const Text('Use manual prayer times'),
@@ -287,7 +293,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ListTile(
             leading: const Icon(Icons.ac_unit),
             title: const Text('Streak freezes per month'),
-            subtitle: Text('${s.freezesPerMonth} missed ${s.freezesPerMonth == 1 ? 'day' : 'days'} a month keep your perfect-day streak'),
+            subtitle: Text(
+              '${s.freezesPerMonth} missed ${s.freezesPerMonth == 1 ? 'day' : 'days'} a month keep your perfect-day streak',
+            ),
             onTap: () async {
               final v = await _pickNumber('Streak freezes per month', s.freezesPerMonth, 0, 10);
               if (v != null) await state.updateSettings((x) => x.freezesPerMonth = v);
@@ -313,67 +321,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Wrap(spacing: 8, children: [
-              OutlinedButton(
-                onPressed: () async {
-                  final ok = await state.notifications.requestPermissions();
-                  await state.rescheduleNow();
-                  _snack(ok ? 'Notifications allowed.' : 'Notifications are blocked. Enable them in system settings.');
-                },
-                child: const Text('Grant permissions'),
-              ),
-              OutlinedButton(onPressed: () => state.notifications.showTest(s), child: const Text('Send test notification')),
-            ]),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                OutlinedButton(
+                  onPressed: () async {
+                    final ok = await state.notifications.requestPermissions();
+                    await state.rescheduleNow();
+                    _snack(
+                      ok ? 'Notifications allowed.' : 'Notifications are blocked. Enable them in system settings.',
+                    );
+                  },
+                  child: const Text('Grant permissions'),
+                ),
+                OutlinedButton(
+                  onPressed: () => state.notifications.showTest(s),
+                  child: const Text('Send test notification'),
+                ),
+              ],
+            ),
           ),
 
           _header('AI coach (OpenRouter)'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              TextField(
-                controller: _apiKey,
-                obscureText: _hideKey,
-                autocorrect: false,
-                enableSuggestions: false,
-                onChanged: state.setApiKey,
-                decoration: InputDecoration(
-                  labelText: 'API key',
-                  hintText: 'sk-or-v1-…',
-                  helperText: 'Get one at openrouter.ai/keys. Stored encrypted on this device.',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    icon: Icon(_hideKey ? Icons.visibility : Icons.visibility_off),
-                    onPressed: () => setState(() => _hideKey = !_hideKey),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _model,
-                autocorrect: false,
-                onSubmitted: (v) => state.updateSettings((x) => x.model = v.trim().isEmpty ? x.model : v.trim()),
-                decoration: InputDecoration(
-                  labelText: 'Model',
-                  helperText: 'Any model ID from openrouter.ai/models',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: PopupMenuButton<String>(
-                    icon: const Icon(Icons.arrow_drop_down),
-                    onSelected: (v) {
-                      _model.text = v;
-                      state.updateSettings((x) => x.model = v);
-                    },
-                    itemBuilder: (_) => [for (final m in _suggestedModels) PopupMenuItem(value: m, child: Text(m))],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(children: [
-                OutlinedButton(onPressed: _testAi, child: const Text('Save & test')),
-                const SizedBox(width: 12),
-                Expanded(child: Text(_aiStatus, style: Theme.of(context).textTheme.bodySmall)),
-              ]),
-            ]),
-          ),
+          AiKeySection(state: state),
 
           _header('Data'),
           ListTile(
@@ -398,7 +368,184 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _header(String text) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 24, 16, 4),
-        child: Text(text, style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.primary)),
-      );
+    padding: const EdgeInsets.fromLTRB(16, 24, 16, 4),
+    child: Text(
+      text,
+      style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.primary),
+    ),
+  );
+}
+
+/// Opens Settings as a page (the gear icon in the app bar). With
+/// [aiKeyOnly] it opens just the AI key section.
+Future<void> openSettings(BuildContext context, AppState state, {bool aiKeyOnly = false}) {
+  return Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: aiKeyOnly ? const Text('AI coach') : null),
+        body: SafeArea(
+          child: aiKeyOnly
+              ? ListView(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  children: [AiKeySection(state: state)],
+                )
+              : SettingsScreen(state: state),
+        ),
+      ),
+    ),
+  );
+}
+
+/// The OpenRouter key and model fields with a "Save & test" check. Used in
+/// Settings and in onboarding (with [showModel] false).
+class AiKeySection extends StatefulWidget {
+  final AppState state;
+  final bool showModel;
+  const AiKeySection({super.key, required this.state, this.showModel = true});
+
+  @override
+  State<AiKeySection> createState() => _AiKeySectionState();
+}
+
+class _AiKeySectionState extends State<AiKeySection> {
+  late final _apiKey = TextEditingController(text: widget.state.apiKey);
+  late final _model = TextEditingController(text: widget.state.settings.model);
+  bool _hideKey = true;
+  String _status = '';
+
+  AppState get state => widget.state;
+
+  @override
+  void initState() {
+    super.initState();
+    state.addListener(_sync);
+  }
+
+  @override
+  void dispose() {
+    state.removeListener(_sync);
+    _apiKey.dispose();
+    _model.dispose();
+    super.dispose();
+  }
+
+  /// Picks up outside changes (e.g. "Reset all data").
+  void _sync() {
+    if (state.apiKey != _apiKey.text.trim()) _apiKey.text = state.apiKey;
+    if (state.settings.model != _model.text.trim() && _model.text.trim().isNotEmpty) _model.text = state.settings.model;
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _test() async {
+    await state.setApiKey(_apiKey.text);
+    await state.updateSettings((x) => x.model = _model.text.trim().isEmpty ? 'openai/gpt-4o-mini' : _model.text.trim());
+    if (state.apiKey.isEmpty) {
+      setState(() => _status = 'Paste your key first.');
+      return;
+    }
+    setState(() => _status = 'Testing…');
+    final client = OpenRouterClient(apiKey: state.apiKey, model: state.settings.model);
+    try {
+      final reply = await client.complete([
+        const ChatMessage('user', 'Reply with exactly: Coach ready!'),
+      ], temperature: 0);
+      if (mounted) setState(() => _status = '✅ ${reply.trim()}');
+    } catch (e) {
+      if (mounted) setState(() => _status = '❌ $e');
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> _remove() async {
+    _apiKey.clear();
+    await state.setApiKey('');
+    if (mounted) setState(() => _status = 'Key removed. Templates still work; the coach is off.');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final on = state.apiKey.isNotEmpty;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                on ? Icons.check_circle : Icons.info_outline,
+                size: 18,
+                color: on ? t.colorScheme.primary : t.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  on
+                      ? 'The coach is on: it can build habits and plan tasks for you.'
+                      : 'Optional. Without a key everything works except the AI coach; habit templates are always available.',
+                  style: t.textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _apiKey,
+            obscureText: _hideKey,
+            autocorrect: false,
+            enableSuggestions: false,
+            onChanged: state.setApiKey,
+            decoration: InputDecoration(
+              labelText: 'API key',
+              hintText: 'sk-or-v1-…',
+              helperText: 'Get one at openrouter.ai/keys. Stored encrypted on this device.',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                tooltip: _hideKey ? 'Show key' : 'Hide key',
+                icon: Icon(_hideKey ? Icons.visibility : Icons.visibility_off),
+                onPressed: () => setState(() => _hideKey = !_hideKey),
+              ),
+            ),
+          ),
+          if (widget.showModel) ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: _model,
+              autocorrect: false,
+              onSubmitted: (v) => state.updateSettings((x) => x.model = v.trim().isEmpty ? x.model : v.trim()),
+              decoration: InputDecoration(
+                labelText: 'Model',
+                helperText: 'Any model ID from openrouter.ai/models',
+                border: const OutlineInputBorder(),
+                suffixIcon: PopupMenuButton<String>(
+                  icon: const Icon(Icons.arrow_drop_down),
+                  onSelected: (v) {
+                    _model.text = v;
+                    state.updateSettings((x) => x.model = v);
+                  },
+                  itemBuilder: (_) => [for (final m in _suggestedModels) PopupMenuItem(value: m, child: Text(m))],
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              OutlinedButton(onPressed: _test, child: const Text('Save & test')),
+              if (on) TextButton(onPressed: _remove, child: const Text('Remove key')),
+            ],
+          ),
+          if (_status.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(_status, style: t.textTheme.bodySmall),
+            ),
+        ],
+      ),
+    );
+  }
 }
