@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../app_state.dart';
 import '../logic/stats.dart';
+import '../logic/tasks.dart';
 import '../models.dart';
 
 enum _Cell { done, partial, late, missed }
@@ -21,13 +22,15 @@ class StatsScreen extends StatelessWidget {
         final t = Theme.of(context);
 
         bool wake(DayLog? l) => wakeDone(l, s);
-        bool train(DayLog? l) => trainingDone(l, s);
-        bool perfect(DayLog? l) => dailyScore(l, s) == maxDailyScore;
+        final habits = state.activeHabits;
+        final routines = state.tasks.where((x) => x.isRepeating).toList();
+        final perfect = perfectDayStreak(s, logs, habits: state.habits, tasks: state.tasks);
 
         final today = dateOnly(DateTime.now());
         final days = [for (var i = 29; i >= 0; i--) DateTime(today.year, today.month, today.day - i)];
         final last30 = days.map((d) => logs[dayKey(d)]).toList();
-        final pct = last30.map((l) => dailyScore(l, s)).fold(0, (a, b) => a + b) / (30 * maxDailyScore);
+        final scores = days.map((d) => dayScore(d, s, logs, habits: state.habits, tasks: state.tasks)).toList();
+        final pct = scores.fold(0, (a, b) => a + b.done) / scores.fold(0, (a, b) => a + b.total);
 
         return ListView(
           padding: const EdgeInsets.all(16),
@@ -46,8 +49,10 @@ class StatsScreen extends StatelessWidget {
               children: [
                 _StreakTile('☀️ Early rising', streak(logs, wake), bestStreak(logs, wake)),
                 _StreakTile('🕌 All 5 prayers', streak(logs, prayersDone), bestStreak(logs, prayersDone)),
-                _StreakTile('🗣️ Training goal', streak(logs, train), bestStreak(logs, train)),
-                _StreakTile('⭐ Perfect days', streak(logs, perfect), bestStreak(logs, perfect)),
+                _StreakTile('⭐ Perfect days', perfect.current, perfect.best),
+                for (final h in habits)
+                  _StreakTile('${h.emoji} ${h.title}', habitStreak(logs, h).current, habitStreak(logs, h).best),
+                for (final r in routines) _StreakTile('📝 ${r.title}', taskStreak(r).current, taskStreak(r).best),
               ],
             ),
             const SizedBox(height: 12),
@@ -67,10 +72,13 @@ class StatsScreen extends StatelessWidget {
                       })),
                   for (final p in prayerNames)
                     _row(context, p, last30.map((l) => (l?.prayers.contains(p) ?? false) ? _Cell.done : _Cell.missed)),
-                  _row(context, 'Training', last30.map((l) {
-                    final m = l?.trainingMinutes ?? 0;
-                    return m >= s.trainingGoalMin ? _Cell.done : (m > 0 ? _Cell.partial : _Cell.missed);
-                  })),
+                  for (final h in habits)
+                    _row(context, h.title, days.map((d) {
+                      final e = logs[dayKey(d)]?.habits[h.id];
+                      return habitDone(e, h) ? _Cell.done : (habitProgress(e, h) > 0 ? _Cell.partial : _Cell.missed);
+                    })),
+                  for (final r in routines)
+                    _row(context, r.title, days.map((d) => r.isDoneOn(d) ? _Cell.done : _Cell.missed)),
                   const SizedBox(height: 8),
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                     Text(DateFormat('d MMM').format(days.first), style: t.textTheme.bodySmall),
@@ -105,7 +113,10 @@ class StatsScreen extends StatelessWidget {
   Widget _row(BuildContext context, String label, Iterable<_Cell> cells) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),
         child: Row(children: [
-          SizedBox(width: 64, child: Text(label, style: Theme.of(context).textTheme.bodySmall)),
+          SizedBox(
+            width: 64,
+            child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
+          ),
           for (final c in cells)
             Expanded(
               child: AspectRatio(
@@ -140,7 +151,7 @@ class _StreakTile extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-          Text(label, style: t.textTheme.bodySmall),
+          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.textTheme.bodySmall),
           Text('$current ${current == 1 ? 'day' : 'days'}', style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
           Text('Best: $best', style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
         ]),

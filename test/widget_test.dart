@@ -36,7 +36,7 @@ void main() {
     addTearDown(tester.view.reset);
     await pumpApp(tester);
     expect(find.textContaining('Wake up early'), findsOneWidget);
-    for (final tab in ['Tasks', 'Train', 'Stats', 'Settings', 'Today']) {
+    for (final tab in ['Tasks', 'Progress', 'Settings', 'Today']) {
       await tester.tap(find.text(tab).last);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: tab);

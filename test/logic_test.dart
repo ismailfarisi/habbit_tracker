@@ -22,12 +22,11 @@ void main() {
   });
 
   group('streaks', () {
-    final s = Settings(trainingGoalMin: 10);
     final today = DateTime(2026, 3, 10);
     Map<String, DayLog> logs(List<int> daysAgo) => {
-          for (final d in daysAgo) dayKey(DateTime(2026, 3, 10 - d)): DayLog(trainingMinutes: 10),
+          for (final d in daysAgo) dayKey(DateTime(2026, 3, 10 - d)): DayLog(prayers: prayerNames.toSet()),
         };
-    bool done(DayLog? l) => trainingDone(l, s);
+    bool done(DayLog? l) => prayersDone(l);
 
     test('counts back from today', () {
       expect(streak(logs([0, 1, 2]), done, today: today), 3);
@@ -45,12 +44,6 @@ void main() {
     test('best streak', () {
       expect(bestStreak(logs([0, 1, 5, 6, 7, 8]), done), 4);
     });
-  });
-
-  test('daily score', () {
-    final s = Settings(wakeTime: const TimeOfDay(hour: 5, minute: 0), trainingGoalMin: 15);
-    final log = DayLog(wakeAt: DateTime(2026, 1, 1, 4, 55), prayers: {'Fajr', 'Dhuhr'}, trainingMinutes: 15);
-    expect(dailyScore(log, s), 4);
   });
 
   group('settings', () {

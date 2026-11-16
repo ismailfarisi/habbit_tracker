@@ -7,6 +7,7 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
+import '../habits/habit.dart';
 import '../models.dart';
 import 'reminders.dart';
 import 'storage.dart';
@@ -119,18 +120,18 @@ class NotificationService {
     final doneLabel = switch (kind) {
       ReminderKind.wake => "I'm up",
       ReminderKind.prayer => 'Prayed',
-      ReminderKind.training => 'Open coach',
+      ReminderKind.habit => 'Open',
       ReminderKind.task => 'Done',
     };
     final actions = [
       AndroidNotificationAction(
         _doneAction,
         doneLabel,
-        showsUserInterface: kind == ReminderKind.training,
+        showsUserInterface: kind == ReminderKind.habit,
       ),
     ];
     final ios = DarwinNotificationDetails(
-      categoryIdentifier: kind == ReminderKind.training ? null : _habitCategory,
+      categoryIdentifier: kind == ReminderKind.habit ? null : _habitCategory,
       interruptionLevel: kind == ReminderKind.wake ? InterruptionLevel.timeSensitive : InterruptionLevel.active,
     );
     if (kind == ReminderKind.wake && s.wakeAlarmLoud) {
@@ -156,7 +157,7 @@ class NotificationService {
     final (channel, name) = switch (kind) {
       ReminderKind.wake => ('wake', 'Wake-up reminder'),
       ReminderKind.prayer => ('prayer', 'Prayer reminders'),
-      ReminderKind.training => ('training', 'Training reminders'),
+      ReminderKind.habit => ('habits', 'Habit reminders'),
       ReminderKind.task => ('tasks', 'Task reminders'),
     };
     return NotificationDetails(
@@ -173,13 +174,18 @@ class NotificationService {
   }
 
   /// Replaces all pending reminders with a fresh plan.
-  Future<void> reschedule(Settings s, Map<String, DayLog> logs, List<Task> tasks) async {
+  Future<void> reschedule(
+    Settings s,
+    Map<String, DayLog> logs,
+    List<Task> tasks, {
+    List<HabitDef> habits = const [],
+  }) async {
     if (!_ready) return;
     await _plugin.cancelAllPendingNotifications();
     if (!s.remindersEnabled) return;
 
     final exact = _android == null || (await _android!.canScheduleExactNotifications() ?? false);
-    for (final r in planReminders(s, logs, DateTime.now(), tasks: tasks).take(maxPending)) {
+    for (final r in planReminders(s, logs, DateTime.now(), tasks: tasks, habits: habits).take(maxPending)) {
       final mode = !exact
           ? AndroidScheduleMode.inexactAllowWhileIdle
           : r.kind == ReminderKind.wake
@@ -210,7 +216,7 @@ class NotificationService {
     await _plugin.show(
       id: 1,
       title: '✅ Reminders are working',
-      body: 'You will be reminded to wake up, pray and train.',
+      body: 'You will be reminded to wake up, pray and keep your habits.',
       notificationDetails: _details(ReminderKind.prayer, s),
     );
   }

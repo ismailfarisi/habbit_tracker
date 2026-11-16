@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'habits/habit.dart';
+
 /// The five daily prayers, in order.
 const prayerNames = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 
@@ -54,11 +56,16 @@ class Settings {
   bool remindersEnabled;
   int prayerOffsetMin;
   bool wakeAlarmLoud;
+  /// Legacy (v1): only read when migrating the old articulation trainer
+  /// into the "Articulation practice" habit.
   TimeOfDay trainingTime;
   int trainingGoalMin;
 
   String model;
   String speechLocale;
+
+  /// Missed days per calendar month that don't break the perfect-day streak.
+  int freezesPerMonth;
 
   Settings({
     this.wakeTime = const TimeOfDay(hour: 5, minute: 0),
@@ -77,6 +84,7 @@ class Settings {
     this.trainingGoalMin = 15,
     this.model = 'openai/gpt-4o-mini',
     this.speechLocale = '',
+    this.freezesPerMonth = 2,
   }) : manualTimes = manualTimes ?? Map.of(defaultManualTimes);
 
   bool get hasLocation => latitude != null && longitude != null;
@@ -98,6 +106,7 @@ class Settings {
         'trainingGoalMin': trainingGoalMin,
         'model': model,
         'speechLocale': speechLocale,
+        'freezesPerMonth': freezesPerMonth,
       };
 
   factory Settings.fromJson(Map<String, dynamic> j) {
@@ -122,34 +131,82 @@ class Settings {
       trainingGoalMin: (j['trainingGoalMin'] as num?)?.toInt() ?? d.trainingGoalMin,
       model: (j['model'] as String?)?.trim().isNotEmpty == true ? j['model'] as String : d.model,
       speechLocale: j['speechLocale'] as String? ?? '',
+      freezesPerMonth: (j['freezesPerMonth'] as num?)?.toInt() ?? d.freezesPerMonth,
     );
   }
 
   Settings copy() => Settings.fromJson(toJson());
 }
 
+/// Prayer statuses stored in [DayLog.prayerStatus].
+const prayerOnTime = 'onTime', prayerLate = 'late', prayerQada = 'qada';
+const prayerStatuses = [prayerOnTime, prayerLate, prayerQada];
+
 /// What happened on a single day.
 class DayLog {
   DateTime? wakeAt;
+
+  /// Prayers done that day (whatever their status).
   Set<String> prayers;
-  int trainingMinutes;
 
-  DayLog({this.wakeAt, Set<String>? prayers, this.trainingMinutes = 0})
-      : prayers = prayers ?? <String>{};
+  /// 'onTime' | 'late' | 'qada' per prayer in [prayers]. A prayer without a
+  /// status counts as on time.
+  Map<String, String> prayerStatus;
+  DateTime? bedtimeAt;
 
-  bool get isEmpty => wakeAt == null && prayers.isEmpty && trainingMinutes == 0;
+  /// Entries keyed by `HabitDef.id`.
+  Map<String, HabitEntry> habits;
+
+  DayLog({
+    this.wakeAt,
+    Set<String>? prayers,
+    Map<String, String>? prayerStatus,
+    this.bedtimeAt,
+    Map<String, HabitEntry>? habits,
+  })  : prayers = prayers ?? <String>{},
+        prayerStatus = prayerStatus ?? {},
+        habits = habits ?? {};
+
+  bool get isEmpty =>
+      wakeAt == null && bedtimeAt == null && prayers.isEmpty && habits.values.every((e) => e.isEmpty);
 
   Map<String, dynamic> toJson() => {
         if (wakeAt != null) 'wakeAt': wakeAt!.toIso8601String(),
+        if (bedtimeAt != null) 'bedtimeAt': bedtimeAt!.toIso8601String(),
         'prayers': prayers.toList(),
-        'trainingMinutes': trainingMinutes,
+        if (prayerStatus.isNotEmpty) 'prayerStatus': prayerStatus,
+        if (habits.isNotEmpty)
+          'habits': {
+            for (final e in habits.entries)
+              if (!e.value.isEmpty) e.key: e.value.toJson(),
+          },
       };
 
-  factory DayLog.fromJson(Map<String, dynamic> j) => DayLog(
-        wakeAt: j['wakeAt'] == null ? null : DateTime.tryParse(j['wakeAt'] as String),
-        prayers: ((j['prayers'] as List?) ?? const []).cast<String>().toSet(),
-        trainingMinutes: (j['trainingMinutes'] as num?)?.toInt() ?? 0,
-      );
+  /// Also reads v1 logs: `trainingMinutes` becomes the minutes of the
+  /// [articulationHabitId] entry.
+  factory DayLog.fromJson(Map<String, dynamic> j) {
+    final prayers = ((j['prayers'] as List?) ?? const []).map((e) => e.toString()).toSet();
+    final habits = <String, HabitEntry>{
+      if (j['habits'] is Map)
+        for (final e in (j['habits'] as Map).entries)
+          if (e.value is Map) e.key.toString(): HabitEntry.fromJson((e.value as Map).cast<String, dynamic>()),
+    };
+    final training = (j['trainingMinutes'] as num?)?.toInt() ?? 0;
+    if (training > 0 && !habits.containsKey(articulationHabitId)) {
+      habits[articulationHabitId] = HabitEntry(minutes: training);
+    }
+    return DayLog(
+      wakeAt: j['wakeAt'] == null ? null : DateTime.tryParse(j['wakeAt'].toString()),
+      bedtimeAt: j['bedtimeAt'] == null ? null : DateTime.tryParse(j['bedtimeAt'].toString()),
+      prayers: prayers,
+      prayerStatus: {
+        if (j['prayerStatus'] is Map)
+          for (final e in (j['prayerStatus'] as Map).entries)
+            if (prayers.contains(e.key) && prayerStatuses.contains(e.value)) e.key.toString(): e.value.toString(),
+      },
+      habits: habits,
+    );
+  }
 }
 
 enum Repeat { none, daily, weekly }

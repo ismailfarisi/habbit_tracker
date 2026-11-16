@@ -1,9 +1,10 @@
+import '../habits/habit.dart';
 import '../logic/stats.dart';
 import '../logic/tasks.dart';
 import '../models.dart';
 import 'prayer_service.dart';
 
-enum ReminderKind { wake, prayer, training, task }
+enum ReminderKind { wake, prayer, habit, task }
 
 class PlannedReminder {
   final int id;
@@ -12,7 +13,7 @@ class PlannedReminder {
   final String title;
   final String body;
 
-  /// "wake|2026-11-08", "prayer:Fajr|2026-11-08", "train|2026-11-08",
+  /// "wake|2026-11-08", "prayer:Fajr|2026-11-08", "habit:ID|2026-11-08",
   /// "task:ID|2026-11-08"
   final String payload;
 
@@ -33,8 +34,8 @@ const scheduleDays = 8;
 /// [maxPending] reminders are scheduled at a time.
 const maxPending = 60;
 
-/// Stable notification id for a date and slot (0 = wake, 1-5 = prayers,
-/// 6 = training), so a given day's reminder keeps its id across reschedules.
+/// Stable notification id for a date and slot (0 = wake, 1-5 = prayers;
+/// 6-9 are free for other built-in reminders), so a given day's reminder keeps its id across reschedules.
 int reminderId(DateTime date, int slot) {
   final dayNumber = DateTime.utc(date.year, date.month, date.day).millisecondsSinceEpoch ~/ 86400000;
   return 100 + (dayNumber % 100000) * 10 + slot;
@@ -47,6 +48,13 @@ int taskReminderId(Task t, DateTime date) {
   return 1000000000 + (dayNumber % 1000) * 100000 + t.seq % 100000;
 }
 
+/// Stable notification id for a habit on a date, in its own range
+/// (1.2e9 .. 1.3e9) above task reminders and below 2^31.
+int habitReminderId(HabitDef h, DateTime date) {
+  final dayNumber = DateTime.utc(date.year, date.month, date.day).millisecondsSinceEpoch ~/ 86400000;
+  return 1200000000 + (dayNumber % 1000) * 100000 + h.seq % 100000;
+}
+
 /// Every reminder from [now] through the next [days] days, skipping ones
 /// that are in the past or for habits already completed.
 List<PlannedReminder> planReminders(
@@ -55,6 +63,7 @@ List<PlannedReminder> planReminders(
   DateTime now, {
   int days = scheduleDays,
   List<Task> tasks = const [],
+  List<HabitDef> habits = const [],
 }) {
   final out = <PlannedReminder>[];
   for (var d = 0; d < days; d++) {
@@ -89,14 +98,21 @@ List<PlannedReminder> planReminders(
       ));
     }
 
-    if (!trainingDone(log, s)) {
+    for (final h in habits) {
+      if (h.archived || h.reminder == null || !h.isScheduledOn(date)) continue;
+      if (habitDone(log?.habits[h.id], h)) continue;
+      final at = parseHm(h.reminder!);
       out.add(PlannedReminder(
-        id: reminderId(date, 6),
-        when: DateTime(date.year, date.month, date.day, s.trainingTime.hour, s.trainingTime.minute),
-        kind: ReminderKind.training,
-        title: '🗣️ Articulation training',
-        body: '${s.trainingGoalMin} minutes with your AI speech coach. Let\'s go!',
-        payload: 'train|$key',
+        id: habitReminderId(h, date),
+        when: DateTime(date.year, date.month, date.day, at.hour, at.minute),
+        kind: ReminderKind.habit,
+        title: '${h.emoji} ${h.title}',
+        body: switch (h.kind) {
+          HabitKind.count => 'Goal: ${h.target} ${h.unit} today.'.replaceAll('  ', ' '),
+          HabitKind.duration || HabitKind.practice => '${h.target} minutes today. Let\'s go!',
+          _ => 'Time for your habit. Tap to log it.',
+        },
+        payload: 'habit:${h.id}|$key',
       ));
     }
 

@@ -14,8 +14,9 @@ Future<void> main() async {
 
   void handle(NotificationResponse r) {
     final payload = r.payload ?? '';
-    if (payload.startsWith('train|')) {
-      state.requestedTab.value = HomeScreen.trainTab;
+    if (payload.startsWith('habit:')) {
+      state.requestedHabit.value = payload.substring(6).split('|').first;
+      state.requestedTab.value = HomeScreen.todayTab;
     } else if (r.actionId == 'done') {
       state.applyNotificationAction(payload);
     } else {

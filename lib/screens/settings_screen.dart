@@ -283,23 +283,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
 
-          _header('Articulation training'),
+          _header('Streaks'),
           ListTile(
-            leading: const Icon(Icons.schedule),
-            title: const Text('Daily reminder'),
-            subtitle: Text(_fmt(s.trainingTime)),
+            leading: const Icon(Icons.ac_unit),
+            title: const Text('Streak freezes per month'),
+            subtitle: Text('${s.freezesPerMonth} missed ${s.freezesPerMonth == 1 ? 'day' : 'days'} a month keep your perfect-day streak'),
             onTap: () async {
-              final t = await _pickTime(s.trainingTime);
-              if (t != null) await state.updateSettings((x) => x.trainingTime = t);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.flag_outlined),
-            title: const Text('Daily goal'),
-            subtitle: Text('${s.trainingGoalMin} minutes'),
-            onTap: () async {
-              final v = await _pickNumber('Daily training goal', s.trainingGoalMin, 5, 120);
-              if (v != null) await state.updateSettings((x) => x.trainingGoalMin = v);
+              final v = await _pickNumber('Streak freezes per month', s.freezesPerMonth, 0, 10);
+              if (v != null) await state.updateSettings((x) => x.freezesPerMonth = v);
             },
           ),
 
@@ -307,7 +298,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SwitchListTile(
             secondary: const Icon(Icons.notifications_active_outlined),
             title: const Text('Reminders'),
-            subtitle: const Text('Wake-up alarm, each prayer, and training'),
+            subtitle: const Text('Wake-up alarm, each prayer, habits and tasks'),
             value: s.remindersEnabled,
             onChanged: (v) => state.updateSettings((x) => x.remindersEnabled = v),
           ),

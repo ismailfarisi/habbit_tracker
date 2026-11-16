@@ -1,5 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
+import '../agent/habit_agent.dart';
+import '../agent/habit_surface.dart';
 import '../app_state.dart';
 import '../services/openrouter.dart';
 import '../services/task_tools.dart';
@@ -11,10 +15,15 @@ class ChatEntry {
   final bool error;
   final List<ToolActivity> activities = [];
   final Set<ToolActivity> undone = {};
+
+  /// Habits the model proposed in this reply, previewed inline.
+  final List<HabitProposal> proposals = [];
   ChatEntry(this.role, this.text, {this.error = false});
 }
 
-/// A conversation with the AI that can manage tasks through tool calls.
+/// A conversation with the AI that can manage tasks and habits through tool
+/// calls. A habit the model proposes is previewed inline as an A2UI surface
+/// with an "Add habit" button ([acceptProposal]).
 class AssistantChat extends ChangeNotifier {
   final AppState state;
   final String Function() systemPrompt;
@@ -26,7 +35,10 @@ class AssistantChat extends ChangeNotifier {
   final entries = <ChatEntry>[];
   bool busy = false;
 
-  AssistantChat(this.state, {required this.systemPrompt});
+  /// Overrides the OpenRouter client (tests).
+  final OpenRouterClient Function()? client;
+
+  AssistantChat(this.state, {required this.systemPrompt, this.client});
 
   bool get isEmpty => entries.isEmpty;
 
@@ -62,20 +74,23 @@ class AssistantChat extends ChangeNotifier {
     notifyListeners();
 
     var afterTools = false;
-    final tools = TaskTools(state, onActivity: (a) {
-      reply.activities.add(a);
-      notifyListeners();
-    });
-    final client = OpenRouterClient(apiKey: state.apiKey, model: state.settings.model);
+    final agent = HabitAgent(
+      state,
+      client: client,
+      onActivity: (a) {
+        reply.activities.add(a);
+        notifyListeners();
+      },
+      onProposal: (p) {
+        reply.proposals.add(p);
+        notifyListeners();
+      },
+    );
     try {
-      await client.runAgent(
+      await agent.run(
         history,
         system: systemPrompt(),
-        tools: taskToolDefinitions,
-        execute: (call) {
-          afterTools = true;
-          return tools.execute(call);
-        },
+        onToolCall: () => afterTools = true,
         onText: (delta) {
           if (afterTools && reply.text.isNotEmpty) reply.text += '\n\n';
           afterTools = false;
@@ -83,17 +98,34 @@ class AssistantChat extends ChangeNotifier {
           notifyListeners();
         },
       );
-      if (reply.text.isEmpty && reply.activities.isEmpty) reply.text = '(no reply)';
+      final (text, surfaces) = splitInlineA2ui(reply.text);
+      reply.text = text;
+      for (final components in surfaces) {
+        final result = await agent.habitTools.execute(ToolCall('inline', 'create_habit', jsonEncode({
+          'title': 'New habit',
+          'kind': 'check',
+          'ui': {'components': components},
+        })));
+        debugPrint('Inline A2UI surface: $result');
+      }
+      if (reply.text.isEmpty && reply.activities.isEmpty && reply.proposals.isEmpty) reply.text = '(no reply)';
     } catch (e) {
       // Drop the partial exchange so the next request is well-formed.
       history.removeRange(mark, history.length);
-      if (reply.text.isEmpty && reply.activities.isEmpty) entries.remove(reply);
+      if (reply.text.isEmpty && reply.activities.isEmpty && reply.proposals.isEmpty) entries.remove(reply);
       entries.add(ChatEntry('assistant', e.toString(), error: true));
     } finally {
-      client.close();
       busy = false;
       notifyListeners();
     }
+  }
+
+  /// Saves a proposed habit (the "Add habit" button).
+  Future<void> acceptProposal(HabitProposal p) async {
+    if (p.accepted) return;
+    await state.upsertHabit(p.habit);
+    p.accepted = true;
+    notifyListeners();
   }
 
   Future<void> undo(ChatEntry e, ToolActivity a) async {
@@ -244,10 +276,50 @@ class _Bubble extends StatelessWidget {
                   ),
               ]),
             ),
+          for (final p in entry.proposals) _ProposalCard(proposal: p, chat: chat),
           if (entry.text.isNotEmpty)
             SimpleMarkdown(entry.text, style: TextStyle(color: fg))
-          else if (entry.activities.isEmpty)
+          else if (entry.activities.isEmpty && entry.proposals.isEmpty)
             const SizedBox(width: 24, height: 16, child: LinearProgressIndicator()),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Inline preview of a habit the model proposed: its A2UI surface (not
+/// saved while previewing) and an "Add habit" button.
+class _ProposalCard extends StatelessWidget {
+  final HabitProposal proposal;
+  final AssistantChat chat;
+  const _ProposalCard({required this.proposal, required this.chat});
+
+  @override
+  Widget build(BuildContext context) {
+    final h = proposal.habit;
+    final t = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      color: t.colorScheme.surface,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+          Text('${h.emoji}  ${h.title}', style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+          Text(h.describeSchedule(), style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+          const Divider(),
+          if (!proposal.accepted) HabitSurface(chat.state, h, DateTime.now(), persist: false),
+          const SizedBox(height: 8),
+          proposal.accepted
+              ? Row(children: [
+                  Icon(Icons.check_circle, color: t.colorScheme.primary, size: 20),
+                  const SizedBox(width: 6),
+                  const Expanded(child: Text('Added. You can find it on Today.')),
+                ])
+              : FilledButton.icon(
+                  onPressed: () => chat.acceptProposal(proposal),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add habit'),
+                ),
         ]),
       ),
     );

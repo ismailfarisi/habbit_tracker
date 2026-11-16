@@ -5,11 +5,14 @@ import 'package:intl/intl.dart';
 
 import '../app_state.dart';
 import '../logic/stats.dart';
-import '../models.dart';
-import '../services/prayer_service.dart';
 import '../services/reminders.dart';
-import '../logic/tasks.dart';
-import '../widgets/task_editor.dart';
+import '../widgets/add_habit_sheet.dart';
+import '../widgets/cards/habit_card.dart';
+import '../widgets/cards/prayer_card.dart';
+import '../widgets/cards/section_card.dart';
+import '../widgets/cards/tasks_card.dart';
+import '../widgets/cards/wake_card.dart';
+import 'habit_detail_screen.dart';
 import 'home_screen.dart';
 
 class TodayScreen extends StatefulWidget {
@@ -30,10 +33,24 @@ class _TodayScreenState extends State<TodayScreen> {
     super.initState();
     _tick = Timer.periodic(const Duration(seconds: 30), (_) => setState(() {}));
     _checkNotifications();
+    widget.state.requestedHabit.addListener(_openRequestedHabit);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openRequestedHabit());
+  }
+
+  /// Opens the habit a notification asked for.
+  void _openRequestedHabit() {
+    final id = widget.state.requestedHabit.value;
+    if (id == null || !mounted) return;
+    widget.state.requestedHabit.value = null;
+    if (widget.state.habitById(id) == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => HabitDetailScreen(state: widget.state, habitId: id)),
+    );
   }
 
   @override
   void dispose() {
+    widget.state.requestedHabit.removeListener(_openRequestedHabit);
     _tick?.cancel();
     super.dispose();
   }
@@ -57,7 +74,7 @@ class _TodayScreenState extends State<TodayScreen> {
         final s = widget.state.settings;
         final now = DateTime.now();
         final log = widget.state.today;
-        final score = dailyScore(log, s);
+        final score = dayScore(now, s, widget.state.logs, habits: widget.state.habits, tasks: widget.state.tasks);
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -77,10 +94,19 @@ class _TodayScreenState extends State<TodayScreen> {
                 action: 'Set up',
                 onTap: () => widget.onNavigate(HomeScreen.settingsTab),
               ),
-            _WakeCard(state: widget.state, log: log),
-            _PrayerCard(state: widget.state, log: log, now: now),
-            _TrainingCard(state: widget.state, log: log, onStart: () => widget.onNavigate(HomeScreen.trainTab)),
-            _TasksCard(state: widget.state, now: now, onOpen: () => widget.onNavigate(HomeScreen.tasksTab)),
+            WakeCard(state: widget.state, log: log),
+            PrayerCard(state: widget.state, log: log, now: now),
+            for (final h in widget.state.activeHabits)
+              if (h.isScheduledOn(now)) HabitCard(key: ValueKey(h.id), state: widget.state, habit: h, day: now),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: OutlinedButton.icon(
+                onPressed: () => showAddHabitSheet(context, widget.state),
+                icon: const Icon(Icons.add),
+                label: const Text('Add habit'),
+              ),
+            ),
+            TasksCard(state: widget.state, now: now, onOpen: () => widget.onNavigate(HomeScreen.tasksTab)),
             _UpcomingCard(state: widget.state, now: now),
           ],
         );
@@ -91,7 +117,7 @@ class _TodayScreenState extends State<TodayScreen> {
 
 class _Header extends StatelessWidget {
   final DateTime now;
-  final int score;
+  final DayScore score;
   const _Header({required this.now, required this.score});
 
   @override
@@ -116,11 +142,11 @@ class _Header extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               CircularProgressIndicator(
-                value: score / maxDailyScore,
+                value: score.fraction,
                 strokeWidth: 6,
                 backgroundColor: t.colorScheme.surfaceContainerHighest,
               ),
-              Center(child: Text('$score/$maxDailyScore', style: const TextStyle(fontWeight: FontWeight.bold))),
+              Center(child: Text('$score', style: const TextStyle(fontWeight: FontWeight.bold))),
             ],
           ),
         ),
@@ -156,159 +182,6 @@ class _Banner extends StatelessWidget {
   }
 }
 
-class _SectionCard extends StatelessWidget {
-  final String title;
-  final Widget? trailing;
-  final List<Widget> children;
-  const _SectionCard({required this.title, this.trailing, required this.children});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Expanded(child: Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600))),
-              ?trailing,
-            ]),
-            const SizedBox(height: 8),
-            ...children,
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _WakeCard extends StatelessWidget {
-  final AppState state;
-  final DayLog log;
-  const _WakeCard({required this.state, required this.log});
-
-  @override
-  Widget build(BuildContext context) {
-    final s = state.settings;
-    final result = wakeResult(log, s);
-    final target = DateFormat.jm().format(DateTime(2000, 1, 1, s.wakeTime.hour, s.wakeTime.minute));
-    final status = switch (result) {
-      WakeResult.none => 'Goal: up by $target (+${s.wakeGraceMin} min grace). Tap when you get out of bed.',
-      WakeResult.onTime => '✅ Up at ${DateFormat.jm().format(log.wakeAt!)}. Great start!',
-      WakeResult.late => '⏰ Up at ${DateFormat.jm().format(log.wakeAt!)}, later than your goal. Tomorrow is a new chance.',
-    };
-    return _SectionCard(
-      title: '☀️  Wake up early',
-      trailing: Chip(label: Text(target), visualDensity: VisualDensity.compact),
-      children: [
-        Text(status),
-        const SizedBox(height: 12),
-        if (result == WakeResult.none)
-          FilledButton.icon(onPressed: state.markWake, icon: const Icon(Icons.wb_sunny_outlined), label: const Text("I'm up!"))
-        else
-          TextButton(onPressed: state.undoWake, child: const Text('Undo')),
-      ],
-    );
-  }
-}
-
-class _PrayerCard extends StatelessWidget {
-  final AppState state;
-  final DayLog log;
-  final DateTime now;
-  const _PrayerCard({required this.state, required this.log, required this.now});
-
-  @override
-  Widget build(BuildContext context) {
-    final s = state.settings;
-    final day = prayerTimesFor(s, now);
-    final next = nextPrayer(s, now);
-    final mins = next.value.difference(now).inMinutes;
-    final inText = mins >= 60 ? '${mins ~/ 60} h ${mins % 60} min' : '$mins min';
-    final done = prayerNames.where(log.prayers.contains).length;
-    final c = Theme.of(context).colorScheme;
-    return _SectionCard(
-      title: '🕌  Five daily prayers',
-      trailing: Chip(label: Text('$done/5'), visualDensity: VisualDensity.compact),
-      children: [
-        Text('Next: ${next.key} in $inText', style: TextStyle(color: c.onSurfaceVariant)),
-        for (final p in prayerNames)
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            value: log.prayers.contains(p),
-            onChanged: (v) => state.setPrayer(now, p, v ?? false),
-            title: Text(p, style: TextStyle(fontWeight: next.key == p ? FontWeight.bold : FontWeight.normal)),
-            secondary: Text(DateFormat.jm().format(day.times[p]!), style: TextStyle(color: c.onSurfaceVariant)),
-          ),
-        Text(
-          day.calculated
-              ? 'Calculated for ${s.locationName.isEmpty ? 'your location' : s.locationName} · ${calcMethodLabels[s.calcMethod]}'
-              : 'Using manual times',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: c.onSurfaceVariant),
-        ),
-      ],
-    );
-  }
-}
-
-class _TrainingCard extends StatelessWidget {
-  final AppState state;
-  final DayLog log;
-  final VoidCallback onStart;
-  const _TrainingCard({required this.state, required this.log, required this.onStart});
-
-  @override
-  Widget build(BuildContext context) {
-    final goal = state.settings.trainingGoalMin;
-    final m = log.trainingMinutes;
-    return _SectionCard(
-      title: '🗣️  Articulation training',
-      trailing: Chip(label: Text('$m/$goal min'), visualDensity: VisualDensity.compact),
-      children: [
-        LinearProgressIndicator(value: (m / goal).clamp(0, 1).toDouble(), minHeight: 8, borderRadius: BorderRadius.circular(8)),
-        const SizedBox(height: 12),
-        Wrap(spacing: 8, children: [
-          FilledButton.icon(onPressed: onStart, icon: const Icon(Icons.mic_none), label: const Text('Train with AI coach')),
-          OutlinedButton(onPressed: () => state.addTraining(5), child: const Text('+5 min')),
-        ]),
-      ],
-    );
-  }
-}
-
-class _TasksCard extends StatelessWidget {
-  final AppState state;
-  final DateTime now;
-  final VoidCallback onOpen;
-  const _TasksCard({required this.state, required this.now, required this.onOpen});
-
-  @override
-  Widget build(BuildContext context) {
-    final tasks = tasksForDay(state.tasks, now, today: now);
-    final done = tasks.where((t) => t.isDoneOn(now)).length;
-    return _SectionCard(
-      title: '📝  Tasks',
-      trailing: Chip(label: Text('$done/${tasks.length}'), visualDensity: VisualDensity.compact),
-      children: [
-        if (tasks.isEmpty) const Text('No tasks for today.'),
-        for (final t in tasks.take(8)) TaskTile(state: state, task: t, day: now),
-        if (tasks.length > 8) Text('+${tasks.length - 8} more'),
-        const SizedBox(height: 8),
-        Wrap(spacing: 8, children: [
-          FilledButton.tonalIcon(onPressed: onOpen, icon: const Icon(Icons.auto_awesome), label: const Text('Plan with AI')),
-          OutlinedButton.icon(
-            onPressed: () => showTaskEditor(context, state, initialDate: now),
-            icon: const Icon(Icons.add),
-            label: const Text('Add'),
-          ),
-        ]),
-      ],
-    );
-  }
-}
-
 class _UpcomingCard extends StatelessWidget {
   final AppState state;
   final DateTime now;
@@ -317,8 +190,8 @@ class _UpcomingCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = state.settings;
-    final upcoming = planReminders(s, state.logs, now, days: 2, tasks: state.tasks).take(5).toList();
-    return _SectionCard(
+    final upcoming = planReminders(s, state.logs, now, days: 2, tasks: state.tasks, habits: state.habits).take(5).toList();
+    return SectionCard(
       title: '⏰  Upcoming reminders',
       children: [
         if (!s.remindersEnabled)
@@ -333,7 +206,7 @@ class _UpcomingCard extends StatelessWidget {
               leading: Icon(switch (r.kind) {
                 ReminderKind.wake => Icons.alarm,
                 ReminderKind.prayer => Icons.mosque_outlined,
-                ReminderKind.training => Icons.record_voice_over_outlined,
+                ReminderKind.habit => Icons.repeat,
                 ReminderKind.task => Icons.task_alt,
               }),
               title: Text(r.title),
