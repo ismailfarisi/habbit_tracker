@@ -94,9 +94,10 @@ void main() {
     await pumpProgress(tester);
     final tile = find.ancestor(of: find.textContaining('Read Quran'), matching: find.byType(StreakTile)).first;
     expect(find.descendant(of: tile, matching: find.text('8 days')), findsOneWidget);
-    expect(find.descendant(of: tile, matching: find.text('${ruleLabel(quran.streakRule)} · best 8')), findsOneWidget);
+    expect(find.descendant(of: tile, matching: find.text(ruleLabel(quran.streakRule))), findsOneWidget);
+    expect(find.descendant(of: tile, matching: find.text('Best 8')), findsOneWidget);
     expect(find.descendant(of: tile, matching: find.text('8 of last 9')), findsOneWidget);
-    expect(find.textContaining('freezes left this month'), findsOneWidget);
+    expect(find.textContaining('freezes left'), findsOneWidget);
 
     await tester.tap(tile);
     await tester.pumpAndSettle();

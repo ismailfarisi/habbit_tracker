@@ -147,14 +147,13 @@ class StreakTile extends StatelessWidget {
             Text(data.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.textTheme.bodySmall),
             Text('$n ${n == 1 ? 'day' : 'days'}', style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
             Text(
-              freezes == null ? '${data.rule} · best ${data.info.best}' : 'Best ${data.info.best}',
+              freezes == null ? data.rule : '❄️ $freezes ${freezes == 1 ? 'freeze' : 'freezes'} left',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: muted,
             ),
             Text(c.total == 0 ? 'No days yet' : '${c.done} of last ${c.total}', style: t.textTheme.bodySmall),
-            if (freezes != null)
-              Text('❄️ $freezes ${freezes == 1 ? 'freeze' : 'freezes'} left this month', maxLines: 1, overflow: TextOverflow.ellipsis, style: muted),
+            Text('Best ${data.info.best}', maxLines: 1, overflow: TextOverflow.ellipsis, style: muted),
           ]),
         ),
       ),
