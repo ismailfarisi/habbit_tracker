@@ -19,7 +19,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.9.2
+  sdk: ^3.10.0
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -45,6 +45,16 @@ dependencies:
   http: ^1.6.0
   flutter_secure_storage: ^10.3.4
   intl: ^0.20.3
+  a2ui_flutter: ^0.3.0
+  a2ui_core: ^0.7.0
+  a2ui_agent: ^0.3.0
+  json_schema_builder: ^0.1.7
+  app_settings: ^9.0.1
+  hijri: ^3.0.1
+  home_widget: ^0.9.4
+  share_plus: ^13.3.1
+  file_picker: ^13.3.3
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:
@@ -67,6 +77,19 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Inter-ExtraBold.ttf
+          weight: 800
 
   # To add assets to your application, add an assets section, like this:
   # assets:

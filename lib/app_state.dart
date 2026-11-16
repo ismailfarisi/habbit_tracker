@@ -1,13 +1,25 @@
 import 'package:flutter/foundation.dart';
 
+import 'habits/habit.dart';
 import 'logic/stats.dart';
 import 'logic/tasks.dart';
 import 'models.dart';
+import 'services/home_widget_service.dart';
 import 'services/notification_service.dart';
 import 'services/reminders.dart';
 import 'services/storage.dart';
 import 'services/task_tools.dart';
 
+/// App state and the only writer of persisted data.
+///
+/// Stable APIs for feature code:
+/// * days: [logFor] (read), [setWake], [setPrayerStatus], [setPrayer],
+///   [setBedtime], [logHabit]; all accept any day, past days included.
+/// * habits: [habits] (all), [activeHabits], [habitById], [upsertHabit],
+///   [archiveHabit], [deleteHabit], [habitEntry].
+/// * tasks: the [TaskBackend] methods.
+///
+/// Every mutation notifies listeners, saves, and reschedules reminders.
 class AppState extends ChangeNotifier implements TaskBackend {
   final Storage storage;
   final NotificationService notifications;
@@ -16,28 +28,51 @@ class AppState extends ChangeNotifier implements TaskBackend {
   Map<String, DayLog> logs;
   @override
   List<Task> tasks;
+
+  /// Every habit, archived ones included. Mutate through [upsertHabit],
+  /// [archiveHabit] and [deleteHabit].
+  List<HabitDef> habits;
   String apiKey = '';
 
-  /// Set when a notification asks the UI to open a tab (e.g. training).
+  /// Set when a notification asks the UI to open a tab.
   final ValueNotifier<int?> requestedTab = ValueNotifier(null);
 
-  AppState._(this.storage, this.notifications, this.settings, this.logs, this.tasks);
+  /// Set to a habit id when a notification asks the UI to open that habit.
+  final ValueNotifier<String?> requestedHabit = ValueNotifier(null);
+
+  AppState._(this.storage, this.notifications, this.settings, this.logs, this.tasks, this.habits);
 
   static Future<AppState> load(Storage storage, NotificationService n) async {
-    final s = AppState._(storage, n, storage.loadSettings(), storage.loadLogs(), storage.loadTasks());
+    final s = AppState._(
+      storage,
+      n,
+      storage.loadSettings(),
+      storage.loadLogs(),
+      storage.loadTasks(),
+      storage.loadHabits(),
+    );
+    if (!storage.hasHabits) await storage.saveHabits(s.habits);
     s.apiKey = await storage.loadApiKey();
     return s;
   }
 
-  DayLog dayLog(DateTime d) => logs[dayKey(d)] ?? DayLog();
-  DayLog get today => dayLog(DateTime.now());
+  /// The log of [day]; an empty one if nothing was logged. Read-only: use
+  /// the setters below to change a day.
+  DayLog logFor(DateTime day) => logs[dayKey(day)] ?? DayLog();
+  DayLog dayLog(DateTime d) => logFor(d);
+  DayLog get today => logFor(DateTime.now());
 
   DayLog _mutableDay(DateTime d) => logs.putIfAbsent(dayKey(d), DayLog.new);
+
+  Future<void> _reschedule() async {
+    await notifications.reschedule(settings, logs, tasks, habits: habits);
+    await HomeWidgetService.publish(settings, logs, habits: habits, tasks: tasks);
+  }
 
   Future<void> _commit({bool reschedule = true}) async {
     notifyListeners();
     await storage.saveLogs(logs);
-    if (reschedule) await notifications.reschedule(settings, logs, tasks);
+    if (reschedule) await _reschedule();
   }
 
   /// Pick up changes made by the background notification isolate.
@@ -45,32 +80,106 @@ class AppState extends ChangeNotifier implements TaskBackend {
     await storage.reload();
     logs = storage.loadLogs();
     tasks = storage.loadTasks();
+    habits = storage.loadHabits();
     notifyListeners();
-    await notifications.reschedule(settings, logs, tasks);
+    await _reschedule();
   }
 
-  Future<void> markWake([DateTime? at]) async {
-    final now = at ?? DateTime.now();
-    _mutableDay(now).wakeAt = now;
+  /// Sets (or with null clears) the wake time logged for [day]. The date
+  /// part of [at] is replaced by [day].
+  Future<void> setWake(DateTime day, DateTime? at) async {
+    _mutableDay(day).wakeAt =
+        at == null ? null : DateTime(day.year, day.month, day.day, at.hour, at.minute, at.second);
     // Silence the wake alarm if it is still ringing.
-    await notifications.cancel(reminderId(now, 0));
+    if (at != null) await notifications.cancel(reminderId(day, 0));
     await _commit();
   }
 
-  Future<void> undoWake() async {
-    _mutableDay(DateTime.now()).wakeAt = null;
+  Future<void> markWake([DateTime? at]) {
+    final now = at ?? DateTime.now();
+    return setWake(now, now);
+  }
+
+  Future<void> undoWake() => setWake(DateTime.now(), null);
+
+  Future<void> setBedtime(DateTime day, DateTime? at) async {
+    _mutableDay(day).bedtimeAt = at;
     await _commit();
   }
 
-  Future<void> setPrayer(DateTime day, String name, bool done) async {
+  /// Marks prayer [name] on [day] with [status] ('onTime' | 'late' | 'qada'),
+  /// or as not prayed when [status] is null.
+  Future<void> setPrayerStatus(DateTime day, String name, String? status) async {
+    if (!prayerNames.contains(name)) return;
     final log = _mutableDay(day);
-    done ? log.prayers.add(name) : log.prayers.remove(name);
+    if (status == null) {
+      log.prayers.remove(name);
+      log.prayerStatus.remove(name);
+    } else {
+      log.prayers.add(name);
+      log.prayerStatus[name] = prayerStatuses.contains(status) ? status : prayerOnTime;
+    }
     await _commit();
   }
 
-  Future<void> addTraining(int minutes) async {
-    final log = _mutableDay(DateTime.now());
-    log.trainingMinutes = (log.trainingMinutes + minutes).clamp(0, 24 * 60);
+  /// Ticks a prayer on or off, keeping any status it already has.
+  Future<void> setPrayer(DateTime day, String name, bool done) =>
+      setPrayerStatus(day, name, done ? (logFor(day).prayerStatus[name] ?? prayerOnTime) : null);
+
+  // ---------- Habits ----------
+  List<HabitDef> get activeHabits => habits.where((h) => !h.archived).toList();
+
+  HabitDef? habitById(String id) {
+    for (final h in habits) {
+      if (h.id == id) return h;
+    }
+    return null;
+  }
+
+  /// What was logged for [habitId] on [day] (an empty entry if nothing).
+  HabitEntry habitEntry(DateTime day, String habitId) => logs[dayKey(day)]?.habits[habitId] ?? HabitEntry();
+
+  Future<void> _commitHabits() async {
+    notifyListeners();
+    await storage.saveHabits(habits);
+    await _reschedule();
+  }
+
+  /// Adds [habit], or replaces the habit with the same id. A new habit gets
+  /// its notification `seq` here. Returns the stored habit.
+  Future<HabitDef> upsertHabit(HabitDef habit) async {
+    final i = habits.indexWhere((h) => h.id == habit.id);
+    var stored = habit;
+    if (i >= 0) {
+      habits[i] = habit;
+    } else {
+      if (habit.seq == 0) {
+        stored = HabitDef.fromJson({...habit.toJson(), 'seq': nextHabitSeq(habits)});
+      }
+      habits.add(stored);
+    }
+    await _commitHabits();
+    return stored;
+  }
+
+  /// Hides a habit from Today and scoring but keeps its history.
+  Future<void> archiveHabit(String id, {bool archived = true}) async {
+    final h = habitById(id);
+    if (h == null) return;
+    h.archived = archived;
+    await _commitHabits();
+  }
+
+  /// Removes a habit definition. Logged entries stay in the day logs.
+  Future<void> deleteHabit(String id) async {
+    habits.removeWhere((h) => h.id == id);
+    await _commitHabits();
+  }
+
+  /// Replaces what is logged for [habitId] on [day].
+  Future<void> logHabit(DateTime day, String habitId, HabitEntry entry) async {
+    final log = _mutableDay(day);
+    entry.isEmpty ? log.habits.remove(habitId) : log.habits[habitId] = entry;
     await _commit();
   }
 
@@ -85,7 +194,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
     }
   }
 
-  Future<void> rescheduleNow() => notifications.reschedule(settings, logs, tasks);
+  Future<void> rescheduleNow() => _reschedule();
 
   // ---------- Tasks ----------
   Task? taskById(String id) {
@@ -98,7 +207,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
   Future<void> _commitTasks() async {
     notifyListeners();
     await storage.saveTasks(tasks);
-    await notifications.reschedule(settings, logs, tasks);
+    await _reschedule();
   }
 
   /// Creates a task. [seq] and [id] are assigned here.
@@ -161,7 +270,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
     change(settings);
     notifyListeners();
     await storage.saveSettings(settings);
-    await notifications.reschedule(settings, logs, tasks);
+    await _reschedule();
   }
 
   Future<void> setApiKey(String key) async {
@@ -175,8 +284,9 @@ class AppState extends ChangeNotifier implements TaskBackend {
     settings = storage.loadSettings();
     logs = storage.loadLogs();
     tasks = storage.loadTasks();
+    habits = storage.loadHabits();
     notifyListeners();
-    await notifications.reschedule(settings, logs, tasks);
+    await _reschedule();
   }
 
   Future<void> resetAll() async {
@@ -184,8 +294,9 @@ class AppState extends ChangeNotifier implements TaskBackend {
     settings = Settings();
     logs = {};
     tasks = [];
+    habits = [];
     apiKey = '';
     notifyListeners();
-    await notifications.reschedule(settings, logs, tasks);
+    await _reschedule();
   }
 }

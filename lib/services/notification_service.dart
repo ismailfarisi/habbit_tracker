@@ -7,11 +7,17 @@ import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
+import '../habits/habit.dart';
 import '../models.dart';
+import 'diagnostics.dart';
 import 'reminders.dart';
 import 'storage.dart';
 
 const _doneAction = 'done';
+
+/// Wake action used while the wake challenge is on: opens the app to the
+/// challenge instead of marking the wake-up in the background.
+const wakeChallengeAction = 'wake_challenge';
 const _habitCategory = 'habit';
 
 /// Runs in a background isolate when the user taps "Mark done" / "I'm up"
@@ -22,11 +28,13 @@ Future<void> notificationActionBackground(NotificationResponse r) async {
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
   final storage = await Storage.open();
+  await Diagnostics(storage.prefs).count(Diagnostics.backgroundActions);
   if (r.payload!.startsWith('task:')) {
     final tasks = storage.loadTasks();
     if (applyTaskDoneAction(r.payload!, tasks)) await storage.saveTasks(tasks);
     return;
   }
+  if (r.payload!.startsWith('wake|') && storage.loadSettings().wakeChallenge != WakeChallenge.off) return;
   final logs = storage.loadLogs();
   if (applyDoneAction(r.payload!, logs, DateTime.now())) {
     await storage.saveLogs(logs);
@@ -42,6 +50,19 @@ class NotificationService {
 
   /// Called for notification taps / actions while the app is running.
   void Function(NotificationResponse)? onResponse;
+
+  /// Set to the day key of a wake notification the user tapped (or answered
+  /// with [wakeChallengeAction]); the wake card opens the challenge for it
+  /// and clears it.
+  final ValueNotifier<String?> wakeChallengeRequest = ValueNotifier(null);
+
+  void _noteWakeTap(NotificationResponse r) {
+    final payload = r.payload ?? '';
+    if (!payload.startsWith('wake|')) return;
+    if (r.actionId == null || r.actionId == wakeChallengeAction) {
+      wakeChallengeRequest.value = payload.substring(5);
+    }
+  }
 
   bool get _supported =>
       !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
@@ -81,7 +102,10 @@ class NotificationService {
           ],
         ),
       ),
-      onDidReceiveNotificationResponse: (r) => onResponse?.call(r),
+      onDidReceiveNotificationResponse: (r) {
+        _noteWakeTap(r);
+        onResponse?.call(r);
+      },
       onDidReceiveBackgroundNotificationResponse: notificationActionBackground,
     );
     _ready = true;
@@ -91,7 +115,9 @@ class NotificationService {
   Future<NotificationResponse?> launchResponse() async {
     if (!_ready) return null;
     final d = await _plugin.getNotificationAppLaunchDetails();
-    return (d?.didNotificationLaunchApp ?? false) ? d!.notificationResponse : null;
+    final r = (d?.didNotificationLaunchApp ?? false) ? d!.notificationResponse : null;
+    if (r != null) _noteWakeTap(r);
+    return r;
   }
 
   /// Asks for notification, exact-alarm and full-screen permissions.
@@ -116,21 +142,23 @@ class NotificationService {
   }
 
   NotificationDetails _details(ReminderKind kind, Settings s) {
+    final challenge = kind == ReminderKind.wake && s.wakeChallenge != WakeChallenge.off;
     final doneLabel = switch (kind) {
       ReminderKind.wake => "I'm up",
       ReminderKind.prayer => 'Prayed',
-      ReminderKind.training => 'Open coach',
+      ReminderKind.habit => 'Open',
       ReminderKind.task => 'Done',
+      ReminderKind.bedtime => 'Going to bed',
     };
     final actions = [
       AndroidNotificationAction(
-        _doneAction,
+        challenge ? wakeChallengeAction : _doneAction,
         doneLabel,
-        showsUserInterface: kind == ReminderKind.training,
+        showsUserInterface: kind == ReminderKind.habit || challenge,
       ),
     ];
     final ios = DarwinNotificationDetails(
-      categoryIdentifier: kind == ReminderKind.training ? null : _habitCategory,
+      categoryIdentifier: kind == ReminderKind.habit || challenge ? null : _habitCategory,
       interruptionLevel: kind == ReminderKind.wake ? InterruptionLevel.timeSensitive : InterruptionLevel.active,
     );
     if (kind == ReminderKind.wake && s.wakeAlarmLoud) {
@@ -156,8 +184,9 @@ class NotificationService {
     final (channel, name) = switch (kind) {
       ReminderKind.wake => ('wake', 'Wake-up reminder'),
       ReminderKind.prayer => ('prayer', 'Prayer reminders'),
-      ReminderKind.training => ('training', 'Training reminders'),
+      ReminderKind.habit => ('habits', 'Habit reminders'),
       ReminderKind.task => ('tasks', 'Task reminders'),
+      ReminderKind.bedtime => ('bedtime', 'Bedtime reminder'),
     };
     return NotificationDetails(
       android: AndroidNotificationDetails(
@@ -173,13 +202,19 @@ class NotificationService {
   }
 
   /// Replaces all pending reminders with a fresh plan.
-  Future<void> reschedule(Settings s, Map<String, DayLog> logs, List<Task> tasks) async {
+  Future<void> reschedule(
+    Settings s,
+    Map<String, DayLog> logs,
+    List<Task> tasks, {
+    List<HabitDef> habits = const [],
+  }) async {
     if (!_ready) return;
     await _plugin.cancelAllPendingNotifications();
     if (!s.remindersEnabled) return;
 
     final exact = _android == null || (await _android!.canScheduleExactNotifications() ?? false);
-    for (final r in planReminders(s, logs, DateTime.now(), tasks: tasks).take(maxPending)) {
+    var scheduled = 0, failed = 0;
+    for (final r in planReminders(s, logs, DateTime.now(), tasks: tasks, habits: habits).take(maxPending)) {
       final mode = !exact
           ? AndroidScheduleMode.inexactAllowWhileIdle
           : r.kind == ReminderKind.wake
@@ -195,10 +230,15 @@ class NotificationService {
           body: r.body,
           payload: r.payload,
         );
+        scheduled++;
       } catch (e) {
+        failed++;
         debugPrint('Failed to schedule ${r.payload}: $e');
       }
     }
+    await Diagnostics.global?.count(Diagnostics.reschedules);
+    await Diagnostics.global?.count(Diagnostics.remindersScheduled, scheduled);
+    await Diagnostics.global?.count(Diagnostics.remindersFailed, failed);
   }
 
   Future<void> cancel(int id) async {
@@ -210,7 +250,7 @@ class NotificationService {
     await _plugin.show(
       id: 1,
       title: '✅ Reminders are working',
-      body: 'You will be reminded to wake up, pray and train.',
+      body: 'You will be reminded to wake up, pray and keep your habits.',
       notificationDetails: _details(ReminderKind.prayer, s),
     );
   }

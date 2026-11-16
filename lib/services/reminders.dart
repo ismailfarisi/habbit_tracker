@@ -1,9 +1,12 @@
+import '../habits/habit.dart';
+import '../logic/sleep.dart';
+import '../logic/prayer_status.dart';
 import '../logic/stats.dart';
 import '../logic/tasks.dart';
 import '../models.dart';
 import 'prayer_service.dart';
 
-enum ReminderKind { wake, prayer, training, task }
+enum ReminderKind { wake, prayer, habit, task, bedtime }
 
 class PlannedReminder {
   final int id;
@@ -12,8 +15,8 @@ class PlannedReminder {
   final String title;
   final String body;
 
-  /// "wake|2026-11-08", "prayer:Fajr|2026-11-08", "train|2026-11-08",
-  /// "task:ID|2026-11-08"
+  /// "wake|2026-11-08", "prayer:Fajr|2026-11-08", "habit:ID|2026-11-08",
+  /// "task:ID|2026-11-08", "bed|2026-11-08" (the night of that day)
   final String payload;
 
   const PlannedReminder({
@@ -34,7 +37,7 @@ const scheduleDays = 8;
 const maxPending = 60;
 
 /// Stable notification id for a date and slot (0 = wake, 1-5 = prayers,
-/// 6 = training), so a given day's reminder keeps its id across reschedules.
+/// 6 = bedtime, 8 = Ramadan suhoor, 9 = early Jumu'ah; 7 is free), so a given day's reminder keeps its id across reschedules.
 int reminderId(DateTime date, int slot) {
   final dayNumber = DateTime.utc(date.year, date.month, date.day).millisecondsSinceEpoch ~/ 86400000;
   return 100 + (dayNumber % 100000) * 10 + slot;
@@ -47,6 +50,16 @@ int taskReminderId(Task t, DateTime date) {
   return 1000000000 + (dayNumber % 1000) * 100000 + t.seq % 100000;
 }
 
+/// Stable notification id for a habit on a date, in its own range
+/// (1.2e9 .. 1.3e9) above task reminders and below 2^31.
+int habitReminderId(HabitDef h, DateTime date) {
+  final dayNumber = DateTime.utc(date.year, date.month, date.day).millisecondsSinceEpoch ~/ 86400000;
+  return 1200000000 + (dayNumber % 1000) * 100000 + h.seq % 100000;
+}
+
+/// [reminderId] slot of the nightly wind-down reminder.
+const bedtimeSlot = 6;
+
 /// Every reminder from [now] through the next [days] days, skipping ones
 /// that are in the past or for habits already completed.
 List<PlannedReminder> planReminders(
@@ -55,6 +68,7 @@ List<PlannedReminder> planReminders(
   DateTime now, {
   int days = scheduleDays,
   List<Task> tasks = const [],
+  List<HabitDef> habits = const [],
 }) {
   final out = <PlannedReminder>[];
   for (var d = 0; d < days; d++) {
@@ -83,27 +97,55 @@ List<PlannedReminder> planReminders(
         id: reminderId(date, 1 + i),
         when: at.subtract(Duration(minutes: offset)),
         kind: ReminderKind.prayer,
-        title: offset > 0 ? '🕌 $name in $offset min' : '🕌 Time for $name',
+        title: prayerReminderTitle(s, name, date, offset),
         body: 'Prayer time ${_hm(at)}. Tap "Prayed" once you\'re done.',
         payload: 'prayer:$name|$key',
       ));
     }
 
-    if (!trainingDone(log, s)) {
+    out.addAll(muslimReminders(s, date, log, times));
+
+    for (final h in habits) {
+      if (h.archived || h.reminder == null || !h.isScheduledOn(date)) continue;
+      if (habitDone(log?.habits[h.id], h)) continue;
+      final at = parseHm(h.reminder!);
       out.add(PlannedReminder(
-        id: reminderId(date, 6),
-        when: DateTime(date.year, date.month, date.day, s.trainingTime.hour, s.trainingTime.minute),
-        kind: ReminderKind.training,
-        title: '🗣️ Articulation training',
-        body: '${s.trainingGoalMin} minutes with your AI speech coach. Let\'s go!',
-        payload: 'train|$key',
+        id: habitReminderId(h, date),
+        when: DateTime(date.year, date.month, date.day, at.hour, at.minute),
+        kind: ReminderKind.habit,
+        title: '${h.emoji} ${h.title}',
+        body: switch (h.kind) {
+          HabitKind.count => 'Goal: ${h.target} ${h.unit} today.'.replaceAll('  ', ' '),
+          HabitKind.duration || HabitKind.practice => '${h.target} minutes today. Let\'s go!',
+          _ => 'Time for your habit. Tap to log it.',
+        },
+        payload: 'habit:${h.id}|$key',
+      ));
+    }
+
+    if (s.bedtimeReminder && log?.bedtimeAt == null) {
+      final bed = bedtimeFor(s, date);
+      out.add(PlannedReminder(
+        id: reminderId(date, bedtimeSlot),
+        when: windDownFor(s, date),
+        kind: ReminderKind.bedtime,
+        title: '🌙 Time to wind down',
+        body: 'Bed by ${_hm(bed)} for ${fmtSleep(sleepGoal(s))} of sleep before your ${fmtHm(s.wakeTime)} wake-up. '
+            'Tap "Going to bed" when you lie down.',
+        payload: 'bed|$key',
       ));
     }
 
     for (final t in tasks) {
-      if (!t.isScheduledOn(date) || t.isDoneOn(date)) continue;
       final when = t.reminderOn(date);
       if (when == null) continue;
+      final anytime = !t.isRepeating && t.date == null && !t.isOneOffDone;
+      if (anytime) {
+        final previous = t.reminderOn(DateTime(date.year, date.month, date.day - 1))!;
+        if (!when.isAfter(now) || previous.isAfter(now)) continue;
+      } else if (!t.isScheduledOn(date) || t.isDoneOn(date)) {
+        continue;
+      }
       out.add(PlannedReminder(
         id: taskReminderId(t, date),
         when: when,
@@ -140,15 +182,21 @@ bool applyDoneAction(String payload, Map<String, DayLog> logs, DateTime now) {
   final parts = payload.split('|');
   if (parts.length != 2) return false;
   final what = parts[0], key = parts[1];
+  if (what == 'suhoor') return true;
   final log = logs.putIfAbsent(key, DayLog.new);
   if (what == 'wake') {
     log.wakeAt ??= now;
+    return true;
+  }
+  if (what == 'bed') {
+    log.bedtimeAt ??= now;
     return true;
   }
   if (what.startsWith('prayer:')) {
     final name = what.substring(7);
     if (!prayerNames.contains(name)) return false;
     log.prayers.add(name);
+    log.prayerStatus[name] ??= prayerOnTime;
     return true;
   }
   return false;
@@ -156,3 +204,46 @@ bool applyDoneAction(String payload, Map<String, DayLog> logs, DateTime now) {
 
 String _hm(DateTime t) =>
     '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+// ---------- Prayer: Jumu'ah and Ramadan ----------
+
+String prayerReminderTitle(Settings s, String name, DateTime date, int offset) {
+  final label = prayerLabel(name, date);
+  if (name == 'Maghrib' && isRamadan(s, date)) {
+    return offset > 0 ? '🌙 Iftar (Maghrib) in $offset min' : '🌙 Iftar time · Maghrib';
+  }
+  return offset > 0 ? '🕌 $label in $offset min' : '🕌 Time for $label';
+}
+
+/// The Ramadan suhoor wake alarm (Fajr minus [Settings.suhoorMinutes]) and
+/// the early Friday reminder ([Settings.jumuahReminderMinutes] before
+/// Jumu'ah) for [date].
+List<PlannedReminder> muslimReminders(Settings s, DateTime date, DayLog? log, Map<String, DateTime> times) {
+  final key = dayKey(date);
+  final out = <PlannedReminder>[];
+  final fajr = times['Fajr']!;
+  if (s.suhoorReminder && s.suhoorMinutes > 0 && isRamadan(s, date) && log?.wakeAt == null &&
+      !(log?.prayers.contains('Fajr') ?? false)) {
+    out.add(PlannedReminder(
+      id: reminderId(date, 8),
+      when: fajr.subtract(Duration(minutes: s.suhoorMinutes)),
+      kind: ReminderKind.wake,
+      title: '🌙 Suhoor time',
+      body: 'Fajr (end of suhoor) at ${_hm(fajr)}. Eat and drink before then.',
+      payload: 'suhoor|$key',
+    ));
+  }
+  final dhuhr = times['Dhuhr']!;
+  if (s.jumuahReminder && s.jumuahReminderMinutes > s.prayerOffsetMin && date.weekday == DateTime.friday &&
+      !(log?.prayers.contains('Dhuhr') ?? false)) {
+    out.add(PlannedReminder(
+      id: reminderId(date, 9),
+      when: dhuhr.subtract(Duration(minutes: s.jumuahReminderMinutes)),
+      kind: ReminderKind.prayer,
+      title: "🕌 Jumu'ah in ${s.jumuahReminderMinutes} min",
+      body: "Jumu'ah at ${_hm(dhuhr)}. Time for ghusl and to head to the mosque.",
+      payload: 'prayer:Dhuhr|$key',
+    ));
+  }
+  return out;
+}

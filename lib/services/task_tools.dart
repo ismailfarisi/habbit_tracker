@@ -274,14 +274,13 @@ String plannerContext(Settings s, DateTime now) {
 Current local time: ${DateFormat('EEEE yyyy-MM-dd HH:mm').format(now)} (today is ${dayKey(now)}).
 User's habits (tracked automatically, don't create tasks for these unless asked):
 - Wake up by ${fmtHm(s.wakeTime)}
-- Five daily prayers. Today: $prayers. Tomorrow: $prayersTomorrow.
-- Articulation training ${s.trainingGoalMin} min/day, reminder at ${fmtHm(s.trainingTime)}.''';
+- Five daily prayers. Today: $prayers. Tomorrow: $prayersTomorrow.''';
 }
 
 const plannerSystemPrompt = '''
 You are the planning assistant inside "Daily Discipline", a habit tracker
 for someone building a disciplined routine: waking early, praying the five
-daily prayers on time, and training their speech articulation.
+daily prayers on time, and keeping their own habits.
 
 You can manage the user's tasks with tools: create_task, list_tasks,
 update_task, complete_task and delete_task.

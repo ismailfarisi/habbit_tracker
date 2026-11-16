@@ -22,12 +22,11 @@ void main() {
   });
 
   group('streaks', () {
-    final s = Settings(trainingGoalMin: 10);
     final today = DateTime(2026, 3, 10);
     Map<String, DayLog> logs(List<int> daysAgo) => {
-          for (final d in daysAgo) dayKey(DateTime(2026, 3, 10 - d)): DayLog(trainingMinutes: 10),
+          for (final d in daysAgo) dayKey(DateTime(2026, 3, 10 - d)): DayLog(prayers: prayerNames.toSet()),
         };
-    bool done(DayLog? l) => trainingDone(l, s);
+    bool done(DayLog? l) => prayersDone(l);
 
     test('counts back from today', () {
       expect(streak(logs([0, 1, 2]), done, today: today), 3);
@@ -47,22 +46,17 @@ void main() {
     });
   });
 
-  test('daily score', () {
-    final s = Settings(wakeTime: const TimeOfDay(hour: 5, minute: 0), trainingGoalMin: 15);
-    final log = DayLog(wakeAt: DateTime(2026, 1, 1, 4, 55), prayers: {'Fajr', 'Dhuhr'}, trainingMinutes: 15);
-    expect(dailyScore(log, s), 4);
-  });
-
   group('settings', () {
     test('round-trips through JSON', () {
-      final s = Settings(latitude: 11.25, longitude: 75.78, calcMethod: 'karachi', madhab: 'hanafi', model: 'x/y');
+      final s = Settings(latitude: 11.25, longitude: 75.78, calcMethod: 'karachi', madhab: 'hanafi', model: 'x/y', themeMode: 'dark');
       final r = Settings.fromJson(jsonDecode(jsonEncode(s.toJson())) as Map<String, dynamic>);
       expect(r.toJson(), s.toJson());
     });
     test('tolerates junk', () {
-      final r = Settings.fromJson({'wakeTime': 'nope', 'calcMethod': 'bogus'});
+      final r = Settings.fromJson({'wakeTime': 'nope', 'calcMethod': 'bogus', 'themeMode': 'neon'});
       expect(r.wakeTime, const TimeOfDay(hour: 5, minute: 0));
       expect(r.calcMethod, 'muslim_world_league');
+      expect(r.themeMode, 'system');
     });
   });
 
@@ -96,7 +90,7 @@ void main() {
       final logs = {dayKey(now): DayLog(prayers: {'Asr'})};
       final plan = planReminders(s, logs, now);
       final today = plan.where((r) => dayKey(r.when) == dayKey(now)).map((r) => r.payload).toList();
-      expect(today, ['prayer:Maghrib|2026-06-01', 'prayer:Isha|2026-06-01']);
+      expect(today, ['prayer:Maghrib|2026-06-01', 'prayer:Isha|2026-06-01', 'bed|2026-06-01']);
       expect(plan.length, lessThanOrEqualTo(64));
       expect(plan.map((r) => r.id).toSet().length, plan.length, reason: 'ids are unique');
     });
