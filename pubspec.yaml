@@ -51,6 +51,7 @@ dependencies:
   json_schema_builder: ^0.1.7
   app_settings: ^9.0.1
   hijri: ^3.0.1
+  home_widget: ^0.9.4
 
 dev_dependencies:
   flutter_test:

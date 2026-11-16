@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="prayer_widget_name">Daily Discipline</string>
+    <string name="prayer_widget_description">Next prayer, today\'s score and a Done button</string>
+    <string name="prayer_widget_open_app">Open the app</string>
+    <string name="prayer_widget_done">Done</string>
+</resources>
