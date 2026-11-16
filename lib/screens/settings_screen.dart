@@ -7,9 +7,13 @@ import '../app_state.dart';
 import '../logic/prayer_status.dart';
 import '../models.dart';
 import '../logic/sleep.dart';
+import '../services/backup_service.dart';
+import '../services/diagnostics.dart';
 import '../services/openrouter.dart';
 import 'reminders_screen.dart';
 import 'wake_challenge_screen.dart';
+import '../services/storage.dart';
+import 'diagnostics_screen.dart';
 
 const _suggestedModels = [
   'openai/gpt-4o-mini',
@@ -21,7 +25,12 @@ const _suggestedModels = [
 
 class SettingsScreen extends StatefulWidget {
   final AppState state;
-  const SettingsScreen({super.key, required this.state});
+
+  /// Overrides for tests; default to the real file-backed services.
+  final BackupService? backup;
+  final Future<String?> Function()? pickBackupFile;
+
+  const SettingsScreen({super.key, required this.state, this.backup, this.pickBackupFile});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -31,6 +40,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final _lat = TextEditingController(text: widget.state.settings.latitude?.toStringAsFixed(4) ?? '');
   late final _lng = TextEditingController(text: widget.state.settings.longitude?.toStringAsFixed(4) ?? '');
   late final _locName = TextEditingController(text: widget.state.settings.locationName);
+  late final _backup = widget.backup ?? BackupService(widget.state.storage);
+  late final _diagnostics = Diagnostics.global ?? Diagnostics(widget.state.storage.prefs);
   bool _locating = false;
 
   AppState get state => widget.state;
@@ -92,32 +103,123 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _snack('Location saved. Prayer times updated.');
   }
 
-  Future<void> _import() async {
+  // ---------- Backup ----------
+  Future<void> _pasteBackup() async {
     final ctl = TextEditingController();
     final raw = await showDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Import backup'),
-        content: TextField(
-          controller: ctl,
-          maxLines: 8,
-          decoration: const InputDecoration(hintText: 'Paste backup JSON here'),
-        ),
+        title: const Text('Paste backup'),
+        content: TextField(controller: ctl, maxLines: 8, decoration: const InputDecoration(hintText: 'Paste backup JSON here')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(c, ctl.text), child: const Text('Import')),
+          FilledButton(onPressed: () => Navigator.pop(c, ctl.text), child: const Text('Continue')),
         ],
       ),
     );
     ctl.dispose();
     if (raw == null || raw.trim().isEmpty) return;
+    await _confirmRestore(raw, 'the pasted backup');
+  }
+
+  Future<void> _importFile() async {
     try {
-      await state.importBackup(raw);
-      _snack('Backup restored.');
-      setState(() {});
+      final raw = await (widget.pickBackupFile ?? BackupService.pickBackupFile)();
+      if (raw == null) return;
+      await _confirmRestore(raw, 'this file');
     } catch (e) {
-      _snack('Import failed: $e');
+      _snack(_errorText(e));
     }
+  }
+
+  Future<void> _exportFile(BuildContext tileContext) async {
+    final box = tileContext.findRenderObject() as RenderBox?;
+    try {
+      await _backup.shareExport(origin: box == null ? null : box.localToGlobal(Offset.zero) & box.size);
+    } catch (e) {
+      _snack('Could not share the backup: $e');
+    }
+  }
+
+  Future<void> _copyBackup() async {
+    await Clipboard.setData(ClipboardData(text: state.storage.exportJson()));
+    _snack('Backup copied to clipboard.');
+  }
+
+  Future<void> _pickAutomaticBackup() async {
+    final list = await _backup.automaticBackups();
+    if (!mounted) return;
+    final picked = await showModalBottomSheet<AutoBackup>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: ListView(shrinkWrap: true, children: [
+          const ListTile(
+            title: Text('Restore from automatic backup'),
+            subtitle: Text('A copy is saved on this phone once a day (last ${BackupService.keepDaily} kept), '
+                'and before every restore.'),
+          ),
+          if (list.isEmpty)
+            const ListTile(leading: Icon(Icons.info_outline), title: Text('No automatic backups yet.'))
+          else
+            for (final b in list)
+              ListTile(
+                leading: Icon(b.beforeRestore ? Icons.restore : Icons.event_available_outlined),
+                title: Text(DateFormat.yMMMEd().add_jm().format(b.at)),
+                subtitle: Text(b.beforeRestore ? 'Saved before a restore' : 'Daily backup'),
+                onTap: () => Navigator.pop(c, b),
+              ),
+        ]),
+      ),
+    );
+    if (picked == null) return;
+    try {
+      await _confirmRestore(await picked.read(), 'the backup from ${DateFormat.yMMMEd().add_jm().format(picked.at)}');
+    } catch (e) {
+      _snack(_errorText(e));
+    }
+  }
+
+  String _errorText(Object e) => e is FormatException ? 'Import failed: ${e.message}' : 'Import failed: $e';
+
+  Future<void> _confirmRestore(String raw, String what) async {
+    final BackupSummary info;
+    try {
+      info = Storage.describeBackup(raw);
+    } catch (e) {
+      _snack(_errorText(e));
+      return;
+    }
+    if (!mounted) return;
+    final made = info.exportedAt == null ? '' : ' Made ${DateFormat.yMMMd().add_jm().format(info.exportedAt!.toLocal())}.';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Restore backup?'),
+        content: Text('Restore $what: ${info.describe()}.$made\n\n'
+            'This replaces the data on this phone. A copy of your current data is saved first, so you can '
+            'undo this from "Restore from automatic backup". Your API key is not part of backups.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Restore')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _backup.restore(state, raw);
+      _syncFields();
+      _snack('Backup restored.');
+    } catch (e) {
+      _snack(_errorText(e));
+    }
+  }
+
+  void _syncFields() {
+    _lat.text = s.latitude?.toStringAsFixed(4) ?? '';
+    _lng.text = s.longitude?.toStringAsFixed(4) ?? '';
+    _locName.text = s.locationName;
+    if (mounted) setState(() {});
   }
 
   Future<void> _reset() async {
@@ -125,7 +227,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('Reset everything?'),
-        content: const Text('This deletes all your history, settings and API key.'),
+        content: const Text('This deletes all your history, settings, API key and diagnostics. '
+            'Automatic backups stay on this phone, so you can still restore one.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Reset')),
@@ -134,6 +237,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (ok != true) return;
     await state.resetAll();
+    await _diagnostics.clear();
     _lat.clear();
     _lng.clear();
     _locName.clear();
@@ -361,17 +465,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _header('AI coach (OpenRouter)'),
           AiKeySection(state: state),
 
-          _header('Data'),
+          _header('Backup'),
+          Builder(
+            builder: (tile) => ListTile(
+              leading: const Icon(Icons.ios_share),
+              title: const Text('Export backup file'),
+              subtitle: const Text('Save or send your history, habits, tasks and settings as a file'),
+              onTap: () => _exportFile(tile),
+            ),
+          ),
           ListTile(
-            leading: const Icon(Icons.upload_outlined),
-            title: const Text('Export backup'),
-            subtitle: const Text('Copies your history and settings to the clipboard'),
-            onTap: () async {
-              await Clipboard.setData(ClipboardData(text: state.storage.exportJson()));
-              _snack('Backup copied to clipboard.');
+            leading: const Icon(Icons.file_open_outlined),
+            title: const Text('Import backup file'),
+            subtitle: const Text('Restore from a file you exported'),
+            onTap: _importFile,
+          ),
+          ListTile(
+            leading: const Icon(Icons.history),
+            title: const Text('Restore from automatic backup'),
+            subtitle: const Text('Saved on this phone once a day, last ${BackupService.keepDaily} kept'),
+            onTap: _pickAutomaticBackup,
+          ),
+          ListTile(
+            leading: const Icon(Icons.copy_outlined),
+            title: const Text('Copy backup to clipboard'),
+            onTap: _copyBackup,
+          ),
+          ListTile(
+            leading: const Icon(Icons.content_paste_outlined),
+            title: const Text('Paste backup'),
+            onTap: _pasteBackup,
+          ),
+
+          _header('Diagnostics'),
+          SwitchListTile(
+            secondary: const Icon(Icons.monitor_heart_outlined),
+            title: const Text('Collect diagnostics on this phone'),
+            subtitle: const Text(diagnosticsExplanation),
+            isThreeLine: true,
+            value: _diagnostics.enabled,
+            onChanged: (v) async {
+              await _diagnostics.setEnabled(v);
+              setState(() {});
             },
           ),
-          ListTile(leading: const Icon(Icons.download_outlined), title: const Text('Import backup'), onTap: _import),
+          ListTile(
+            leading: const Icon(Icons.bug_report_outlined),
+            title: const Text('Diagnostics'),
+            subtitle: const Text('Counters, error log and "Share report"'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => DiagnosticsScreen(diagnostics: _diagnostics)),
+              );
+              if (mounted) setState(() {});
+            },
+          ),
+
+          _header('Data'),
           ListTile(
             leading: Icon(Icons.delete_forever_outlined, color: Theme.of(context).colorScheme.error),
             title: Text('Reset all data', style: TextStyle(color: Theme.of(context).colorScheme.error)),

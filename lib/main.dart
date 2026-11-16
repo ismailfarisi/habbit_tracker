@@ -4,6 +4,8 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'app_state.dart';
 import 'screens/home_screen.dart';
 import 'screens/onboarding_screen.dart';
+import 'services/backup_service.dart';
+import 'services/diagnostics.dart';
 import 'services/notification_service.dart';
 import 'services/storage.dart';
 
@@ -28,8 +30,14 @@ Future<void> main() async {
   final notifications = NotificationService.instance;
   await notifications.init();
   final state = await AppState.load(await Storage.open(), notifications);
+  final diagnostics = Diagnostics.global = Diagnostics(state.storage.prefs)..installErrorHandlers();
+  await diagnostics.count(Diagnostics.appOpens);
+  BackupService(state.storage).startAutomatic();
 
-  void handle(NotificationResponse r) => routeNotification(state, r.payload ?? '', r.actionId);
+  void handle(NotificationResponse r) {
+    diagnostics.count(r.actionId == null ? Diagnostics.opensFromNotification : Diagnostics.notificationActions);
+    routeNotification(state, r.payload ?? '', r.actionId);
+  }
 
   notifications.onResponse = handle;
   final launch = await notifications.launchResponse();

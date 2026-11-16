@@ -52,6 +52,9 @@ dependencies:
   app_settings: ^9.0.1
   hijri: ^3.0.1
   home_widget: ^0.9.4
+  share_plus: ^13.3.1
+  file_picker: ^13.3.3
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:
