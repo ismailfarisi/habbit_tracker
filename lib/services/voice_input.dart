@@ -105,6 +105,8 @@ class DictationUnavailable implements Exception {
 
 /// Streams 16 kHz microphone audio into a live whisper.cpp session.
 class WhisperDictation implements Dictation {
+  static const finalPassWait = Duration(milliseconds: 1200);
+
   final String modelPath;
   AudioRecorder? _rec;
   AudioRecorder get _recorder => _rec ??= AudioRecorder();
@@ -114,6 +116,7 @@ class WhisperDictation implements Dictation {
   void Function()? _onDone;
   void Function(String)? _onText;
   bool _finished = false;
+  String _last = '';
 
   WhisperDictation(this.modelPath);
 
@@ -144,12 +147,16 @@ class WhisperDictation implements Dictation {
         pcm16Stream: pcm,
         lang: whisperLang(locale),
         suppressNonSpeechTokens: true,
+        keepModelLoaded: true,
       );
     } catch (e) {
       await _recorder.stop().catchError((_) => null);
       throw DictationUnavailable('$e');
     }
-    _partials = _session!.partials.listen((t) => onText(_clean(t)), onError: (Object e) => onError('Whisper: $e'));
+    _partials = _session!.partials.listen(
+      (t) => onText(_last = _clean(t)),
+      onError: (Object e) => onError('Whisper: $e'),
+    );
     _limit = Timer(const Duration(minutes: 3), stop);
   }
 
@@ -158,8 +165,11 @@ class WhisperDictation implements Dictation {
     if (_finished || _session == null) return;
     _limit?.cancel();
     await _recorder.stop();
-    final text = await _session!.stop();
-    if (!_finished) _onText?.call(_clean(text));
+    // The live text is already on screen; take whisper's final pass only if
+    // it arrives quickly, so stopping feels instant.
+    final text = await _session!.stop().timeout(finalPassWait, onTimeout: () => _last);
+    final clean = _clean(text);
+    if (!_finished && clean.isNotEmpty) _onText?.call(clean);
     _finish();
   }
 

@@ -130,6 +130,28 @@ void main() {
     expect(((await defaultSpeaker()) as FallbackSpeaker).primary, isA<GrokSpeaker>());
   });
 
+  test('speechChunks splits sentences, keeps a short first one, merges short later ones', () {
+    expect(speechChunks('Hi! This is how your coach will sound.'), ['Hi!', 'This is how your coach will sound.']);
+    expect(speechChunks('One. Two. Three is longer than the rest.'), ['One.', 'Two. Three is longer than the rest.']);
+    expect(speechChunks('No punctuation here'), ['No punctuation here']);
+    final long = List.filled(30, 'word,').join(' ');
+    expect(speechChunks(long, max: 60).every((c) => c.length <= 60), isTrue);
+  });
+
+  test('clips play in order and the next chunk is made while one plays', () async {
+    final events = <String>[];
+    kokoroSynth = (dir, text, sid, speed) async {
+      events.add('make $text');
+      return Uint8List(1);
+    };
+    playAudio = (bytes, ext) async {
+      events.add('play');
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    };
+    await KokoroSpeaker('/m', 3).speak('Hi! This is how your coach will sound.');
+    expect(events, ['make Hi!', 'make This is how your coach will sound.', 'play', 'play']);
+  });
+
   test('wavBytes writes a 16-bit mono RIFF header', () {
     final w = wavBytes(Float32List.fromList([0, 1, -1]), 24000);
     expect(ascii.decode(w.sublist(0, 4)), 'RIFF');

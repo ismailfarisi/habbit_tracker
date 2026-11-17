@@ -113,16 +113,65 @@ Future<void> _playAudio(Uint8List bytes, String ext) async {
 
 var _generation = 0;
 
-/// An engine that produces an audio clip, which is then played.
+/// Splits [text] into sentence-sized chunks (long ones at commas), so the
+/// first one can play while the rest are still being made.
+List<String> speechChunks(String text, {int max = 220}) {
+  final parts = RegExp(r'[^.!?…\n]+[.!?…]*', unicode: true)
+      .allMatches(text)
+      .map((m) => m.group(0)!.trim())
+      .where((s) => s.isNotEmpty)
+      .toList();
+  final out = <String>[];
+  for (final p in parts) {
+    if (p.length <= max) {
+      out.add(p);
+      continue;
+    }
+    var cur = '';
+    for (final piece in p.split(RegExp(r'(?<=,)\s+'))) {
+      if (cur.isNotEmpty && cur.length + piece.length + 1 > max) {
+        out.add(cur);
+        cur = piece;
+      } else {
+        cur = cur.isEmpty ? piece : '$cur $piece';
+      }
+    }
+    if (cur.isNotEmpty) out.add(cur);
+  }
+  // Very short fragments ("Hi!") are merged forward, except the first,
+  // which starts playing almost at once.
+  final merged = <String>[];
+  for (final c in out) {
+    if (merged.length > 1 && merged.last.length < 24) {
+      merged[merged.length - 1] = '${merged.last} $c';
+    } else {
+      merged.add(c);
+    }
+  }
+  return merged.isEmpty ? [text.trim()] : merged;
+}
+
+/// An engine that produces audio clips, played back to back: the next
+/// chunk is synthesized while the current one plays.
 abstract class ClipSpeaker implements Speaker {
   Future<(Uint8List, String)> synthesize(String text, String locale, double rate);
 
   @override
   Future<void> speak(String text, {String locale = '', double rate = 0.5}) async {
     final gen = ++_generation;
-    final (bytes, ext) = await synthesize(text, locale, rate);
-    if (gen != _generation) return;
-    await playAudio(bytes, ext);
+    final chunks = speechChunks(text);
+    var next = synthesize(chunks.first, locale, rate);
+    for (var i = 0; i < chunks.length; i++) {
+      final (bytes, ext) = await next;
+      if (gen != _generation) return;
+      if (i + 1 < chunks.length) {
+        next = synthesize(chunks[i + 1], locale, rate);
+        // Errors surface when awaited; don't let an early one go unhandled.
+        next.ignore();
+      }
+      await playAudio(bytes, ext);
+      if (gen != _generation) return;
+    }
   }
 
   @override
@@ -244,33 +293,97 @@ Uint8List wavBytes(Float32List samples, int sampleRate) {
   return data.buffer.asUint8List();
 }
 
-/// Runs Kokoro on a background isolate and returns WAV bytes. Replace in tests.
-Future<Uint8List> Function(String modelDir, String text, int sid, double speed) kokoroSynth = _kokoroSynth;
+/// Synthesizes with Kokoro and returns WAV bytes. Replace in tests.
+Future<Uint8List> Function(String modelDir, String text, int sid, double speed) kokoroSynth = (dir, text, sid, speed) =>
+    KokoroWorker.forModel(dir, british: sid >= 20).synth(text, sid, speed);
 
-Future<Uint8List> _kokoroSynth(String dir, String text, int sid, double speed) => Isolate.run(() {
-  sherpa.initBindings();
-  final tts = sherpa.OfflineTts(
-    sherpa.OfflineTtsConfig(
-      model: sherpa.OfflineTtsModelConfig(
-        kokoro: sherpa.OfflineTtsKokoroModelConfig(
-          model: '$dir/model.int8.onnx',
-          voices: '$dir/voices.bin',
-          tokens: '$dir/tokens.txt',
-          dataDir: '$dir/espeak-ng-data',
-          lexicon: sid >= 20 ? '$dir/lexicon-gb-en.txt' : '$dir/lexicon-us-en.txt',
-        ),
-        numThreads: 2,
-      ),
-    ),
-  );
-  try {
-    final audio = tts.generate(text: text, sid: sid, speed: speed);
-    if (audio.samples.isEmpty) throw TtsException('Kokoro produced no audio');
-    return wavBytes(audio.samples, audio.sampleRate);
-  } finally {
-    tts.free();
+/// A background isolate that keeps one Kokoro model loaded, so only the
+/// first sentence pays the model load.
+class KokoroWorker {
+  static KokoroWorker? _current;
+
+  final String modelDir;
+  final bool british;
+  final Future<SendPort> _port;
+
+  KokoroWorker._(this.modelDir, this.british) : _port = _spawn(modelDir, british);
+
+  static KokoroWorker forModel(String dir, {required bool british}) {
+    final c = _current;
+    if (c != null && c.modelDir == dir && c.british == british) return c;
+    c?.dispose();
+    return _current = KokoroWorker._(dir, british);
   }
-});
+
+  /// Starts loading the model in the background (e.g. when Kokoro is picked).
+  static void warmUp(String dir, int sid) => forModel(dir, british: sid >= 20);
+
+  static void disposeCurrent() {
+    _current?.dispose();
+    _current = null;
+  }
+
+  static Future<SendPort> _spawn(String dir, bool british) async {
+    final ready = ReceivePort();
+    final threads = Platform.numberOfProcessors.clamp(2, 4);
+    await Isolate.spawn(_main, [ready.sendPort, dir, british, threads]);
+    return await ready.first as SendPort;
+  }
+
+  static void _main(List<Object> args) {
+    final reply = args[0] as SendPort;
+    final dir = args[1] as String;
+    sherpa.initBindings();
+    final tts = sherpa.OfflineTts(
+      sherpa.OfflineTtsConfig(
+        model: sherpa.OfflineTtsModelConfig(
+          kokoro: sherpa.OfflineTtsKokoroModelConfig(
+            model: '$dir/model.int8.onnx',
+            voices: '$dir/voices.bin',
+            tokens: '$dir/tokens.txt',
+            dataDir: '$dir/espeak-ng-data',
+            lexicon: args[2] as bool ? '$dir/lexicon-gb-en.txt' : '$dir/lexicon-us-en.txt',
+          ),
+          numThreads: args[3] as int,
+        ),
+      ),
+    );
+    final inbox = ReceivePort();
+    reply.send(inbox.sendPort);
+    inbox.listen((msg) {
+      final m = msg as List<Object?>;
+      if (m.first == 'stop') {
+        tts.free();
+        inbox.close();
+        return;
+      }
+      final out = m[4] as SendPort;
+      try {
+        final audio = tts.generate(text: m[1] as String, sid: m[2] as int, speed: m[3] as double);
+        if (audio.samples.isEmpty) {
+          out.send('Kokoro produced no audio');
+        } else {
+          out.send(TransferableTypedData.fromList([wavBytes(audio.samples, audio.sampleRate)]));
+        }
+      } catch (e) {
+        out.send('Kokoro: $e');
+      }
+    });
+  }
+
+  Future<Uint8List> synth(String text, int sid, double speed) async {
+    final port = await _port;
+    final rp = ReceivePort();
+    port.send(['synth', text, sid, speed, rp.sendPort]);
+    final r = await rp.first;
+    if (r is String) throw TtsException(r);
+    return (r as TransferableTypedData).materialize().asUint8List();
+  }
+
+  void dispose() {
+    _port.then((p) => p.send(const ['stop']), onError: (_) {});
+  }
+}
 
 final _arabic = RegExp(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]');
 
@@ -459,6 +572,7 @@ class KokoroModel extends ChangeNotifier {
   }
 
   Future<void> delete() async {
+    KokoroWorker.disposeCurrent();
     final dir = Directory(await modelDir());
     if (await dir.exists()) await dir.delete(recursive: true);
     ready = false;

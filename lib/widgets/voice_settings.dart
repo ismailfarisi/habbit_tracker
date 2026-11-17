@@ -184,7 +184,10 @@ class _SpokenVoiceSectionState extends State<SpokenVoiceSection> {
     lastTtsError.value = null;
     if (engine == 'kokoro') {
       await _kokoro.refresh();
-      if (!_kokoro.ready) unawaited(_kokoro.download());
+      if (!_kokoro.ready) {
+        await _kokoro.download();
+      }
+      if (_kokoro.ready) KokoroWorker.warmUp(await _kokoro.modelDir(), widget.state.settings.kokoroVoice);
     }
   }
 
