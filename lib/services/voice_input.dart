@@ -7,13 +7,14 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:record/record.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:whisper_ggml/whisper_ggml.dart';
 
 import '../models.dart';
+
+export 'tts.dart' show speakAloud, speakText, stopSpeaking;
 
 /// A single listen-until-stopped dictation.
 abstract class Dictation {
@@ -358,15 +359,3 @@ class WhisperModels extends ChangeNotifier {
     notifyListeners();
   }
 }
-
-final _tts = FlutterTts();
-
-/// Reads [text] aloud with the phone's text-to-speech. Replace in tests.
-Future<void> Function(String text) speakAloud = (text) async {
-  final locale = voiceSettings().speechLocale;
-  if (locale.isNotEmpty) await _tts.setLanguage(locale.replaceAll('_', '-'));
-  await _tts.setSpeechRate(0.5);
-  await _tts.speak(text.replaceAll(RegExp(r'[*#_`]'), ''));
-};
-
-Future<void> stopSpeaking() => _tts.stop();

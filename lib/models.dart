@@ -91,6 +91,14 @@ class Settings {
   bool speakConfirmations;
   bool readCoachReplies;
 
+  /// Spoken output: 'system' | 'kokoro' | 'openai' | 'grok'.
+  String ttsEngine;
+
+  /// Kokoro v1.0 English speaker id (see `kokoroVoices`).
+  int kokoroVoice;
+  String openaiVoice;
+  String grokVoice;
+
   /// Missed days per calendar month that don't break the perfect-day streak.
   int freezesPerMonth;
 
@@ -137,6 +145,10 @@ class Settings {
     this.whisperModel = 'base',
     this.speakConfirmations = true,
     this.readCoachReplies = false,
+    this.ttsEngine = 'system',
+    this.kokoroVoice = 3,
+    this.openaiVoice = 'coral',
+    this.grokVoice = 'eve',
     this.freezesPerMonth = 2,
     this.onboarded = false,
     this.themeMode = 'system',
@@ -179,6 +191,10 @@ class Settings {
     'whisperModel': whisperModel,
     'speakConfirmations': speakConfirmations,
     'readCoachReplies': readCoachReplies,
+    'ttsEngine': ttsEngine,
+    'kokoroVoice': kokoroVoice,
+    'openaiVoice': openaiVoice,
+    'grokVoice': grokVoice,
     'freezesPerMonth': freezesPerMonth,
     'onboarded': onboarded,
     'themeMode': themeMode,
@@ -226,6 +242,12 @@ class Settings {
       whisperModel: const ['tiny', 'base'].contains(j['whisperModel']) ? j['whisperModel'] as String : d.whisperModel,
       speakConfirmations: j['speakConfirmations'] as bool? ?? d.speakConfirmations,
       readCoachReplies: j['readCoachReplies'] as bool? ?? d.readCoachReplies,
+      ttsEngine: const ['system', 'kokoro', 'openai', 'grok'].contains(j['ttsEngine'])
+          ? j['ttsEngine'] as String
+          : d.ttsEngine,
+      kokoroVoice: ((j['kokoroVoice'] as num?)?.toInt() ?? d.kokoroVoice).clamp(0, 27),
+      openaiVoice: (j['openaiVoice'] as String?)?.isNotEmpty == true ? j['openaiVoice'] as String : d.openaiVoice,
+      grokVoice: (j['grokVoice'] as String?)?.isNotEmpty == true ? j['grokVoice'] as String : d.grokVoice,
       freezesPerMonth: (j['freezesPerMonth'] as num?)?.toInt() ?? d.freezesPerMonth,
       onboarded: j['onboarded'] as bool? ?? true,
       themeMode: const ['system', 'light', 'dark'].contains(j['themeMode']) ? j['themeMode'] as String : d.themeMode,

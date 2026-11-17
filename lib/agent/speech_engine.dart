@@ -3,9 +3,12 @@
 /// challenge) can be driven by a fake in tests: set [speechEngineFactory].
 library;
 
-import 'package:flutter_tts/flutter_tts.dart';
+import 'dart:async';
 
+import '../services/tts.dart' as tts show stopSpeaking;
 import '../services/voice_input.dart';
+
+Future<void> stopSpeakingAloud() => tts.stopSpeaking();
 
 abstract class SpeechEngine {
   /// Prepares the recognizer. [onStopped] fires when listening ends on its
@@ -23,10 +26,9 @@ abstract class SpeechEngine {
 SpeechEngine Function() speechEngineFactory = PluginSpeechEngine.new;
 
 /// Listens through the user's chosen dictation engine (Whisper or the
-/// phone's recognizer, see [dictationFactory]) and speaks with the phone's
-/// text-to-speech.
+/// phone's recognizer, see [dictationFactory]) and speaks with the chosen
+/// voice engine (see [speakText]).
 class PluginSpeechEngine implements SpeechEngine {
-  final _tts = FlutterTts();
   Dictation? _dictation;
   void Function()? _onStopped;
   void Function(String message)? _onError;
@@ -40,7 +42,7 @@ class PluginSpeechEngine implements SpeechEngine {
 
   @override
   Future<void> listen({required void Function(String words) onWords, String? localeId}) async {
-    await _tts.stop();
+    await stopSpeakingAloud();
     _dictation?.dispose();
     final d = _dictation = await dictationFactory();
     await d.start(
@@ -56,19 +58,15 @@ class PluginSpeechEngine implements SpeechEngine {
 
   @override
   Future<void> speak(String text, {void Function()? onDone}) async {
-    _tts.setCompletionHandler(() => onDone?.call());
-    await _tts.setSpeechRate(0.42);
-    await _tts.speak(text.replaceAll(RegExp(r'[*#_`]'), ''));
+    unawaited(speakText(text, rate: 0.42).whenComplete(() => onDone?.call()));
   }
 
   @override
-  Future<void> stopSpeaking() async {
-    await _tts.stop();
-  }
+  Future<void> stopSpeaking() => stopSpeakingAloud();
 
   @override
   void dispose() {
     _dictation?.dispose();
-    _tts.stop();
+    stopSpeakingAloud();
   }
 }

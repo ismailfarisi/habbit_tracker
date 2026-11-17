@@ -57,6 +57,9 @@ dependencies:
   path_provider: ^2.1.6
   whisper_ggml: ^2.9.0
   record: ^7.2.0
+  sherpa_onnx: ^1.13.8
+  audioplayers: ^6.8.1
+  archive: ^4.7.1
 
 dev_dependencies:
   flutter_test:

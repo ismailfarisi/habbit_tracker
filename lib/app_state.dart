@@ -9,6 +9,7 @@ import 'services/notification_service.dart';
 import 'services/reminders.dart';
 import 'services/storage.dart';
 import 'services/task_tools.dart';
+import 'services/tts.dart';
 import 'services/voice_input.dart';
 
 /// App state and the only writer of persisted data.
@@ -35,6 +36,10 @@ class AppState extends ChangeNotifier implements TaskBackend {
   List<HabitDef> habits;
   String apiKey = '';
 
+  /// Keys for OpenAI / xAI (Grok) voices; separate from the OpenRouter key.
+  String openaiKey = '';
+  String xaiKey = '';
+
   /// Set when a notification asks the UI to open a tab.
   final ValueNotifier<int?> requestedTab = ValueNotifier(null);
 
@@ -54,7 +59,10 @@ class AppState extends ChangeNotifier implements TaskBackend {
     );
     if (!storage.hasHabits) await storage.saveHabits(s.habits);
     s.apiKey = await storage.loadApiKey();
+    s.openaiKey = await storage.loadSecret(Storage.openaiKeyName);
+    s.xaiKey = await storage.loadSecret(Storage.xaiKeyName);
     voiceSettings = () => s.settings;
+    ttsKeys = () => TtsKeys(openai: s.openaiKey, xai: s.xaiKey);
     return s;
   }
 
@@ -280,6 +288,14 @@ class AppState extends ChangeNotifier implements TaskBackend {
     await storage.saveApiKey(apiKey);
   }
 
+  /// Saves the key for a cloud voice: [provider] is 'openai' or 'grok'.
+  Future<void> setVoiceKey(String provider, String key) async {
+    final k = key.trim();
+    provider == 'openai' ? openaiKey = k : xaiKey = k;
+    notifyListeners();
+    await storage.saveSecret(provider == 'openai' ? Storage.openaiKeyName : Storage.xaiKeyName, k);
+  }
+
   Future<void> importBackup(String raw) async {
     await storage.importJson(raw);
     settings = storage.loadSettings();
@@ -297,6 +313,8 @@ class AppState extends ChangeNotifier implements TaskBackend {
     tasks = [];
     habits = [];
     apiKey = '';
+    openaiKey = '';
+    xaiKey = '';
     notifyListeners();
     await _reschedule();
   }

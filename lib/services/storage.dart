@@ -22,6 +22,8 @@ class Storage {
   static const _habitsKey = 'habits.v1';
   static const backupVersion = 2;
   static const _apiKeyKey = 'openrouter_api_key';
+  static const openaiKeyName = 'openai_api_key';
+  static const xaiKeyName = 'xai_api_key';
   static const _secure = FlutterSecureStorage();
 
   final SharedPreferences prefs;
@@ -110,6 +112,19 @@ class Storage {
       ? _secure.delete(key: _apiKeyKey)
       : _secure.write(key: _apiKeyKey, value: key);
 
+  /// Another provider's API key kept in secure storage ([openaiKeyName],
+  /// [xaiKeyName]); never part of backups.
+  Future<String> loadSecret(String name) async {
+    try {
+      return await _secure.read(key: name) ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<void> saveSecret(String name, String value) =>
+      value.isEmpty ? _secure.delete(key: name) : _secure.write(key: name, value: value);
+
   /// True when there is nothing worth backing up (fresh install or reset).
   bool get hasNoData => loadLogs().isEmpty && loadTasks().isEmpty && loadHabits().isEmpty;
 
@@ -185,6 +200,8 @@ class Storage {
     await prefs.remove(_tasksKey);
     await saveHabits([]);
     await saveApiKey('');
+    await saveSecret(openaiKeyName, '');
+    await saveSecret(xaiKeyName, '');
   }
 }
 
