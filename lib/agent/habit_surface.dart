@@ -303,7 +303,7 @@ class HabitFallback extends StatelessWidget {
           ),
           IconButton.filled(tooltip: 'More', onPressed: () => bump(step), icon: const Icon(Icons.add)),
         ]),
-      CheckboxListTile(
+      CheckboxListTile.adaptive(
         contentPadding: EdgeInsets.zero,
         controlAffinity: ListTileControlAffinity.leading,
         value: habitDone(entry, habit),

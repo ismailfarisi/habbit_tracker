@@ -157,7 +157,7 @@ class _DayEditorState extends State<DayEditor> {
                 _HabitEditor(key: ValueKey('day-habit-${h.id}-${dayKey(day)}'), state: state, habit: h, day: day),
               if (tasks.isNotEmpty) _Heading('Routines'),
               for (final task in tasks)
-                CheckboxListTile(
+                CheckboxListTile.adaptive(
                   key: ValueKey('day-task-${task.id}'),
                   contentPadding: EdgeInsets.zero,
                   dense: true,

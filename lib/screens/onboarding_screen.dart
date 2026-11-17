@@ -160,6 +160,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         if (optional)
                           TextButton(onPressed: _finishing ? null : _next, child: Text(_last ? 'Skip' : 'Not now')),
                         FilledButton(
+                          style: FilledButton.styleFrom(minimumSize: const Size(120, 48)),
                           onPressed: _finishing ? null : _next,
                           child: Text(switch (_step) {
                             0 => 'Get started',
@@ -232,7 +233,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       ),
       const SizedBox(height: 16),
       Text('Sleep goal: $hours hours', style: t.textTheme.titleMedium),
-      Slider(
+      Slider.adaptive(
         value: s.sleepHours.clamp(5, 10),
         min: 5,
         max: 10,
@@ -251,7 +252,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     ),
     for (final h in habitTemplates)
       Card(
-        child: CheckboxListTile(
+        child: CheckboxListTile.adaptive(
           value: _picked.contains(h.id),
           onChanged: (v) => setState(() => v == true ? _picked.add(h.id) : _picked.remove(h.id)),
           secondary: Text(h.emoji, style: const TextStyle(fontSize: 28)),
@@ -387,7 +388,7 @@ class _LocationStepState extends State<_LocationStep> {
         FilledButton.tonalIcon(
           onPressed: _locating ? null : _useLocation,
           icon: _locating
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator.adaptive(strokeWidth: 2))
               : const Icon(Icons.my_location),
           label: const Text('Use my location'),
         ),

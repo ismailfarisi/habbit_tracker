@@ -13,6 +13,7 @@ import '../services/task_tools.dart';
 import '../widgets/assistant_chat.dart';
 import '../widgets/day_editor.dart';
 import 'habit_detail_screen.dart';
+import '../widgets/adaptive.dart';
 
 /// The Progress tab: streak tiles (current streak, rule, "N of last 30",
 /// freezes left), the weekly review and a 30-day grid of every tracked item
@@ -26,13 +27,10 @@ class ProgressScreen extends StatelessWidget {
     return ListenableBuilder(
       listenable: state,
       builder: (context, _) {
-        final t = Theme.of(context);
         final today = dateOnly(DateTime.now());
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text('Progress', style: t.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
             _StreakGrid(state: state, today: today),
             const SizedBox(height: 12),
             WeeklyReviewCard(
@@ -83,12 +81,12 @@ class _StreakGrid extends StatelessWidget {
     bool wake(DayLog? l) => wakeDone(l, s);
     final perfect = perfectDayStreak(s, logs, habits: state.habits, tasks: state.tasks, today: today);
     final tiles = [
-      StreakTileData('☀️ Early rising', logStreak(logs, wake, today: today), ruleLabel(StreakRule.strict),
+      StreakTileData('Early rising', logStreak(logs, wake, today: today), ruleLabel(StreakRule.strict),
           consistency(logs, wake, today: today, scheduled: builtIn)),
-      StreakTileData('🕌 All 5 prayers', logStreak(logs, prayersDone, today: today), ruleLabel(StreakRule.strict),
+      StreakTileData('All 5 prayers', logStreak(logs, prayersDone, today: today), ruleLabel(StreakRule.strict),
           consistency(logs, prayersDone, today: today, scheduled: builtIn)),
       StreakTileData(
-        '⭐ Perfect days',
+        'Perfect days',
         perfect,
         'Freezes',
         consistencyBy(
@@ -147,7 +145,7 @@ class StreakTile extends StatelessWidget {
             Text(data.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.textTheme.bodySmall),
             Text('$n ${n == 1 ? 'day' : 'days'}', style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
             Text(
-              freezes == null ? data.rule : '❄️ $freezes ${freezes == 1 ? 'freeze' : 'freezes'} left',
+              freezes == null ? data.rule : '$freezes ${freezes == 1 ? 'freeze' : 'freezes'} left',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: muted,
@@ -174,10 +172,13 @@ class WeeklyReviewCard extends StatelessWidget {
     final r = review;
     final f = DateFormat('d MMM');
     final pct = (r.week.fraction * 100).round();
-    Widget line(String emoji, String text) => Padding(
+    Widget line(IconData icon, String text) => Padding(
           padding: const EdgeInsets.only(top: 6),
           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            SizedBox(width: 26, child: Text(emoji)),
+            Padding(
+              padding: const EdgeInsets.only(right: 10, top: 1),
+              child: Icon(icon, size: 18, color: t.colorScheme.onSurfaceVariant),
+            ),
             Expanded(child: Text(text)),
           ]),
         );
@@ -192,21 +193,22 @@ class WeeklyReviewCard extends StatelessWidget {
             Text('${f.format(r.start)} – ${f.format(r.end)}', style: t.textTheme.bodySmall),
           ]),
           if (r.isEmpty)
-            line('📅', 'Log a few days to see your weekly review.')
+            line(Icons.event_note_outlined, 'Log a few days to see your weekly review.')
           else ...[
             line(
-              '📊',
+              Icons.bar_chart_rounded,
               '${r.week.done} of ${r.week.total} done ($pct%)'
                   '${r.previousWeek.total == 0 ? '' : ' · last week ${(r.previousWeek.fraction * 100).round()}%'}',
             ),
-            if (r.best != null) line('🏆', 'Best: ${r.best!.label} ${r.best!.done}/${r.best!.total}'),
-            if (r.worst != null) line('⚠️', 'Needs work: ${r.worst!.label} ${r.worst!.done}/${r.worst!.total}'),
-            if (r.pattern != null) line('📅', r.pattern!.describe()),
-            if (r.suggestion != null) line('💡', r.suggestion!),
+            if (r.best != null) line(Icons.emoji_events_outlined, 'Best: ${r.best!.label} ${r.best!.done}/${r.best!.total}'),
+            if (r.worst != null) line(Icons.trending_down_rounded, 'Needs work: ${r.worst!.label} ${r.worst!.done}/${r.worst!.total}'),
+            if (r.pattern != null) line(Icons.calendar_month_outlined, r.pattern!.describe()),
+            if (r.suggestion != null) line(Icons.lightbulb_outline, r.suggestion!),
           ],
           const SizedBox(height: 12),
           if (state.apiKey.isNotEmpty)
             FilledButton.tonalIcon(
+              style: compactButton,
               onPressed: r.isEmpty ? null : () => showWeeklyReviewCoach(context, state, r),
               icon: const Icon(Icons.auto_awesome),
               label: const Text('Ask coach'),

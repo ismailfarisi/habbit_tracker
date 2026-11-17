@@ -44,7 +44,7 @@ class RemindersScreen extends StatelessWidget {
           final c = Theme.of(context).colorScheme;
           return ListView(
             children: [
-              SwitchListTile(
+              SwitchListTile.adaptive(
                 secondary: const Icon(Icons.notifications_active_outlined),
                 title: const Text('Reminders'),
                 subtitle: const Text('Wake-up alarm, each prayer, habits and tasks'),

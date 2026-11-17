@@ -9,6 +9,7 @@ import 'services/notification_service.dart';
 import 'services/reminders.dart';
 import 'services/storage.dart';
 import 'services/task_tools.dart';
+import 'services/voice_input.dart';
 
 /// App state and the only writer of persisted data.
 ///
@@ -53,6 +54,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
     );
     if (!storage.hasHabits) await storage.saveHabits(s.habits);
     s.apiKey = await storage.loadApiKey();
+    voiceSettings = () => s.settings;
     return s;
   }
 
@@ -88,8 +90,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
   /// Sets (or with null clears) the wake time logged for [day]. The date
   /// part of [at] is replaced by [day].
   Future<void> setWake(DateTime day, DateTime? at) async {
-    _mutableDay(day).wakeAt =
-        at == null ? null : DateTime(day.year, day.month, day.day, at.hour, at.minute, at.second);
+    _mutableDay(day).wakeAt = at == null ? null : DateTime(day.year, day.month, day.day, at.hour, at.minute, at.second);
     // Silence the wake alarm if it is still ringing.
     if (at != null) await notifications.cancel(reminderId(day, 0));
     await _commit();

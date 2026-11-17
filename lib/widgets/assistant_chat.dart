@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -7,7 +8,9 @@ import '../agent/habit_surface.dart';
 import '../app_state.dart';
 import '../services/openrouter.dart';
 import '../services/task_tools.dart';
+import '../services/voice_input.dart';
 import 'simple_markdown.dart';
+import 'voice_input_button.dart';
 
 class ChatEntry {
   final String role; // user | assistant
@@ -101,14 +104,23 @@ class AssistantChat extends ChangeNotifier {
       final (text, surfaces) = splitInlineA2ui(reply.text);
       reply.text = text;
       for (final components in surfaces) {
-        final result = await agent.habitTools.execute(ToolCall('inline', 'create_habit', jsonEncode({
-          'title': 'New habit',
-          'kind': 'check',
-          'ui': {'components': components},
-        })));
+        final result = await agent.habitTools.execute(
+          ToolCall(
+            'inline',
+            'create_habit',
+            jsonEncode({
+              'title': 'New habit',
+              'kind': 'check',
+              'ui': {'components': components},
+            }),
+          ),
+        );
         debugPrint('Inline A2UI surface: $result');
       }
       if (reply.text.isEmpty && reply.activities.isEmpty && reply.proposals.isEmpty) reply.text = '(no reply)';
+      if (state.settings.readCoachReplies && reply.text.isNotEmpty && reply.text != '(no reply)') {
+        unawaited(speakAloud(reply.text));
+      }
     } catch (e) {
       // Drop the partial exchange so the next request is well-formed.
       history.removeRange(mark, history.length);
@@ -196,9 +208,11 @@ class _AssistantChatViewState extends State<AssistantChatView> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (chat.isEmpty && widget.suggestions.isNotEmpty)
-              Wrap(spacing: 8, runSpacing: 4, children: [
-                for (final s in widget.suggestions) ActionChip(label: Text(s), onPressed: () => _send(s)),
-              ]),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [for (final s in widget.suggestions) ActionChip(label: Text(s), onPressed: () => _send(s))],
+              ),
             if (!chat.isEmpty)
               ConstrainedBox(
                 constraints: BoxConstraints(maxHeight: widget.maxHeight),
@@ -210,20 +224,26 @@ class _AssistantChatViewState extends State<AssistantChatView> {
               ),
             if (chat.busy) const Padding(padding: EdgeInsets.only(top: 4), child: LinearProgressIndicator()),
             const SizedBox(height: 8),
-            Row(children: [
-              Expanded(
-                child: TextField(
-                  controller: _input,
-                  minLines: 1,
-                  maxLines: 4,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _send(),
-                  decoration: InputDecoration(hintText: widget.hint, border: const OutlineInputBorder()),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _input,
+                    minLines: 1,
+                    maxLines: 4,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _send(),
+                    decoration: InputDecoration(
+                      hintText: widget.hint,
+                      border: const OutlineInputBorder(),
+                      suffixIcon: VoiceInputButton(key: const Key('chat-voice'), controller: _input),
+                    ),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              IconButton.filled(onPressed: chat.busy ? null : _send, icon: const Icon(Icons.send)),
-            ]),
+                const SizedBox(width: 8),
+                IconButton.filled(onPressed: chat.busy ? null : _send, icon: const Icon(Icons.send)),
+              ],
+            ),
           ],
         );
       },
@@ -251,37 +271,43 @@ class _Bubble extends StatelessWidget {
           color: entry.error ? c.errorContainer : (user ? c.primary : c.surfaceContainerHighest),
           borderRadius: BorderRadius.circular(14),
         ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-          for (final a in entry.activities)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Row(children: [
-                Icon(entry.undone.contains(a) ? Icons.undo : Icons.task_alt, size: 18, color: c.primary),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    a.label,
-                    style: TextStyle(
-                      color: fg,
-                      fontWeight: FontWeight.w600,
-                      decoration: entry.undone.contains(a) ? TextDecoration.lineThrough : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final a in entry.activities)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  children: [
+                    Icon(entry.undone.contains(a) ? Icons.undo : Icons.task_alt, size: 18, color: c.primary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        a.label,
+                        style: TextStyle(
+                          color: fg,
+                          fontWeight: FontWeight.w600,
+                          decoration: entry.undone.contains(a) ? TextDecoration.lineThrough : null,
+                        ),
+                      ),
                     ),
-                  ),
+                    if (a.undo != null && !entry.undone.contains(a))
+                      TextButton(
+                        style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                        onPressed: () => chat.undo(entry, a),
+                        child: const Text('Undo'),
+                      ),
+                  ],
                 ),
-                if (a.undo != null && !entry.undone.contains(a))
-                  TextButton(
-                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                    onPressed: () => chat.undo(entry, a),
-                    child: const Text('Undo'),
-                  ),
-              ]),
-            ),
-          for (final p in entry.proposals) _ProposalCard(proposal: p, chat: chat),
-          if (entry.text.isNotEmpty)
-            SimpleMarkdown(entry.text, style: TextStyle(color: fg))
-          else if (entry.activities.isEmpty && entry.proposals.isEmpty)
-            const SizedBox(width: 24, height: 16, child: LinearProgressIndicator()),
-        ]),
+              ),
+            for (final p in entry.proposals) _ProposalCard(proposal: p, chat: chat),
+            if (entry.text.isNotEmpty)
+              SimpleMarkdown(entry.text, style: TextStyle(color: fg))
+            else if (entry.activities.isEmpty && entry.proposals.isEmpty)
+              const SizedBox(width: 24, height: 16, child: LinearProgressIndicator()),
+          ],
+        ),
       ),
     );
   }
@@ -303,24 +329,30 @@ class _ProposalCard extends StatelessWidget {
       color: t.colorScheme.surface,
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
-          Text('${h.emoji}  ${h.title}', style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-          Text(h.describeSchedule(), style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
-          const Divider(),
-          if (!proposal.accepted) HabitSurface(chat.state, h, DateTime.now(), persist: false),
-          const SizedBox(height: 8),
-          proposal.accepted
-              ? Row(children: [
-                  Icon(Icons.check_circle, color: t.colorScheme.primary, size: 20),
-                  const SizedBox(width: 6),
-                  const Expanded(child: Text('Added. You can find it on Today.')),
-                ])
-              : FilledButton.icon(
-                  onPressed: () => chat.acceptProposal(proposal),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add habit'),
-                ),
-        ]),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('${h.emoji}  ${h.title}', style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+            Text(h.describeSchedule(), style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+            const Divider(),
+            if (!proposal.accepted) HabitSurface(chat.state, h, DateTime.now(), persist: false),
+            const SizedBox(height: 8),
+            proposal.accepted
+                ? Row(
+                    children: [
+                      Icon(Icons.check_circle, color: t.colorScheme.primary, size: 20),
+                      const SizedBox(width: 6),
+                      const Expanded(child: Text('Added. You can find it on Today.')),
+                    ],
+                  )
+                : FilledButton.icon(
+                    onPressed: () => chat.acceptProposal(proposal),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add habit'),
+                  ),
+          ],
+        ),
       ),
     );
   }

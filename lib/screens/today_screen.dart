@@ -18,6 +18,7 @@ import '../widgets/cards/wake_card.dart';
 import '../widgets/yesterday_prompt.dart';
 import 'habit_detail_screen.dart';
 import 'home_screen.dart';
+import '../widgets/adaptive.dart';
 
 enum TodayKind { wake, prayers, habit, tasks }
 
@@ -206,10 +207,13 @@ class _TodayScreenState extends State<TodayScreen> {
             for (final i in pending) _card(i, now),
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: FilledButton.tonalIcon(
-                onPressed: () => showAddHabitSheet(context, widget.state),
-                icon: const Icon(Icons.add),
-                label: const Text('Add habit'),
+              child: Center(
+                child: FilledButton.tonalIcon(
+                  style: compactButton,
+                  onPressed: () => showAddHabitSheet(context, widget.state),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add habit'),
+                ),
               ),
             ),
             if (done.isNotEmpty) ...[

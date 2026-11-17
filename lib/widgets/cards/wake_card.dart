@@ -7,6 +7,7 @@ import '../../logic/stats.dart';
 import '../../models.dart';
 import '../../screens/wake_challenge_screen.dart';
 import 'section_card.dart';
+import '../adaptive.dart';
 
 /// Today's wake-up card: goal, status, last night's sleep, the "I'm up"
 /// button (through the wake challenge when it is on) and, in the evening,
@@ -78,9 +79,9 @@ class _WakeCardState extends State<WakeCard> {
     final evening = isBedtimeWindow(s, now);
 
     return SectionCard(
-      emoji: '☀️',
+      icon: Icons.wb_sunny_outlined,
       title: 'Wake up early',
-      trailing: Chip(label: Text(target), visualDensity: VisualDensity.compact),
+      trailing: CountBadge(target),
       children: [
         Text(status),
         if (sleepLine != null) ...[
@@ -107,6 +108,7 @@ class _WakeCardState extends State<WakeCard> {
           Text('🌙 Bedtime ${_jm(bedtimeFor(s, night))} for ${fmtSleepHours(s.sleepHours)} of sleep.'),
           const SizedBox(height: 8),
           OutlinedButton.icon(
+            style: compactButton,
             onPressed: () => state.setBedtime(night, DateTime.now()),
             icon: const Icon(Icons.bedtime_outlined),
             label: const Text('Going to bed'),

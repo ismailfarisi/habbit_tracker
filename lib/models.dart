@@ -6,13 +6,7 @@ import 'habits/habit.dart';
 const prayerNames = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 
 /// Default prayer times used when no location is set and manual mode is on.
-const defaultManualTimes = {
-  'Fajr': '05:00',
-  'Dhuhr': '12:30',
-  'Asr': '15:45',
-  'Maghrib': '18:15',
-  'Isha': '19:45',
-};
+const defaultManualTimes = {'Fajr': '05:00', 'Dhuhr': '12:30', 'Asr': '15:45', 'Maghrib': '18:15', 'Isha': '19:45'};
 
 /// Calculation methods supported by the adhan package, with readable labels.
 const calcMethodLabels = {
@@ -30,8 +24,7 @@ const calcMethodLabels = {
   'moon_sighting_committee': 'Moonsighting Committee',
 };
 
-String fmtHm(TimeOfDay t) =>
-    '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+String fmtHm(TimeOfDay t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
 TimeOfDay parseHm(String s, {TimeOfDay fallback = const TimeOfDay(hour: 0, minute: 0)}) {
   final m = RegExp(r'^(\d{1,2}):(\d{2})').firstMatch(s.trim());
@@ -59,22 +52,27 @@ class Settings {
   /// Ramadan: 'auto' (Hijri month 9), 'on' or 'off'.
   String ramadanMode;
   bool suhoorReminder;
+
   /// The suhoor wake alarm rings this long before Fajr.
   int suhoorMinutes;
   bool taraweeh;
   bool jumuahReminder;
+
   /// Extra Friday reminder this long before Jumu'ah.
   int jumuahReminderMinutes;
+
   /// Local Jumu'ah time 'HH:mm' (e.g. '13:15' in the UAE); '' = Dhuhr time.
   String jumuahTime;
   bool sunnahDuha;
   bool sunnahWitr;
+
   /// Days added to the Umm al-Qura Hijri date to match local moon sighting.
   int hijriOffsetDays;
 
   bool remindersEnabled;
   int prayerOffsetMin;
   bool wakeAlarmLoud;
+
   /// Legacy (v1): only read when migrating the old articulation trainer
   /// into the "Articulation practice" habit.
   TimeOfDay trainingTime;
@@ -82,6 +80,16 @@ class Settings {
 
   String model;
   String speechLocale;
+
+  /// 'whisper' (on-device, falls back to the phone) | 'system'.
+  String voiceEngine;
+
+  /// Whisper model id: 'tiny' | 'base'.
+  String whisperModel;
+
+  /// Say "Added: ..." after a task is created by voice.
+  bool speakConfirmations;
+  bool readCoachReplies;
 
   /// Missed days per calendar month that don't break the perfect-day streak.
   int freezesPerMonth;
@@ -125,6 +133,10 @@ class Settings {
     this.trainingGoalMin = 15,
     this.model = 'openai/gpt-4o-mini',
     this.speechLocale = '',
+    this.voiceEngine = 'whisper',
+    this.whisperModel = 'base',
+    this.speakConfirmations = true,
+    this.readCoachReplies = false,
     this.freezesPerMonth = 2,
     this.onboarded = false,
     this.themeMode = 'system',
@@ -137,40 +149,44 @@ class Settings {
   bool get hasLocation => latitude != null && longitude != null;
 
   Map<String, dynamic> toJson() => {
-        'wakeTime': fmtHm(wakeTime),
-        'wakeGraceMin': wakeGraceMin,
-        'latitude': latitude,
-        'longitude': longitude,
-        'locationName': locationName,
-        'calcMethod': calcMethod,
-        'madhab': madhab,
-        'useManualPrayer': useManualPrayer,
-        'manualTimes': manualTimes,
-        'ramadanMode': ramadanMode,
-        'suhoorReminder': suhoorReminder,
-        'suhoorMinutes': suhoorMinutes,
-        'taraweeh': taraweeh,
-        'jumuahReminder': jumuahReminder,
-        'jumuahReminderMinutes': jumuahReminderMinutes,
-        'jumuahTime': jumuahTime,
-        'sunnahDuha': sunnahDuha,
-        'sunnahWitr': sunnahWitr,
-        'hijriOffsetDays': hijriOffsetDays,
-        'remindersEnabled': remindersEnabled,
-        'prayerOffsetMin': prayerOffsetMin,
-        'wakeAlarmLoud': wakeAlarmLoud,
-        'trainingTime': fmtHm(trainingTime),
-        'trainingGoalMin': trainingGoalMin,
-        'model': model,
-        'speechLocale': speechLocale,
-        'freezesPerMonth': freezesPerMonth,
-        'onboarded': onboarded,
-        'themeMode': themeMode,
-        'wakeChallenge': wakeChallenge.name,
-        'sleepHours': sleepHours,
-        'windDownMinutes': windDownMinutes,
-        'bedtimeReminder': bedtimeReminder,
-      };
+    'wakeTime': fmtHm(wakeTime),
+    'wakeGraceMin': wakeGraceMin,
+    'latitude': latitude,
+    'longitude': longitude,
+    'locationName': locationName,
+    'calcMethod': calcMethod,
+    'madhab': madhab,
+    'useManualPrayer': useManualPrayer,
+    'manualTimes': manualTimes,
+    'ramadanMode': ramadanMode,
+    'suhoorReminder': suhoorReminder,
+    'suhoorMinutes': suhoorMinutes,
+    'taraweeh': taraweeh,
+    'jumuahReminder': jumuahReminder,
+    'jumuahReminderMinutes': jumuahReminderMinutes,
+    'jumuahTime': jumuahTime,
+    'sunnahDuha': sunnahDuha,
+    'sunnahWitr': sunnahWitr,
+    'hijriOffsetDays': hijriOffsetDays,
+    'remindersEnabled': remindersEnabled,
+    'prayerOffsetMin': prayerOffsetMin,
+    'wakeAlarmLoud': wakeAlarmLoud,
+    'trainingTime': fmtHm(trainingTime),
+    'trainingGoalMin': trainingGoalMin,
+    'model': model,
+    'speechLocale': speechLocale,
+    'voiceEngine': voiceEngine,
+    'whisperModel': whisperModel,
+    'speakConfirmations': speakConfirmations,
+    'readCoachReplies': readCoachReplies,
+    'freezesPerMonth': freezesPerMonth,
+    'onboarded': onboarded,
+    'themeMode': themeMode,
+    'wakeChallenge': wakeChallenge.name,
+    'sleepHours': sleepHours,
+    'windDownMinutes': windDownMinutes,
+    'bedtimeReminder': bedtimeReminder,
+  };
 
   factory Settings.fromJson(Map<String, dynamic> j) {
     final d = Settings();
@@ -193,7 +209,9 @@ class Settings {
       taraweeh: j['taraweeh'] as bool? ?? d.taraweeh,
       jumuahReminder: j['jumuahReminder'] as bool? ?? d.jumuahReminder,
       jumuahReminderMinutes: (j['jumuahReminderMinutes'] as num?)?.toInt() ?? d.jumuahReminderMinutes,
-      jumuahTime: RegExp(r'^\d{1,2}:\d{2}$').hasMatch(j['jumuahTime'] as String? ?? '') ? j['jumuahTime'] as String : '',
+      jumuahTime: RegExp(r'^\d{1,2}:\d{2}$').hasMatch(j['jumuahTime'] as String? ?? '')
+          ? j['jumuahTime'] as String
+          : '',
       sunnahDuha: j['sunnahDuha'] as bool? ?? d.sunnahDuha,
       sunnahWitr: j['sunnahWitr'] as bool? ?? d.sunnahWitr,
       hijriOffsetDays: ((j['hijriOffsetDays'] as num?)?.toInt() ?? 0).clamp(-2, 2),
@@ -204,10 +222,17 @@ class Settings {
       trainingGoalMin: (j['trainingGoalMin'] as num?)?.toInt() ?? d.trainingGoalMin,
       model: (j['model'] as String?)?.trim().isNotEmpty == true ? j['model'] as String : d.model,
       speechLocale: j['speechLocale'] as String? ?? '',
+      voiceEngine: const ['whisper', 'system'].contains(j['voiceEngine']) ? j['voiceEngine'] as String : d.voiceEngine,
+      whisperModel: const ['tiny', 'base'].contains(j['whisperModel']) ? j['whisperModel'] as String : d.whisperModel,
+      speakConfirmations: j['speakConfirmations'] as bool? ?? d.speakConfirmations,
+      readCoachReplies: j['readCoachReplies'] as bool? ?? d.readCoachReplies,
       freezesPerMonth: (j['freezesPerMonth'] as num?)?.toInt() ?? d.freezesPerMonth,
       onboarded: j['onboarded'] as bool? ?? true,
       themeMode: const ['system', 'light', 'dark'].contains(j['themeMode']) ? j['themeMode'] as String : d.themeMode,
-      wakeChallenge: WakeChallenge.values.firstWhere((c) => c.name == j['wakeChallenge'], orElse: () => d.wakeChallenge),
+      wakeChallenge: WakeChallenge.values.firstWhere(
+        (c) => c.name == j['wakeChallenge'],
+        orElse: () => d.wakeChallenge,
+      ),
       sleepHours: ((j['sleepHours'] as num?)?.toDouble() ?? d.sleepHours).clamp(3.0, 12.0),
       windDownMinutes: ((j['windDownMinutes'] as num?)?.toInt() ?? d.windDownMinutes).clamp(0, 180),
       bedtimeReminder: j['bedtimeReminder'] as bool? ?? d.bedtimeReminder,
@@ -242,24 +267,23 @@ class DayLog {
     Map<String, String>? prayerStatus,
     this.bedtimeAt,
     Map<String, HabitEntry>? habits,
-  })  : prayers = prayers ?? <String>{},
-        prayerStatus = prayerStatus ?? {},
-        habits = habits ?? {};
+  }) : prayers = prayers ?? <String>{},
+       prayerStatus = prayerStatus ?? {},
+       habits = habits ?? {};
 
-  bool get isEmpty =>
-      wakeAt == null && bedtimeAt == null && prayers.isEmpty && habits.values.every((e) => e.isEmpty);
+  bool get isEmpty => wakeAt == null && bedtimeAt == null && prayers.isEmpty && habits.values.every((e) => e.isEmpty);
 
   Map<String, dynamic> toJson() => {
-        if (wakeAt != null) 'wakeAt': wakeAt!.toIso8601String(),
-        if (bedtimeAt != null) 'bedtimeAt': bedtimeAt!.toIso8601String(),
-        'prayers': prayers.toList(),
-        if (prayerStatus.isNotEmpty) 'prayerStatus': prayerStatus,
-        if (habits.isNotEmpty)
-          'habits': {
-            for (final e in habits.entries)
-              if (!e.value.isEmpty) e.key: e.value.toJson(),
-          },
-      };
+    if (wakeAt != null) 'wakeAt': wakeAt!.toIso8601String(),
+    if (bedtimeAt != null) 'bedtimeAt': bedtimeAt!.toIso8601String(),
+    'prayers': prayers.toList(),
+    if (prayerStatus.isNotEmpty) 'prayerStatus': prayerStatus,
+    if (habits.isNotEmpty)
+      'habits': {
+        for (final e in habits.entries)
+          if (!e.value.isEmpty) e.key: e.value.toJson(),
+      },
+  };
 
   /// Also reads v1 logs: `trainingMinutes` becomes the minutes of the
   /// [articulationHabitId] entry.
@@ -321,37 +345,37 @@ class Task {
     Set<String>? doneDates,
     DateTime? createdAt,
     this.createdByAi = false,
-  })  : weekdays = weekdays ?? [],
-        doneDates = doneDates ?? <String>{},
-        createdAt = createdAt ?? DateTime.now();
+  }) : weekdays = weekdays ?? [],
+       doneDates = doneDates ?? <String>{},
+       createdAt = createdAt ?? DateTime.now();
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'seq': seq,
-        'title': title,
-        'notes': notes,
-        'date': date,
-        'time': time,
-        'repeat': repeat.name,
-        'weekdays': weekdays,
-        'doneDates': doneDates.toList(),
-        'createdAt': createdAt.toIso8601String(),
-        'createdByAi': createdByAi,
-      };
+    'id': id,
+    'seq': seq,
+    'title': title,
+    'notes': notes,
+    'date': date,
+    'time': time,
+    'repeat': repeat.name,
+    'weekdays': weekdays,
+    'doneDates': doneDates.toList(),
+    'createdAt': createdAt.toIso8601String(),
+    'createdByAi': createdByAi,
+  };
 
   factory Task.fromJson(Map<String, dynamic> j) => Task(
-        id: j['id'] as String,
-        seq: (j['seq'] as num?)?.toInt() ?? 0,
-        title: j['title'] as String? ?? '',
-        notes: j['notes'] as String? ?? '',
-        date: j['date'] as String?,
-        time: j['time'] as String?,
-        repeat: Repeat.values.firstWhere((r) => r.name == j['repeat'], orElse: () => Repeat.none),
-        weekdays: ((j['weekdays'] as List?) ?? const []).map((e) => (e as num).toInt()).toList(),
-        doneDates: ((j['doneDates'] as List?) ?? const []).cast<String>().toSet(),
-        createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime.now(),
-        createdByAi: j['createdByAi'] as bool? ?? false,
-      );
+    id: j['id'] as String,
+    seq: (j['seq'] as num?)?.toInt() ?? 0,
+    title: j['title'] as String? ?? '',
+    notes: j['notes'] as String? ?? '',
+    date: j['date'] as String?,
+    time: j['time'] as String?,
+    repeat: Repeat.values.firstWhere((r) => r.name == j['repeat'], orElse: () => Repeat.none),
+    weekdays: ((j['weekdays'] as List?) ?? const []).map((e) => (e as num).toInt()).toList(),
+    doneDates: ((j['doneDates'] as List?) ?? const []).cast<String>().toSet(),
+    createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime.now(),
+    createdByAi: j['createdByAi'] as bool? ?? false,
+  );
 
   Task copy() => Task.fromJson(toJson());
 }

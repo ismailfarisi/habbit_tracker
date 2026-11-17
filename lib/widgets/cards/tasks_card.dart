@@ -5,6 +5,7 @@ import '../../logic/tasks.dart';
 import '../../models.dart';
 import '../task_editor.dart';
 import 'section_card.dart';
+import '../adaptive.dart';
 
 /// Today's tasks (unfinished first, in time order) with quick add and the
 /// link to the planner.
@@ -42,17 +43,18 @@ class TasksCard extends StatelessWidget {
     final tasks = ordered(state, now);
     final done = tasks.where((t) => t.isDoneOn(now)).length;
     return SectionCard(
-      emoji: '📝',
+      icon: Icons.checklist_rounded,
       title: 'Tasks',
-      trailing: Chip(label: Text('$done/${tasks.length}'), visualDensity: VisualDensity.compact),
+      trailing: CountBadge('$done/${tasks.length}'),
       children: [
         if (tasks.isEmpty) const Text('No tasks for today.'),
         for (final t in tasks.take(8)) TaskTile(state: state, task: t, day: now),
         if (tasks.length > 8) Text('+${tasks.length - 8} more'),
         const SizedBox(height: 8),
         Wrap(spacing: 8, children: [
-          FilledButton.tonalIcon(onPressed: onOpen, icon: const Icon(Icons.auto_awesome), label: const Text('Plan with AI')),
+          FilledButton.tonalIcon(style: compactButton, onPressed: onOpen, icon: const Icon(Icons.auto_awesome), label: const Text('Plan with AI')),
           OutlinedButton.icon(
+            style: compactButton,
             onPressed: () => showTaskEditor(context, state, initialDate: now),
             icon: const Icon(Icons.add),
             label: const Text('Add'),

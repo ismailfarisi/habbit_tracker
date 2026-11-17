@@ -1,6 +1,8 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import '../widgets/adaptive.dart';
 import 'plan_screen.dart';
 import 'settings_screen.dart';
 import 'progress_screen.dart';
@@ -76,13 +78,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final ios = isCupertino(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Daily Discipline'),
+        title: Text(HomeScreen.tabs[_tab].label),
         actions: [
           IconButton(
             tooltip: 'Settings',
-            icon: const Icon(Icons.settings_outlined),
+            icon: Icon(ios ? CupertinoIcons.gear : Icons.settings_outlined),
             onPressed: () => openSettings(context, widget.state),
           ),
         ],
@@ -91,7 +94,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         top: false,
         child: IndexedStack(index: _tab, children: [for (final t in HomeScreen.tabs) t.build(widget.state, goTo)]),
       ),
-      bottomNavigationBar: SafeArea(
+      bottomNavigationBar: ios
+          ? CupertinoTabBar(
+              currentIndex: _tab,
+              onTap: goTo,
+              activeColor: Theme.of(context).colorScheme.primary,
+              backgroundColor: Theme.of(context).colorScheme.surface.withValues(alpha: 0.92),
+              items: [
+                for (final t in HomeScreen.tabs)
+                  BottomNavigationBarItem(icon: Icon(t.icon), activeIcon: Icon(t.selectedIcon), label: t.label),
+              ],
+            )
+          : SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
           child: DecoratedBox(

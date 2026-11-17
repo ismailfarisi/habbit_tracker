@@ -9,8 +9,10 @@ import '../widgets/add_habit_sheet.dart';
 import '../widgets/ai_key_empty_state.dart';
 import '../widgets/assistant_chat.dart';
 import '../widgets/task_editor.dart';
+import '../widgets/voice_input_button.dart';
 import 'habit_detail_screen.dart';
 import 'tasks_screen.dart';
+import '../widgets/adaptive.dart';
 
 /// The Plan tab: the coach entry, the habit list (add from template, edit,
 /// archive) and the task lists.
@@ -46,11 +48,26 @@ class _PlanScreenState extends State<PlanScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      floatingActionButton: FloatingActionButton.extended(
-        tooltip: 'New task',
-        onPressed: () => showTaskEditor(context, state),
-        icon: const Icon(Icons.add),
-        label: const Text('Task'),
+      floatingActionButton: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          FloatingActionButton.small(
+            key: const Key('voice-task'),
+            heroTag: 'voice-task',
+            tooltip: 'Speak a task',
+            onPressed: () => showTaskEditor(context, state, dictate: true),
+            child: const Icon(Icons.mic),
+          ),
+          const SizedBox(width: 12),
+          FloatingActionButton.extended(
+            heroTag: 'new-task',
+            tooltip: 'New task',
+            onPressed: () => showTaskEditor(context, state),
+            icon: const Icon(Icons.add),
+            label: const Text('Task'),
+          ),
+        ],
       ),
       body: ListenableBuilder(
         listenable: state,
@@ -152,18 +169,14 @@ class _HabitTile extends StatelessWidget {
   const _HabitTile({required this.state, required this.habit});
 
   Future<void> _delete(BuildContext context) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: Text('Delete "${habit.title}"?'),
-        content: const Text('The habit is removed. Days you already logged stay in your history.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Delete')),
-        ],
-      ),
+    final ok = await confirmDialog(
+      context,
+      title: 'Delete "${habit.title}"?',
+      message: 'The habit is removed. Days you already logged stay in your history.',
+      confirm: 'Delete',
+      destructive: true,
     );
-    if (ok == true) await state.deleteHabit(habit.id);
+    if (ok) await state.deleteHabit(habit.id);
   }
 
   @override
@@ -294,7 +307,11 @@ class _HabitEditorState extends State<_HabitEditor> {
               Expanded(
                 child: TextField(
                   controller: _title,
-                  decoration: const InputDecoration(labelText: 'Name', border: OutlineInputBorder()),
+                  decoration: InputDecoration(
+                    labelText: 'Name',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: VoiceInputButton(key: const Key('habit-name-voice'), controller: _title),
+                  ),
                 ),
               ),
             ],
@@ -359,7 +376,7 @@ class _HabitEditorState extends State<_HabitEditor> {
                     onPressed: () => setState(() => _h.reminder = null),
                   ),
           ),
-          SwitchListTile(
+          SwitchListTile.adaptive(
             contentPadding: EdgeInsets.zero,
             title: const Text('Forgiving streak'),
             subtitle: const Text('One missed day keeps the streak; two in a row break it'),
