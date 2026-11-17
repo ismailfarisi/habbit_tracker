@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../widgets/adaptive.dart';
+import 'chat_screen.dart';
 import 'plan_screen.dart';
 import 'settings_screen.dart';
 import 'progress_screen.dart';
@@ -21,12 +22,13 @@ class HomeTab {
 /// the gear in the app bar, and [settingsTab] (passed to `goTo` or
 /// `AppState.requestedTab`) opens it too.
 class HomeScreen extends StatefulWidget {
-  static const todayTab = 0, planTab = 1, progressTab = 2;
-  static const settingsTab = 3;
+  static const todayTab = 0, planTab = 1, chatTab = 2, progressTab = 3;
+  static const settingsTab = 4;
 
   static final tabs = <HomeTab>[
     HomeTab('Today', Icons.today_outlined, Icons.today, (s, goTo) => TodayScreen(state: s, onNavigate: goTo)),
     HomeTab('Plan', Icons.event_note_outlined, Icons.event_note, (s, _) => PlanScreen(state: s)),
+    HomeTab('Chat', Icons.chat_bubble_outline, Icons.chat_bubble, (s, _) => ChatScreen(state: s)),
     HomeTab('Progress', Icons.insights_outlined, Icons.insights, (s, _) => ProgressScreen(state: s)),
   ];
 
