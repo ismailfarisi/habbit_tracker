@@ -255,7 +255,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final p = widget.state.chatPrompt.value;
     if (p == null || _chat.busy) return;
     widget.state.chatPrompt.value = null;
-    _send(p);
+    if (widget.state.apiKey.isNotEmpty) _send(p);
   }
 
   @override
