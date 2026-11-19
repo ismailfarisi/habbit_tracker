@@ -11,6 +11,7 @@ import 'habit_detail_screen.dart';
 import 'tasks_screen.dart';
 import '../widgets/adaptive.dart';
 import '../goals/goals_card.dart';
+import 'calendar_screen.dart';
 import 'home_screen.dart';
 
 /// The Plan tab: the coach entry, the habit list (add from template, edit,
@@ -59,6 +60,7 @@ class _PlanScreenState extends State<PlanScreen> {
           children: [
             _CoachCard(state: state, onOpen: _openCoach),
             GoalsCard(state: state),
+            CalendarEntryCard(state: state),
             _HabitsCard(state: state),
             TaskSections(state: state),
           ],

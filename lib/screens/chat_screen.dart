@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:ag_ui/ag_ui.dart' as agui;
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../agent/agui_agent.dart';
 import '../agent/goal_tools.dart';
@@ -56,11 +57,41 @@ class ChatItem {
   ChatItem(this.kind, this.id, this.text);
 }
 
+/// One saved conversation in the chat history.
+class ChatThread {
+  final String id;
+  String title;
+  DateTime updatedAt;
+  List<Map<String, dynamic>> messages;
+  ChatThread(this.id, this.title, this.updatedAt, this.messages);
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'updatedAt': updatedAt.toIso8601String(),
+    'messages': messages,
+  };
+
+  factory ChatThread.fromJson(Map<String, dynamic> j) => ChatThread(
+    j['id'] as String,
+    j['title'] as String? ?? 'Chat',
+    DateTime.tryParse(j['updatedAt'] as String? ?? '') ?? DateTime.now(),
+    ((j['messages'] as List?) ?? const []).cast<Map>().map((m) => m.cast<String, dynamic>()).toList(),
+  );
+}
+
 /// The Chat tab's conversation, driven by AG-UI events from [LocalAgUiAgent].
-/// The model-facing history is saved on the phone.
+/// Every conversation is saved on the phone in [threads]; "New chat" starts
+/// another and past ones can be reopened.
 class AgUiChat extends ChangeNotifier {
-  static const _key = 'chat.v1';
+  static const _legacyKey = 'chat.v1';
+  static const _threadsKey = 'chat.threads.v1';
+  static const _currentKey = 'chat.current.v1';
   static const _maxMessages = 80;
+  static const _maxThreads = 50;
+
+  /// Saved conversations, newest first.
+  final threads = <ChatThread>[];
   final AppState state;
   final OpenRouterClient Function()? client;
   final history = <ChatMessage>[];
@@ -79,13 +110,38 @@ class AgUiChat extends ChangeNotifier {
         '${plannerContext(state.settings, now)}\n${goalsContext(state, now)}';
   }
 
-  void newChat() {
+  void _reset(String id) {
     history.clear();
     items.clear();
-    threadId = 'thread-${DateTime.now().millisecondsSinceEpoch}';
+    threadId = id;
+    state.storage.prefs.setString(_currentKey, id);
+  }
+
+  void newChat() {
     _save();
+    _reset('thread-${DateTime.now().millisecondsSinceEpoch}');
     notifyListeners();
   }
+
+  /// Reopens a saved conversation.
+  void open(String id) {
+    if (busy || id == threadId) return;
+    final th = threads.where((t) => t.id == id).firstOrNull;
+    if (th == null) return;
+    _save();
+    _reset(id);
+    _restore(th.messages);
+    notifyListeners();
+  }
+
+  void deleteThread(String id) {
+    threads.removeWhere((t) => t.id == id);
+    if (id == threadId) _reset('thread-${DateTime.now().millisecondsSinceEpoch}');
+    _persist();
+    notifyListeners();
+  }
+
+  void _persist() => state.storage.prefs.setString(_threadsKey, jsonEncode([for (final t in threads) t.toJson()]));
 
   Future<void> send(String text, {String? display}) async {
     if (busy || text.trim().isEmpty) return;
@@ -162,6 +218,7 @@ class AgUiChat extends ChangeNotifier {
   }
 
   void _save() {
+    if (history.isEmpty) return;
     var start = 0;
     if (history.length > _maxMessages) {
       start = history.length - _maxMessages;
@@ -169,31 +226,32 @@ class AgUiChat extends ChangeNotifier {
         start++;
       }
     }
-    final keep = history.sublist(start);
-    state.storage.prefs.setString(
-      _key,
-      jsonEncode([
-        for (final m in keep)
-          {
-            'role': m.role,
-            'content': m.content,
-            if (m.toolCalls.isNotEmpty)
-              'calls': [
-                for (final c in m.toolCalls) {'id': c.id, 'name': c.name, 'args': c.arguments},
-              ],
-            if (m.toolCallId != null) 'callId': m.toolCallId,
-          },
-      ]),
-    );
+    final messages = [
+      for (final m in history.sublist(start))
+        <String, dynamic>{
+          'role': m.role,
+          'content': m.content,
+          if (m.toolCalls.isNotEmpty)
+            'calls': [
+              for (final c in m.toolCalls) {'id': c.id, 'name': c.name, 'args': c.arguments},
+            ],
+          if (m.toolCallId != null) 'callId': m.toolCallId,
+        },
+    ];
+    final first = history.firstWhere((m) => m.role == 'user', orElse: () => history.first).content.trim();
+    final title = first.length > 60 ? '${first.substring(0, 57)}…' : first;
+    threads.removeWhere((t) => t.id == threadId);
+    threads.insert(0, ChatThread(threadId, title.isEmpty ? 'Chat' : title, DateTime.now(), messages));
+    if (threads.length > _maxThreads) threads.removeRange(_maxThreads, threads.length);
+    _persist();
+    state.storage.prefs.setString(_currentKey, threadId);
   }
 
-  void _load() {
-    final raw = state.storage.prefs.getString(_key);
-    if (raw == null) return;
+  void _restore(List<Map<String, dynamic>> messages) {
     try {
-      for (final j in (jsonDecode(raw) as List).cast<Map<String, dynamic>>()) {
+      for (final j in messages) {
         final calls = [
-          for (final c in (j['calls'] as List? ?? const []).cast<Map<String, dynamic>>())
+          for (final c in (j['calls'] as List? ?? const []).cast<Map>())
             ToolCall(c['id'] as String, c['name'] as String, c['args'] as String? ?? ''),
         ];
         final m = ChatMessage(
@@ -216,6 +274,77 @@ class AgUiChat extends ChangeNotifier {
       history.clear();
       items.clear();
     }
+  }
+
+  void _load() {
+    final prefs = state.storage.prefs;
+    try {
+      final raw = prefs.getString(_threadsKey);
+      if (raw != null) {
+        threads.addAll((jsonDecode(raw) as List).cast<Map>().map((m) => ChatThread.fromJson(m.cast<String, dynamic>())));
+      } else if (prefs.getString(_legacyKey) case final legacy?) {
+        final messages = (jsonDecode(legacy) as List).cast<Map>().map((m) => m.cast<String, dynamic>()).toList();
+        if (messages.isNotEmpty) {
+          threads.add(ChatThread(threadId, '${messages.first['content'] ?? 'Chat'}', DateTime.now(), messages));
+          prefs.setString(_currentKey, threadId);
+          _persist();
+        }
+        prefs.remove(_legacyKey);
+      }
+    } catch (_) {
+      threads.clear();
+    }
+    final current = threads.where((t) => t.id == prefs.getString(_currentKey)).firstOrNull;
+    if (current != null) {
+      threadId = current.id;
+      _restore(current.messages);
+    }
+  }
+}
+
+/// Past conversations: tap to reopen, or delete.
+class ChatHistoryScreen extends StatelessWidget {
+  final AgUiChat chat;
+  const ChatHistoryScreen({super.key, required this.chat});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Chat history')),
+      body: ListenableBuilder(
+        listenable: chat,
+        builder: (context, _) {
+          if (chat.threads.isEmpty) {
+            return Center(
+              child: Text('No past chats yet.', style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+            );
+          }
+          return ListView(
+            children: [
+              for (final th in chat.threads)
+                ListTile(
+                  key: ValueKey('thread-${th.id}'),
+                  leading: Icon(th.id == chat.threadId ? Icons.chat_bubble : Icons.chat_bubble_outline),
+                  title: Text(th.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(
+                    '${DateFormat.yMMMd().add_jm().format(th.updatedAt)} · ${th.messages.where((m) => m['role'] == 'user').length} messages',
+                  ),
+                  trailing: IconButton(
+                    tooltip: 'Delete chat',
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: () => chat.deleteThread(th.id),
+                  ),
+                  onTap: () {
+                    chat.open(th.id);
+                    Navigator.of(context).pop();
+                  },
+                ),
+            ],
+          );
+        },
+      ),
+    );
   }
 }
 
@@ -274,6 +403,10 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
   });
 
+  void _openHistory() => Navigator.of(context).push(
+    MaterialPageRoute<void>(builder: (_) => ChatHistoryScreen(chat: _chat)),
+  );
+
   void _send([String? text]) {
     final t = text ?? _input.text;
     if (t.trim().isEmpty) return;
@@ -301,6 +434,16 @@ class _ChatScreenState extends State<ChatScreen> {
                   ? ListView(
                       padding: const EdgeInsets.all(16),
                       children: [
+                        if (_chat.threads.isNotEmpty)
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton.icon(
+                              key: const Key('chat-history-empty'),
+                              onPressed: _openHistory,
+                              icon: const Icon(Icons.history, size: 18),
+                              label: const Text('Past chats'),
+                            ),
+                          ),
                         Text('What should we set up?', style: t.textTheme.titleLarge),
                         const SizedBox(height: 4),
                         Text(
@@ -324,14 +467,22 @@ class _ChatScreenState extends State<ChatScreen> {
                       itemCount: _chat.items.length + 1,
                       itemBuilder: (context, i) {
                         if (i == 0) {
-                          return Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton.icon(
-                              key: const Key('new-chat'),
-                              onPressed: _chat.busy ? null : _chat.newChat,
-                              icon: const Icon(Icons.add_comment_outlined, size: 18),
-                              label: const Text('New chat'),
-                            ),
+                          return Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton.icon(
+                                key: const Key('chat-history'),
+                                onPressed: _openHistory,
+                                icon: const Icon(Icons.history, size: 18),
+                                label: const Text('History'),
+                              ),
+                              TextButton.icon(
+                                key: const Key('new-chat'),
+                                onPressed: _chat.busy ? null : _chat.newChat,
+                                icon: const Icon(Icons.add_comment_outlined, size: 18),
+                                label: const Text('New chat'),
+                              ),
+                            ],
                           );
                         }
                         return _ItemView(chat: _chat, item: _chat.items[i - 1]);

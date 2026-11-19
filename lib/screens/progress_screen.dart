@@ -8,6 +8,7 @@ import '../logic/tasks.dart';
 import '../logic/weekly_review.dart';
 import '../models.dart';
 import '../widgets/day_editor.dart';
+import 'calendar_screen.dart';
 import 'habit_detail_screen.dart';
 import '../widgets/adaptive.dart';
 import '../widgets/ask_chat.dart';
@@ -28,6 +29,8 @@ class ProgressScreen extends StatelessWidget {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            CalendarEntryCard(state: state),
+            const SizedBox(height: 12),
             _StreakGrid(state: state, today: today),
             const SizedBox(height: 12),
             WeeklyReviewCard(
