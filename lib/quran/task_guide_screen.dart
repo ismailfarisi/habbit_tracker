@@ -8,43 +8,95 @@ import '../models.dart';
 import '../widgets/adaptive.dart';
 import '../widgets/task_editor.dart';
 import 'quran.dart';
+import '../goals/goals_card.dart';
 
-/// A task's instructions: steps to tick, what counts as done, and for Quran
-/// tasks the verified passage with translation and recitation.
+/// A task's or goal habit's instructions: steps to tick, what counts as
+/// done, and for Quran practice the verified passage (a habit's next daily
+/// portion) with translation and recitation.
 class TaskGuideScreen extends StatelessWidget {
   final AppState state;
-  final String taskId;
-  const TaskGuideScreen({super.key, required this.state, required this.taskId});
+  final String? taskId;
+  final String? habitId;
+  final DateTime? day;
+  const TaskGuideScreen({super.key, required this.state, this.taskId, this.habitId, this.day});
+
+  static Route<void> route(AppState state, {String? taskId, String? habitId}) => MaterialPageRoute<void>(
+    builder: (_) => TaskGuideScreen(state: state, taskId: taskId, habitId: habitId),
+  );
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: state,
       builder: (context, _) {
-        final task = state.taskById(taskId);
-        if (task == null) return Scaffold(appBar: AppBar(), body: const Center(child: Text('This task was removed.')));
-        final g = task.guide ?? const TaskGuide();
+        final now = day ?? DateTime.now();
+        final today = dayKey(now);
+        final task = taskId == null ? null : state.taskById(taskId!);
+        final habit = habitId == null ? null : state.habitById(habitId!);
+        if (task == null && habit == null) {
+          return Scaffold(appBar: AppBar(), body: const Center(child: Text('This was removed.')));
+        }
+        final entry = habit == null ? null : state.habitEntry(now, habit.id);
+        final g = task?.guide ?? habit?.guide ?? const TaskGuide();
+        final quran = habit != null ? state.quranFor(habit, now) : g.quran;
         final t = Theme.of(context);
-        final today = dayKey(DateTime.now());
-        final ticked = task.stepsDone[today] ?? <int>{};
-        final done = task.isDoneOn(DateTime.now());
+        final ticked = task != null
+            ? task.stepsDone[today] ?? <int>{}
+            : {for (final v in (entry!.data['steps'] as List?) ?? const []) if (v is num) v.toInt()};
+        final done = task != null ? task.isDoneOn(now) : habitDone(entry, habit!);
+        final goal = state.goalFor(task?.id ?? habit!.id);
+        final notes = task?.notes ?? '';
+        void tick(int i, bool on) {
+          if (task != null) {
+            state.updateTask(task, (x) {
+              final set = x.stepsDone[today] ??= <int>{};
+              on ? set.add(i) : set.remove(i);
+            });
+          } else {
+            final set = {...ticked};
+            on ? set.add(i) : set.remove(i);
+            state.logHabit(now, habit!.id, entry!.copy()..data['steps'] = (set.toList()..sort()));
+          }
+        }
+
+        void markDone() => task != null
+            ? state.updateTask(task, (x) => x.doneDates.add(today))
+            : state.logHabit(now, habit!.id, entry!.copy()..done = true);
+
         return Scaffold(
           appBar: AppBar(
-            title: Text(task.title),
+            title: Text(task?.title ?? '${habit!.emoji} ${habit.title}'),
             actions: [
-              IconButton(
-                tooltip: 'Edit task',
-                icon: const Icon(Icons.edit_outlined),
-                onPressed: () => showTaskEditor(context, state, task: task),
-              ),
+              if (task != null)
+                IconButton(
+                  tooltip: 'Edit task',
+                  icon: const Icon(Icons.edit_outlined),
+                  onPressed: () => showTaskEditor(context, state, task: task),
+                ),
             ],
           ),
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             children: [
-              if (g.minutes != null || task.notes.isNotEmpty)
+              if (goal != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: ActionChip(
+                    key: const Key('guide-goal'),
+                    avatar: Text(goal.emoji),
+                    label: Text('Goal: ${goal.title}'),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(builder: (_) => GoalScreen(state: state, goalId: goal.id)),
+                    ),
+                  ),
+                ),
+              if (g.minutes != null || notes.isNotEmpty || habit != null)
                 Text(
-                  [if (g.minutes != null) 'About ${g.minutes} min', if (task.notes.isNotEmpty) task.notes].join(' · '),
+                  [
+                    if (habit != null) habit.describeSchedule(),
+                    if (g.minutes != null) 'About ${g.minutes} min',
+                    if (notes.isNotEmpty) notes,
+                  ].join(' · '),
                   style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
                 ),
               if (g.steps.isNotEmpty) ...[
@@ -58,10 +110,7 @@ class TaskGuideScreen extends StatelessWidget {
                     controlAffinity: ListTileControlAffinity.leading,
                     value: ticked.contains(i),
                     title: Text('${i + 1}. $s'),
-                    onChanged: (v) => state.updateTask(task, (x) {
-                      final set = x.stepsDone[today] ??= <int>{};
-                      v == true ? set.add(i) : set.remove(i);
-                    }),
+                    onChanged: (v) => tick(i, v == true),
                   ),
               ],
               if (g.doneWhen.isNotEmpty) ...[
@@ -82,7 +131,19 @@ class TaskGuideScreen extends StatelessWidget {
                   ),
                 ),
               ],
-              if (g.quran != null) ...[const SizedBox(height: 16), QuranPassageView(passage: g.quran!)],
+              if (quran != null) ...[
+                const SizedBox(height: 16),
+                if (habit != null)
+                  Text(
+                    "Today's portion",
+                    style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                if (habit != null) const SizedBox(height: 6),
+                QuranPassageView(
+                  key: ValueKey('passage-${quran.surah}-${quran.from}-${quran.to}'),
+                  passage: quran,
+                ),
+              ],
               const SizedBox(height: 20),
               done
                   ? Row(
@@ -95,7 +156,7 @@ class TaskGuideScreen extends StatelessWidget {
                   : FilledButton.icon(
                       key: const Key('guide-done'),
                       style: primaryButton,
-                      onPressed: () => state.updateTask(task, (x) => x.doneDates.add(today)),
+                      onPressed: markDone,
                       icon: const Icon(Icons.check),
                       label: const Text('Mark done'),
                     ),

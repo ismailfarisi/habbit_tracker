@@ -15,16 +15,20 @@ class TasksCard extends StatelessWidget {
   final VoidCallback onOpen;
   const TasksCard({super.key, required this.state, required this.now, required this.onOpen});
 
+  /// Today's tasks that are not part of a goal (goals have their own card).
+  static List<Task> _today(AppState state, DateTime now) =>
+      tasksForDay(state.tasks, now, today: now).where((t) => state.goalFor(t.id) == null).toList();
+
   /// Today's tasks, unfinished ones first, each group in time order.
   static List<Task> ordered(AppState state, DateTime now) {
-    final tasks = tasksForDay(state.tasks, now, today: now);
+    final tasks = _today(state, now);
     return [...tasks.where((t) => !t.isDoneOn(now)), ...tasks.where((t) => t.isDoneOn(now))];
   }
 
   /// When the next unfinished task with a time is due, if any.
   static DateTime? nextDue(AppState state, DateTime now) {
     DateTime? best;
-    for (final t in tasksForDay(state.tasks, now, today: now)) {
+    for (final t in _today(state, now)) {
       if (t.isDoneOn(now)) continue;
       final at = t.reminderOn(now);
       if (at != null && (best == null || at.isBefore(best))) best = at;
@@ -34,7 +38,7 @@ class TasksCard extends StatelessWidget {
 
   /// Whether there are tasks today and all are done.
   static bool allDone(AppState state, DateTime now) {
-    final tasks = tasksForDay(state.tasks, now, today: now);
+    final tasks = _today(state, now);
     return tasks.isNotEmpty && tasks.every((t) => t.isDoneOn(now));
   }
 

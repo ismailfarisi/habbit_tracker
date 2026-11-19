@@ -423,13 +423,34 @@ class Task {
 class QuranRef {
   final int surah, from, to;
   final String mode; // memorise | revise | read
-  const QuranRef(this.surah, this.from, this.to, {this.mode = 'read'});
-  Map<String, dynamic> toJson() => {'surah': surah, 'from': from, 'to': to, 'mode': mode};
+
+  /// For daily habits: ayat per day, moving through [from]..[to].
+  final int? perDay;
+  const QuranRef(this.surah, this.from, this.to, {this.mode = 'read', this.perDay});
+  Map<String, dynamic> toJson() => {
+    'surah': surah,
+    'from': from,
+    'to': to,
+    'mode': mode,
+    if (perDay != null) 'perDay': perDay,
+  };
+
+  /// The day's portion after [daysDone] completed days: the next [perDay]
+  /// ayat, or the whole passage to revise once every portion is done.
+  QuranRef portion(int daysDone) {
+    final n = perDay;
+    if (n == null || n <= 0) return this;
+    final start = from + daysDone * n;
+    if (start > to) return QuranRef(surah, from, to, mode: 'revise');
+    return QuranRef(surah, start, start + n - 1 > to ? to : start + n - 1, mode: mode);
+  }
+
   factory QuranRef.fromJson(Map<String, dynamic> j) => QuranRef(
     (j['surah'] as num).toInt(),
     (j['from'] as num?)?.toInt() ?? 1,
     (j['to'] as num?)?.toInt() ?? (j['from'] as num?)?.toInt() ?? 1,
     mode: j['mode'] as String? ?? 'read',
+    perDay: (j['perDay'] as num?)?.toInt(),
   );
 }
 

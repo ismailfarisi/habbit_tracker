@@ -6,8 +6,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:habit_tracker/agent/goal_tools.dart';
 import 'package:habit_tracker/logic/stats.dart';
 import 'package:habit_tracker/models.dart';
+import 'package:habit_tracker/habits/habit.dart';
 import 'package:habit_tracker/quran/quran.dart';
 import 'package:habit_tracker/quran/task_guide_screen.dart';
+import 'package:habit_tracker/goals/goals_card.dart';
+import 'package:habit_tracker/screens/today_screen.dart';
 import 'package:habit_tracker/services/openrouter.dart';
 
 import 'support.dart';
@@ -107,5 +110,76 @@ void main() {
     await tester.tap(find.byKey(const Key('guide-done')));
     await tester.pump();
     expect(s.taskById(t.id)!.doneDates, isNotEmpty);
+  });
+
+  test('a Quran goal is one goal: linked habit with a daily portion, nothing loose on Today', () async {
+    final s = await loadState({'settings.v1': jsonEncode({'onboarded': true})});
+    final now = DateTime.now();
+    final tools = GoalTools(s);
+    await tools.execute(
+      ToolCall(
+        'c',
+        'create_goal',
+        jsonEncode({
+          'title': 'Memorise Surah Al-Mulk',
+          'end_date': dayKey(now.add(const Duration(days: 30))),
+          'habits': [
+            {
+              'title': 'Memorise Al-Mulk',
+              'reminder': '05:30',
+              'steps': ['Listen', 'Repeat each ayah 5 times', 'Recite from memory'],
+              'done_when': 'Recite today\'s ayat from memory',
+              'minutes': 15,
+              'quran': {'surah': 67, 'from': 1, 'to': 30, 'per_day': 2, 'mode': 'memorise'},
+            },
+          ],
+          'tasks': [
+            {'title': 'Revise this week\'s ayat', 'date': dayKey(now), 'steps': ['Recite all'], 'done_when': 'No mistakes'},
+          ],
+        }),
+      ),
+    );
+    final g = s.goals.single;
+    final h = s.habits.firstWhere((x) => x.title == 'Memorise Al-Mulk');
+    expect(g.habitIds, [h.id]);
+    expect(g.taskIds, [s.tasks.single.id]);
+    expect(s.goalFor(h.id), g);
+    final q = s.quranFor(h, now)!;
+    expect((q.surah, q.from, q.to), (67, 1, 2));
+
+    await s.logHabit(now.subtract(const Duration(days: 1)), h.id, s.habitEntry(now, h.id).copy()..done = true);
+    final next = s.quranFor(h, now)!;
+    expect((next.from, next.to), (3, 4), reason: 'one day done moves to the next two ayat');
+    expect(goalHabitSubtitle(s, h, now), startsWith('Memorise Al-Mulk 3–4 · 15 min'));
+
+    final items = todayItems(s, now);
+    expect(items.where((i) => i.kind == TodayKind.goal), hasLength(1));
+    expect(items.where((i) => i.habit?.id == h.id), isEmpty, reason: 'the goal habit sits in the goal card');
+  });
+
+  testWidgets('a goal habit opens its steps and today\'s Quran portion', (tester) async {
+    final s = await loadState({'settings.v1': jsonEncode({'onboarded': true})});
+    final h = await s.upsertHabit(
+      HabitDef(
+        id: 'hm',
+        title: 'Memorise Al-Mulk',
+        guide: const TaskGuide(steps: ['Listen'], doneWhen: 'Recite', quran: QuranRef(67, 1, 30, mode: 'memorise', perDay: 2)),
+      ),
+    );
+    QuranText.cache = QuranText.parse(raw);
+    tester.view.physicalSize = const Size(600, 3000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(home: TaskGuideScreen(state: s, habitId: h.id)));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text("Today's portion"), findsOneWidget);
+    expect(find.text('Al-Mulk 1–2'), findsOneWidget);
+    await tester.tap(find.text('1. Listen'));
+    await tester.pump();
+    expect(s.habitEntry(DateTime.now(), h.id).data['steps'], [0]);
+    await tester.tap(find.byKey(const Key('guide-done')));
+    await tester.pump();
+    expect(s.habitEntry(DateTime.now(), h.id).done, isTrue);
   });
 }

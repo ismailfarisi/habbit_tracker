@@ -6,6 +6,13 @@ import '../logic/tasks.dart';
 import '../widgets/ask_chat.dart';
 import '../widgets/adaptive.dart';
 import 'goal.dart';
+import '../habits/habit.dart';
+import '../logic/stats.dart';
+import '../models.dart';
+import '../quran/quran.dart';
+import '../quran/task_guide_screen.dart';
+import '../widgets/cards/section_card.dart';
+import '../widgets/task_editor.dart';
 
 String reviewPrompt(Goal g) => 'Let\'s review my goal "${g.title}" (id ${g.id}). What went well, and what should I adjust?';
 
@@ -55,6 +62,90 @@ class GoalsCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+String _modeLabel(String mode) => switch (mode) {
+  'memorise' => 'Memorise',
+  'revise' => 'Revise',
+  _ => 'Read',
+};
+
+/// One line for a goal habit: e.g. "Memorise Al-Mulk 3–4 · 15 min · Every day at 05:30".
+String goalHabitSubtitle(AppState state, HabitDef h, DateTime day) {
+  final q = state.quranFor(h, day);
+  return [
+    if (q != null) '${_modeLabel(q.mode)} ${passageLabel(q.surah, q.from, q.to)}',
+    if (h.guide?.minutes != null) '${h.guide!.minutes} min',
+    h.describeSchedule(),
+  ].join(' · ');
+}
+
+/// A goal habit row: tick to log, tap for its steps and Quran portion.
+class GoalHabitTile extends StatelessWidget {
+  final AppState state;
+  final HabitDef habit;
+  final DateTime day;
+  const GoalHabitTile({super.key, required this.state, required this.habit, required this.day});
+
+  @override
+  Widget build(BuildContext context) {
+    final entry = state.habitEntry(day, habit.id);
+    final done = habitDone(entry, habit);
+    final c = Theme.of(context).colorScheme;
+    return ListTile(
+      key: ValueKey('goal-habit-${habit.id}'),
+      contentPadding: EdgeInsets.zero,
+      dense: true,
+      leading: Checkbox.adaptive(
+        value: done,
+        onChanged: (v) => state.logHabit(day, habit.id, entry.copy()..done = v ?? false),
+      ),
+      title: Text(
+        '${habit.emoji} ${habit.title}',
+        style: TextStyle(
+          fontWeight: FontWeight.w500,
+          decoration: done ? TextDecoration.lineThrough : null,
+          color: done ? c.onSurfaceVariant : null,
+        ),
+      ),
+      subtitle: Text(goalHabitSubtitle(state, habit, day), maxLines: 2, overflow: TextOverflow.ellipsis),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => Navigator.of(context).push(TaskGuideScreen.route(state, habitId: habit.id)),
+    );
+  }
+}
+
+/// Today's card for one goal: its habits and tasks due today, together.
+class GoalTodayCard extends StatelessWidget {
+  final AppState state;
+  final Goal goal;
+  final DateTime now;
+  const GoalTodayCard({super.key, required this.state, required this.goal, required this.now});
+
+  /// The goal's habits scheduled on [now] and its tasks for that day.
+  static (List<HabitDef>, List<Task>) itemsFor(AppState state, Goal g, DateTime now) => (
+    state.activeHabits.where((h) => g.habitIds.contains(h.id) && h.isScheduledOn(now)).toList(),
+    tasksForDay(state.tasks, now, today: now).where((t) => g.taskIds.contains(t.id)).toList(),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final (habits, tasks) = itemsFor(state, goal, now);
+    final done =
+        habits.where((h) => habitDone(state.habitEntry(now, h.id), h)).length + tasks.where((t) => t.isDoneOn(now)).length;
+    return SectionCard(
+      emoji: goal.emoji,
+      title: goal.title,
+      trailing: CountBadge('$done/${habits.length + tasks.length}'),
+      onTitleTap: () => Navigator.of(
+        context,
+      ).push(MaterialPageRoute<void>(builder: (_) => GoalScreen(state: state, goalId: goal.id))),
+      children: [
+        for (final h in habits) GoalHabitTile(state: state, habit: h, day: now),
+        for (final t in tasks) TaskTile(state: state, task: t, day: now),
+      ],
     );
   }
 }
@@ -183,26 +274,13 @@ class GoalScreen extends StatelessWidget {
                     state.saveGoals();
                   },
                 ),
+              if (habits.isNotEmpty) ...[
+                heading('Daily practice'),
+                for (final h in habits) GoalHabitTile(state: state, habit: h, day: now),
+              ],
               heading('Tasks'),
               if (tasks.isEmpty) Text('No linked tasks.', style: muted),
-              for (final x in tasks)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  leading: Icon(x.isOneOffDone ? Icons.check_circle : Icons.radio_button_unchecked, size: 20),
-                  title: Text(x.title),
-                  subtitle: x.isRepeating ? Text('${x.repeat.name} · done ${x.doneDates.length} times') : null,
-                ),
-              if (habits.isNotEmpty) ...[
-                heading('Habits'),
-                for (final h in habits)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    leading: Text(h.emoji, style: const TextStyle(fontSize: 20)),
-                    title: Text(h.title),
-                  ),
-              ],
+              for (final x in tasks) TaskTile(state: state, task: x, day: now),
               heading('Reviews'),
               if (g.reviews.isEmpty) Text('Your first look back is ${f.format(g.lastLookBack.add(g.cadenceLength))}.', style: muted),
               for (final r in g.reviews.reversed) ...[

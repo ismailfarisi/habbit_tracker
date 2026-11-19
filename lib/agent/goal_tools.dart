@@ -7,6 +7,7 @@ import '../models.dart';
 import '../services/openrouter.dart';
 import '../services/task_tools.dart';
 import '../quran/surahs.dart';
+import '../habits/habit.dart';
 
 Map<String, dynamic> _fn(String name, String description, Map<String, dynamic> props, List<String> required) => {
   'type': 'function',
@@ -67,11 +68,50 @@ const _task = {
   'required': ['title', 'steps', 'done_when'],
 };
 
+const _goalHabit = {
+  'type': 'object',
+  'description': 'A daily (or weekly) practice that moves the goal forward.',
+  'properties': {
+    'title': {'type': 'string'},
+    'emoji': {'type': 'string'},
+    'reminder': {'type': 'string', 'description': '24h HH:MM'},
+    'weekdays': {
+      'type': 'array',
+      'items': {'type': 'integer'},
+      'description': '1 = Monday .. 7 = Sunday. Omit for every day.',
+    },
+    'steps': {
+      'type': 'array',
+      'items': {'type': 'string'},
+      'description': '3-6 concrete instructions for each session',
+    },
+    'done_when': {'type': 'string'},
+    'minutes': {'type': 'integer'},
+    'quran': {
+      'type': 'object',
+      'description': 'For Quran practice: the whole passage and how many ayat per day. '
+          'The app shows the next portion each day and the verified text.',
+      'properties': {
+        'surah': {'type': 'integer'},
+        'from': {'type': 'integer'},
+        'to': {'type': 'integer'},
+        'per_day': {'type': 'integer'},
+        'mode': {
+          'type': 'string',
+          'enum': ['memorise', 'revise', 'read'],
+        },
+      },
+      'required': ['surah', 'from', 'to'],
+    },
+  },
+  'required': ['title', 'steps', 'done_when'],
+};
+
 final goalToolDefinitions = <Map<String, dynamic>>[
   _fn(
     'create_goal',
-    'Create a goal of any length (a week to years) with milestones and the first tasks that move it forward. '
-        'Create tasks here instead of with create_task so they are linked to the goal.',
+    'Create a goal of any length (a week to years) with milestones, its daily practice habits and the first tasks. '
+        'Everything for the goal goes here (not create_task / create_habit) so it is linked and shown together.',
     {
       'title': {'type': 'string'},
       'why': {'type': 'string', 'description': "The user's reason, in their words"},
@@ -83,6 +123,7 @@ final goalToolDefinitions = <Map<String, dynamic>>[
         'description': 'How often to look back together. Default fits the length.',
       },
       'milestones': {'type': 'array', 'items': _milestone},
+      'habits': {'type': 'array', 'items': _goalHabit},
       'tasks': {'type': 'array', 'items': _task},
     },
     ['title', 'end_date'],
@@ -107,6 +148,7 @@ final goalToolDefinitions = <Map<String, dynamic>>[
         'description': 'Milestone ids to mark done',
       },
       'add_tasks': {'type': 'array', 'items': _task},
+      'add_habits': {'type': 'array', 'items': _goalHabit},
       'link_task_ids': {
         'type': 'array',
         'items': {'type': 'string'},
@@ -178,6 +220,38 @@ class GoalTools {
     return out;
   }
 
+  Future<List<HabitDef>> _habits(Object? raw) async {
+    final out = <HabitDef>[];
+    for (final (i, m) in ((raw as List?) ?? const []).cast<Map>().indexed) {
+      final title = '${m['title'] ?? ''}'.trim();
+      if (title.isEmpty) continue;
+      final reminder = '${m['reminder'] ?? ''}';
+      out.add(
+        await state.upsertHabit(
+          HabitDef(
+            id: '${newHabitId()}$i',
+            title: title,
+            emoji: '${m['emoji'] ?? ''}'.trim().isEmpty ? '📖' : '${m['emoji']}'.trim(),
+            weekdays: [
+              for (final d in (m['weekdays'] as List?) ?? const [])
+                if (d is num && d >= 1 && d <= 7) d.toInt(),
+            ],
+            reminder: RegExp(r'^\d{1,2}:\d{2}$').hasMatch(reminder) ? reminder.padLeft(5, '0') : null,
+            createdByAi: true,
+            guide: _guide(m),
+          ),
+        ),
+      );
+    }
+    return out;
+  }
+
+  Future<void> _removeHabits(List<HabitDef> habits) async {
+    for (final h in habits) {
+      await state.deleteHabit(h.id);
+    }
+  }
+
   TaskGuide? _guide(Map m) {
     QuranRef? q;
     final rq = m['quran'];
@@ -186,7 +260,14 @@ class GoalTools {
       final count = surahInfo[surah - 1].$3;
       final from = ((rq['from'] as num?)?.toInt() ?? 1).clamp(1, count);
       final to = ((rq['to'] as num?)?.toInt() ?? from).clamp(from, count);
-      q = QuranRef(surah, from, to, mode: '${rq['mode'] ?? 'read'}');
+      final perDay = (rq['per_day'] as num?)?.toInt();
+      q = QuranRef(
+        surah,
+        from,
+        to,
+        mode: '${rq['mode'] ?? 'read'}',
+        perDay: perDay == null || perDay <= 0 ? null : perDay,
+      );
     }
     final g = TaskGuide(
       steps: ((m['steps'] as List?) ?? const []).map((e) => '$e'.trim()).where((e) => e.isNotEmpty).toList(),
@@ -227,6 +308,7 @@ class GoalTools {
           {
             'id': h.id,
             'title': h.title,
+            if (state.quranFor(h, now) case final q?) 'todayQuran': q.toJson(),
             'doneLast7': [
               for (var i = 0; i < 7; i++) state.habitEntry(now.subtract(Duration(days: i)), h.id),
             ].where((e) => e.done).length,
@@ -246,6 +328,7 @@ class GoalTools {
         final start = dayKey(clock());
         final days = DateTime.parse(end).difference(DateTime.parse(start)).inDays;
         final tasks = await _tasks(a['tasks']);
+        final habits = await _habits(a['habits']);
         final g = Goal(
           id: _id('g'),
           title: title,
@@ -256,15 +339,18 @@ class GoalTools {
           cadence: ReviewCadence.values.firstWhere((c) => c.name == a['review'], orElse: () => cadenceFor(days)),
           milestones: _milestones(a['milestones']),
           taskIds: [for (final t in tasks) t.id],
+          habitIds: [for (final h in habits) h.id],
         );
         await state.upsertGoal(g);
         onActivity?.call(
           ToolActivity(
-            'Goal "${g.title}": ${g.milestones.length} milestones, ${tasks.length} tasks, reviewed ${g.cadence.name}',
+            'Goal "${g.title}": ${g.milestones.length} milestones, ${habits.length} habits, ${tasks.length} tasks, '
+            'reviewed ${g.cadence.name}',
             undo: () async {
               for (final t in tasks) {
                 await state.deleteTask(t);
               }
+              await _removeHabits(habits);
               await state.deleteGoal(g.id);
             },
           ),
@@ -293,6 +379,8 @@ class GoalTools {
         }
         final tasks = await _tasks(a['add_tasks']);
         g.taskIds.addAll(tasks.map((t) => t.id));
+        final habits = await _habits(a['add_habits']);
+        g.habitIds.addAll(habits.map((h) => h.id));
         for (final id in ((a['link_task_ids'] as List?) ?? const []).cast<String>()) {
           if (state.taskById(id) != null && !g.taskIds.contains(id)) g.taskIds.add(id);
         }
@@ -302,11 +390,13 @@ class GoalTools {
         await state.upsertGoal(g);
         onActivity?.call(
           ToolActivity(
-            'Updated goal "${g.title}"${tasks.isEmpty ? '' : ', added ${tasks.length} tasks'}',
+            'Updated goal "${g.title}"${tasks.isEmpty ? '' : ', added ${tasks.length} tasks'}'
+            '${habits.isEmpty ? '' : ', added ${habits.length} habits'}',
             undo: () async {
               for (final t in tasks) {
                 await state.deleteTask(t);
               }
+              await _removeHabits(habits);
               await state.upsertGoal(before);
             },
           ),
@@ -353,15 +443,19 @@ Goals: when the user describes something bigger than a single task (learn,
 memorise, build, lose, save, finish, become), help them shape it into a goal:
 - If the timeline or starting point is unclear, ask at most two short
   questions first. Otherwise act.
-- Call create_goal with a realistic end date, 3-6 milestones spread across the
-  timeline and only the first week or two of tasks (prefer small repeating
-  tasks). Every task needs clear steps (what exactly to do, in order),
+- Call create_goal once with everything: a realistic end date, 3-6
+  milestones spread across the timeline, the daily practice as habits and
+  only the first week or two of one-off tasks. Never call create_task or
+  create_habit for a goal's items: they would not be linked or shown with
+  the goal. Example: "memorise Surah Al-Mulk" is one habit with quran
+  {surah: 67, from: 1, to: 30, per_day: 2, mode: memorise} (the app moves to
+  the next ayat each day it is done) plus a weekly revision task. Every task needs clear steps (what exactly to do, in order),
   minutes and done_when, so the user never wonders what to do. For Quran
   tasks set quran {surah, from, to, mode}; the app shows the verified
   Uthmani text, translation and recitation, so never write verses yourself.
   Use well-known methods (e.g. listen, repeat each ayah, link ayat, recite
-  from memory, revise the previous day's portion). Suggest a habit with create_habit when daily practice helps, then
-  link it with update_goal link_habit_ids.
+  from memory, revise the previous day's portion). To add practice to an
+  existing goal use update_goal add_habits.
 - Plan in layers: the whole timeline as milestones, the current month as
   focus, this week as tasks. Fill in later weeks during reviews.
 - For a review ("review my goal", or a review is due): call list_goals, look

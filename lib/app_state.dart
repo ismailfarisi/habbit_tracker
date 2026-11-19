@@ -282,6 +282,23 @@ class AppState extends ChangeNotifier implements TaskBackend {
     await _commitTasks();
   }
 
+  /// The active goal a task or habit belongs to, if any.
+  Goal? goalFor(String id) {
+    for (final g in goals) {
+      if (!g.archived && (g.taskIds.contains(id) || g.habitIds.contains(id))) return g;
+    }
+    return null;
+  }
+
+  /// Days before [day] on which [h] was done.
+  int habitDaysDoneBefore(HabitDef h, DateTime day) {
+    final before = dayKey(day);
+    return logs.entries.where((e) => e.key.compareTo(before) < 0 && habitDone(e.value.habits[h.id], h)).length;
+  }
+
+  /// The Quran passage [h] asks for on [day] (its next daily portion).
+  QuranRef? quranFor(HabitDef h, DateTime day) => h.guide?.quran?.portion(habitDaysDoneBefore(h, day));
+
   Goal? goalById(String id) {
     for (final g in goals) {
       if (g.id == id) return g;

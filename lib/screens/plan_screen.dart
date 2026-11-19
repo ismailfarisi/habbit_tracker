@@ -105,7 +105,7 @@ class _HabitsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
-    final active = state.activeHabits;
+    final active = state.activeHabits.where((h) => state.goalFor(h.id) == null).toList();
     final archived = state.habits.where((h) => h.archived).toList();
     return Card(
       child: Padding(
