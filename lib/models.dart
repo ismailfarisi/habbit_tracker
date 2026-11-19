@@ -355,6 +355,12 @@ class Task {
   final DateTime createdAt;
   final bool createdByAi;
 
+  /// How to do the task (steps, time, done-when, Quran passage), when set.
+  TaskGuide? guide;
+
+  /// Steps ticked per day (yyyy-MM-dd → step indexes).
+  Map<String, Set<int>> stepsDone;
+
   Task({
     required this.id,
     required this.seq,
@@ -367,7 +373,10 @@ class Task {
     Set<String>? doneDates,
     DateTime? createdAt,
     this.createdByAi = false,
+    this.guide,
+    Map<String, Set<int>>? stepsDone,
   }) : weekdays = weekdays ?? [],
+       stepsDone = stepsDone ?? {},
        doneDates = doneDates ?? <String>{},
        createdAt = createdAt ?? DateTime.now();
 
@@ -383,6 +392,8 @@ class Task {
     'doneDates': doneDates.toList(),
     'createdAt': createdAt.toIso8601String(),
     'createdByAi': createdByAi,
+    if (guide != null) 'guide': guide!.toJson(),
+    if (stepsDone.isNotEmpty) 'stepsDone': {for (final e in stepsDone.entries) e.key: e.value.toList()},
   };
 
   factory Task.fromJson(Map<String, dynamic> j) => Task(
@@ -397,7 +408,49 @@ class Task {
     doneDates: ((j['doneDates'] as List?) ?? const []).cast<String>().toSet(),
     createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime.now(),
     createdByAi: j['createdByAi'] as bool? ?? false,
+    guide: j['guide'] is Map ? TaskGuide.fromJson((j['guide'] as Map).cast<String, dynamic>()) : null,
+    stepsDone: {
+      for (final e in ((j['stepsDone'] as Map?) ?? const {}).entries)
+        '${e.key}': ((e.value as List?) ?? const []).map((v) => (v as num).toInt()).toSet(),
+    },
   );
 
   Task copy() => Task.fromJson(toJson());
+}
+
+
+/// A Quran passage for a task: verses [from]..[to] of [surah].
+class QuranRef {
+  final int surah, from, to;
+  final String mode; // memorise | revise | read
+  const QuranRef(this.surah, this.from, this.to, {this.mode = 'read'});
+  Map<String, dynamic> toJson() => {'surah': surah, 'from': from, 'to': to, 'mode': mode};
+  factory QuranRef.fromJson(Map<String, dynamic> j) => QuranRef(
+    (j['surah'] as num).toInt(),
+    (j['from'] as num?)?.toInt() ?? 1,
+    (j['to'] as num?)?.toInt() ?? (j['from'] as num?)?.toInt() ?? 1,
+    mode: j['mode'] as String? ?? 'read',
+  );
+}
+
+/// Instructions for doing a task well.
+class TaskGuide {
+  final List<String> steps;
+  final String doneWhen;
+  final int? minutes;
+  final QuranRef? quran;
+  const TaskGuide({this.steps = const [], this.doneWhen = '', this.minutes, this.quran});
+  bool get isEmpty => steps.isEmpty && doneWhen.isEmpty && minutes == null && quran == null;
+  Map<String, dynamic> toJson() => {
+    'steps': steps,
+    'doneWhen': doneWhen,
+    'minutes': minutes,
+    if (quran != null) 'quran': quran!.toJson(),
+  };
+  factory TaskGuide.fromJson(Map<String, dynamic> j) => TaskGuide(
+    steps: ((j['steps'] as List?) ?? const []).map((e) => '$e').toList(),
+    doneWhen: j['doneWhen'] as String? ?? '',
+    minutes: (j['minutes'] as num?)?.toInt(),
+    quran: j['quran'] is Map ? QuranRef.fromJson((j['quran'] as Map).cast<String, dynamic>()) : null,
+  );
 }

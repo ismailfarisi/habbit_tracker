@@ -6,6 +6,7 @@ import '../logic/stats.dart';
 import '../models.dart';
 import '../services/openrouter.dart';
 import '../services/task_tools.dart';
+import '../quran/surahs.dart';
 
 Map<String, dynamic> _fn(String name, String description, Map<String, dynamic> props, List<String> required) => {
   'type': 'function',
@@ -41,8 +42,29 @@ const _task = {
       'items': {'type': 'integer'},
       'description': '1 = Monday .. 7 = Sunday, for weekly',
     },
+    'steps': {
+      'type': 'array',
+      'items': {'type': 'string'},
+      'description': '3-6 concrete numbered instructions for doing the task',
+    },
+    'done_when': {'type': 'string', 'description': 'What counts as done, observable'},
+    'minutes': {'type': 'integer'},
+    'quran': {
+      'type': 'object',
+      'description': 'For Quran tasks: the passage. The app shows the verified text itself; never write verses.',
+      'properties': {
+        'surah': {'type': 'integer', 'description': '1-114'},
+        'from': {'type': 'integer'},
+        'to': {'type': 'integer'},
+        'mode': {
+          'type': 'string',
+          'enum': ['memorise', 'revise', 'read'],
+        },
+      },
+      'required': ['surah', 'from', 'to'],
+    },
   },
-  'required': ['title'],
+  'required': ['title', 'steps', 'done_when'],
 };
 
 final goalToolDefinitions = <Map<String, dynamic>>[
@@ -150,8 +172,29 @@ class GoalTools {
           byAi: true,
         ),
       );
+      final guide = _guide(m);
+      if (guide != null) await state.updateTask(out.last, (t) => t.guide = guide);
     }
     return out;
+  }
+
+  TaskGuide? _guide(Map m) {
+    QuranRef? q;
+    final rq = m['quran'];
+    if (rq is Map && rq['surah'] is num) {
+      final surah = (rq['surah'] as num).toInt().clamp(1, surahInfo.length);
+      final count = surahInfo[surah - 1].$3;
+      final from = ((rq['from'] as num?)?.toInt() ?? 1).clamp(1, count);
+      final to = ((rq['to'] as num?)?.toInt() ?? from).clamp(from, count);
+      q = QuranRef(surah, from, to, mode: '${rq['mode'] ?? 'read'}');
+    }
+    final g = TaskGuide(
+      steps: ((m['steps'] as List?) ?? const []).map((e) => '$e'.trim()).where((e) => e.isNotEmpty).toList(),
+      doneWhen: '${m['done_when'] ?? ''}'.trim(),
+      minutes: (m['minutes'] as num?)?.toInt(),
+      quran: q,
+    );
+    return g.isEmpty ? null : g;
   }
 
   Map<String, dynamic> describe(Goal g) {
@@ -312,7 +355,12 @@ memorise, build, lose, save, finish, become), help them shape it into a goal:
   questions first. Otherwise act.
 - Call create_goal with a realistic end date, 3-6 milestones spread across the
   timeline and only the first week or two of tasks (prefer small repeating
-  tasks). Suggest a habit with create_habit when daily practice helps, then
+  tasks). Every task needs clear steps (what exactly to do, in order),
+  minutes and done_when, so the user never wonders what to do. For Quran
+  tasks set quran {surah, from, to, mode}; the app shows the verified
+  Uthmani text, translation and recitation, so never write verses yourself.
+  Use well-known methods (e.g. listen, repeat each ayah, link ayat, recite
+  from memory, revise the previous day's portion). Suggest a habit with create_habit when daily practice helps, then
   link it with update_goal link_habit_ids.
 - Plan in layers: the whole timeline as milestones, the current month as
   focus, this week as tasks. Fill in later weeks during reviews.

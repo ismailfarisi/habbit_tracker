@@ -10,6 +10,7 @@ import '../logic/spoken_task.dart';
 import '../models.dart';
 import '../services/voice_input.dart';
 import 'voice_input_button.dart';
+import '../quran/task_guide_screen.dart';
 
 /// Opens a bottom sheet to create a task, or edit [task] if given. With
 /// [dictate], the title starts listening right away and a spoken date,
@@ -301,7 +302,11 @@ class TaskTile extends StatelessWidget {
         style: TextStyle(color: overdue ? c.error : null),
       ),
       trailing: task.createdByAi ? Icon(Icons.auto_awesome, size: 16, color: c.primary) : null,
-      onTap: () => showTaskEditor(context, state, task: task),
+      onTap: () => task.guide == null
+          ? showTaskEditor(context, state, task: task)
+          : Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => TaskGuideScreen(state: state, taskId: task.id)),
+            ),
     );
   }
 }
