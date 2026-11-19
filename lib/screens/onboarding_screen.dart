@@ -185,13 +185,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     const Text('🌅', textAlign: TextAlign.center, style: TextStyle(fontSize: 72)),
     const SizedBox(height: 16),
     Text(
-      'Daily Discipline',
+      'Your Personal Islamic Growth Companion',
       textAlign: TextAlign.center,
       style: t.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
     ),
     const SizedBox(height: 12),
     Text(
-      'Wake up early, pray the five prayers on time and keep the habits that matter to you. '
+      'Build better habits. Strengthen your connection with Allah. Improve yourself, one day at a time.\n\n'
+      'Consistency matters more than perfection: a missed day is just a day to begin again. '
       'Setup takes about a minute.',
       textAlign: TextAlign.center,
       style: t.textTheme.bodyLarge,

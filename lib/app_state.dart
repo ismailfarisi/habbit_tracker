@@ -11,6 +11,7 @@ import 'services/storage.dart';
 import 'services/task_tools.dart';
 import 'services/tts.dart';
 import 'services/voice_input.dart';
+import 'goals/goal.dart';
 
 /// App state and the only writer of persisted data.
 ///
@@ -34,6 +35,10 @@ class AppState extends ChangeNotifier implements TaskBackend {
   /// Every habit, archived ones included. Mutate through [upsertHabit],
   /// [archiveHabit] and [deleteHabit].
   List<HabitDef> habits;
+  List<Goal> goals = [];
+
+  /// Text to send in the Chat tab (e.g. "review my goal"), set from other screens.
+  final ValueNotifier<String?> chatPrompt = ValueNotifier(null);
   String apiKey = '';
 
   /// Keys for OpenAI / xAI (Grok) voices; separate from the OpenRouter key.
@@ -58,6 +63,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
       storage.loadHabits(),
     );
     if (!storage.hasHabits) await storage.saveHabits(s.habits);
+    s.goals = storage.loadGoals();
     s.apiKey = await storage.loadApiKey();
     s.openaiKey = await storage.loadSecret(Storage.openaiKeyName);
     s.xaiKey = await storage.loadSecret(Storage.xaiKeyName);
@@ -91,6 +97,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
     logs = storage.loadLogs();
     tasks = storage.loadTasks();
     habits = storage.loadHabits();
+    goals = storage.loadGoals();
     notifyListeners();
     await _reschedule();
   }
@@ -275,6 +282,30 @@ class AppState extends ChangeNotifier implements TaskBackend {
     await _commitTasks();
   }
 
+  Goal? goalById(String id) {
+    for (final g in goals) {
+      if (g.id == id) return g;
+    }
+    return null;
+  }
+
+  /// Adds [goal], or replaces the stored goal with the same id.
+  Future<void> upsertGoal(Goal goal) async {
+    final i = goals.indexWhere((g) => g.id == goal.id);
+    i < 0 ? goals.add(goal) : goals[i] = goal;
+    await saveGoals();
+  }
+
+  Future<void> deleteGoal(String id) async {
+    goals.removeWhere((g) => g.id == id);
+    await saveGoals();
+  }
+
+  Future<void> saveGoals() async {
+    await storage.saveGoals(goals);
+    notifyListeners();
+  }
+
   Future<void> updateSettings(void Function(Settings s) change) async {
     change(settings);
     notifyListeners();
@@ -302,6 +333,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
     logs = storage.loadLogs();
     tasks = storage.loadTasks();
     habits = storage.loadHabits();
+    goals = storage.loadGoals();
     notifyListeners();
     await _reschedule();
   }
@@ -312,6 +344,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
     logs = {};
     tasks = [];
     habits = [];
+    goals = [];
     apiKey = '';
     openaiKey = '';
     xaiKey = '';

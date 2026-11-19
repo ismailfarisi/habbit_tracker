@@ -1,0 +1,275 @@
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+
+import '../app_state.dart';
+import '../logic/tasks.dart';
+import '../screens/home_screen.dart';
+import '../widgets/adaptive.dart';
+import 'goal.dart';
+
+/// Opens the Chat tab and sends [text] there.
+void askChat(AppState state, String text) {
+  state.chatPrompt.value = text;
+  state.requestedTab.value = HomeScreen.chatTab;
+}
+
+String reviewPrompt(Goal g) => 'Let\'s review my goal "${g.title}" (id ${g.id}). What went well, and what should I adjust?';
+
+/// Plan's Goals section: each goal's timeline and progress, and a nudge when
+/// a look-back is due.
+class GoalsCard extends StatelessWidget {
+  final AppState state;
+  const GoalsCard({super.key, required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final goals = state.goals.where((g) => !g.archived).toList();
+    final now = DateTime.now();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Goals${goals.isEmpty ? '' : ' · ${goals.length}'}',
+                    style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                TextButton.icon(
+                  key: const Key('new-goal'),
+                  onPressed: () => askChat(state, 'Help me set a new goal'),
+                  icon: const Icon(Icons.flag_outlined),
+                  label: const Text('New goal'),
+                ),
+              ],
+            ),
+            if (goals.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text(
+                  'Plan something bigger, a week or a few years long. The AI breaks it into milestones and tasks, '
+                  'and looks back with you along the way.',
+                  style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
+                ),
+              ),
+            for (final g in goals) _GoalTile(state: state, goal: g, now: now),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GoalTile extends StatelessWidget {
+  final AppState state;
+  final Goal goal;
+  final DateTime now;
+  const _GoalTile({required this.state, required this.goal, required this.now});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final p = goal.progress(state.tasks);
+    return InkWell(
+      key: ValueKey('goal-${goal.id}'),
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => Navigator.of(
+        context,
+      ).push(MaterialPageRoute<void>(builder: (_) => GoalScreen(state: state, goalId: goal.id))),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(goal.emoji, style: const TextStyle(fontSize: 20)),
+                const SizedBox(width: 8),
+                Expanded(child: Text(goal.title, style: t.textTheme.titleSmall)),
+                if (goal.reviewDue(now))
+                  TextButton(
+                    style: compactButton,
+                    onPressed: () => askChat(state, reviewPrompt(goal)),
+                    child: const Text('Review'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(value: p, minHeight: 6),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${goal.horizon} · ${goal.milestones.isEmpty ? '${(p * 100).round()}%' : '${goal.milestonesDone} of ${goal.milestones.length} milestones'}'
+              ' · until ${DateFormat('d MMM y').format(goal.endDate)}',
+              style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One goal: why it matters, the timeline, milestones, linked tasks and
+/// habits, and past reviews whose suggestions can be applied through Chat.
+class GoalScreen extends StatelessWidget {
+  final AppState state;
+  final String goalId;
+  const GoalScreen({super.key, required this.state, required this.goalId});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: state,
+      builder: (context, _) {
+        final g = state.goalById(goalId);
+        if (g == null) return Scaffold(appBar: AppBar(), body: const Center(child: Text('This goal was removed.')));
+        final t = Theme.of(context);
+        final muted = t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant);
+        final f = DateFormat('d MMM y');
+        final now = DateTime.now();
+        Widget heading(String s) => Padding(
+          padding: const EdgeInsets.only(top: 20, bottom: 4),
+          child: Text(s, style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+        );
+        final tasks = state.tasks.where((x) => g.taskIds.contains(x.id)).toList();
+        final habits = state.habits.where((h) => g.habitIds.contains(h.id)).toList();
+        void review() {
+          Navigator.of(context).pop();
+          askChat(state, reviewPrompt(g));
+        }
+
+        return Scaffold(
+          appBar: AppBar(title: Text('${g.emoji} ${g.title}')),
+          body: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            children: [
+              if (g.why.isNotEmpty) Text('Why: ${g.why}', style: t.textTheme.bodyLarge),
+              const SizedBox(height: 12),
+              Text('${f.format(g.startDate)} → ${f.format(g.endDate)} · ${g.horizon}', style: muted),
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(value: g.progress(state.tasks), minHeight: 8),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${(g.progress(state.tasks) * 100).round()}% done · ${(g.elapsed(now) * 100).round()}% of the time passed',
+                style: muted,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  FilledButton.tonalIcon(
+                    key: const Key('review-goal'),
+                    style: compactButton,
+                    onPressed: review,
+                    icon: const Icon(Icons.auto_awesome),
+                    label: Text(g.reviewDue(now) ? 'Review is due' : 'Review with AI'),
+                  ),
+                  const SizedBox(width: 8),
+                  Text('Look back ${g.cadence.name}', style: muted),
+                ],
+              ),
+              heading('Milestones'),
+              if (g.milestones.isEmpty) Text('No milestones yet.', style: muted),
+              for (final m in g.milestones)
+                CheckboxListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  value: m.done,
+                  title: Text(m.title),
+                  subtitle: m.due == null ? null : Text('By ${f.format(DateTime.parse(m.due!))}'),
+                  onChanged: (v) {
+                    m.done = v ?? false;
+                    state.saveGoals();
+                  },
+                ),
+              heading('Tasks'),
+              if (tasks.isEmpty) Text('No linked tasks.', style: muted),
+              for (final x in tasks)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: Icon(x.isOneOffDone ? Icons.check_circle : Icons.radio_button_unchecked, size: 20),
+                  title: Text(x.title),
+                  subtitle: x.isRepeating ? Text('${x.repeat.name} · done ${x.doneDates.length} times') : null,
+                ),
+              if (habits.isNotEmpty) ...[
+                heading('Habits'),
+                for (final h in habits)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    leading: Text(h.emoji, style: const TextStyle(fontSize: 20)),
+                    title: Text(h.title),
+                  ),
+              ],
+              heading('Reviews'),
+              if (g.reviews.isEmpty) Text('Your first look back is ${f.format(g.lastLookBack.add(g.cadenceLength))}.', style: muted),
+              for (final r in g.reviews.reversed) ...[
+                const SizedBox(height: 8),
+                Text(f.format(r.at), style: muted),
+                Text(r.summary),
+                for (final (i, s) in r.suggestions.indexed)
+                  Row(
+                    children: [
+                      const Icon(Icons.lightbulb_outline, size: 16),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text(s, style: t.textTheme.bodySmall)),
+                      TextButton(
+                        style: compactButton,
+                        onPressed: r.applied.contains(i)
+                            ? null
+                            : () {
+                                r.applied.add(i);
+                                state.saveGoals();
+                                Navigator.of(context).pop();
+                                askChat(state, 'For my goal "${g.title}" (id ${g.id}), apply this suggestion: $s');
+                              },
+                        child: Text(r.applied.contains(i) ? 'Applied' : 'Apply'),
+                      ),
+                    ],
+                  ),
+              ],
+              const SizedBox(height: 24),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  key: const Key('archive-goal'),
+                  onPressed: () {
+                    g.archived = true;
+                    state.saveGoals();
+                    final messenger = ScaffoldMessenger.of(context);
+                    Navigator.of(context).pop();
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text('Archived "${g.title}"'),
+                        action: SnackBarAction(
+                          label: 'Undo',
+                          onPressed: () {
+                            g.archived = false;
+                            state.saveGoals();
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.archive_outlined),
+                  label: const Text('Archive goal'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}

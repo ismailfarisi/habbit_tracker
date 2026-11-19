@@ -5,6 +5,7 @@ import 'package:ag_ui/ag_ui.dart' as agui;
 import 'package:flutter/material.dart';
 
 import '../agent/agui_agent.dart';
+import '../agent/goal_tools.dart';
 import '../agent/habit_agent.dart';
 import '../agent/habit_surface.dart';
 import '../app_state.dart';
@@ -33,6 +34,10 @@ const toolLabels = {
   'log_wake': 'Logging a wake-up',
   'set_wake_time': 'Changing the wake-up goal',
   'get_stats': 'Checking your progress',
+  'create_goal': 'Planning your goal',
+  'list_goals': 'Looking at your goals',
+  'update_goal': 'Updating your goal',
+  'save_goal_review': 'Saving the review',
 };
 
 /// One row in the chat: a user or assistant message, a tool call card or an error.
@@ -67,7 +72,10 @@ class AgUiChat extends ChangeNotifier {
     _load();
   }
 
-  String get systemPrompt => '$plannerSystemPrompt\n${plannerContext(state.settings, DateTime.now())}';
+  String get systemPrompt {
+    final now = DateTime.now();
+    return '$plannerSystemPrompt\n$goalsPrompt\n${plannerContext(state.settings, now)}\n${goalsContext(state, now)}';
+  }
 
   void newChat() {
     history.clear();
@@ -227,6 +235,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _scroll = ScrollController();
 
   static const _suggestions = [
+    'Help me memorise Juz Amma in 6 months',
     'Remind me to call my mother tomorrow at 8pm',
     'I mumble in meetings, build me a daily practice',
     'Drink 2L of water every day',
@@ -238,11 +247,21 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _chat.addListener(_toBottom);
+    widget.state.chatPrompt.addListener(_onPrompt);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onPrompt());
+  }
+
+  void _onPrompt() {
+    final p = widget.state.chatPrompt.value;
+    if (p == null || _chat.busy) return;
+    widget.state.chatPrompt.value = null;
+    _send(p);
   }
 
   @override
   void dispose() {
     _chat.removeListener(_toBottom);
+    widget.state.chatPrompt.removeListener(_onPrompt);
     if (widget.chat == null) _chat.dispose();
     _input.dispose();
     _scroll.dispose();

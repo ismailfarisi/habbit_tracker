@@ -30,6 +30,7 @@ import '../services/task_tools.dart';
 import 'habit_catalog.dart';
 import 'habit_templates.dart';
 import 'app_tools.dart';
+import 'goal_tools.dart';
 
 const habitToolNames = {
   'create_habit',
@@ -481,6 +482,7 @@ class HabitAgent {
   late final habitTools = HabitTools(state, onActivity: onActivity, onProposal: onProposal, clock: clock);
   late final taskTools = TaskTools(state, onActivity: onActivity, clock: clock);
   late final appTools = AppTools(state, onActivity: onActivity, clock: clock);
+  late final goalTools = GoalTools(state, onActivity: onActivity, clock: clock);
 
   HabitAgent(
     this.state, {
@@ -491,12 +493,14 @@ class HabitAgent {
   })  : clock = clock ?? DateTime.now,
         _client = client ?? (() => OpenRouterClient(apiKey: state.apiKey, model: state.settings.model));
 
-  List<Map<String, dynamic>> get tools => [...taskToolDefinitions, ...habitToolDefinitions, ...appToolDefinitions];
+  List<Map<String, dynamic>> get tools => [...taskToolDefinitions, ...habitToolDefinitions, ...appToolDefinitions, ...goalToolDefinitions];
 
   Future<String> execute(ToolCall call) => habitToolNames.contains(call.name)
       ? habitTools.execute(call)
       : appToolNames.contains(call.name)
       ? appTools.execute(call)
+      : goalToolNames.contains(call.name)
+      ? goalTools.execute(call)
       : taskTools.execute(call);
 
   /// Runs the model on [history] (which gains every assistant and tool

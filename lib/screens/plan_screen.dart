@@ -13,6 +13,7 @@ import '../widgets/voice_input_button.dart';
 import 'habit_detail_screen.dart';
 import 'tasks_screen.dart';
 import '../widgets/adaptive.dart';
+import '../goals/goals_card.dart';
 
 /// The Plan tab: the coach entry, the habit list (add from template, edit,
 /// archive) and the task lists.
@@ -75,6 +76,7 @@ class _PlanScreenState extends State<PlanScreen> {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
           children: [
             _CoachCard(state: state, onOpen: _openCoach),
+            GoalsCard(state: state),
             _HabitsCard(state: state),
             TaskSections(state: state),
           ],

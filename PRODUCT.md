@@ -10,6 +10,8 @@ adaptive
 People building daily habits who want structure without friction: waking early, sticking to routines, and planning small tasks. Muslim users can turn on prayer tracking (five prayers, Jumu'ah, Ramadan), but it is optional and the app must read as a general habit app without it. Typical moments are short and frequent: a check-off at the alarm, a glance between tasks, a review before bed.
 
 ## Product Purpose
+
+Positioning: **Your Personal Islamic Growth Companion.** Build better habits. Strengthen your connection with Allah. Improve yourself, one day at a time. It is not "another habit tracker": it encourages consistency, not perfection. Copy never guilts the user over a missed day; it offers a lighter next step. Goals of any length (a week to years) are planned with the AI in Chat, broken into milestones and near-term tasks, and revisited weekly, monthly or quarterly.
 Daily Discipline (package `habit_tracker`) helps someone show up every day. Success is that the user opens it briefly several times a day, logs honestly (including past days), and sees real progress over weeks, not a brittle streak that breaks on one miss.
 
 ## Positioning
