@@ -114,7 +114,7 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(find.text(AiKeyEmptyState.message), findsNothing);
-    expect(find.text('What do I have today?'), findsOneWidget, reason: 'the chat appears once a key is set');
+    expect(find.text('How did my week go?'), findsOneWidget, reason: 'the chat appears once a key is set');
   });
 
   testWidgets('the coach sheet shows the empty state without a key', (tester) async {

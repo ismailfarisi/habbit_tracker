@@ -38,7 +38,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
   List<Goal> goals = [];
 
   /// Text to send in the Chat tab (e.g. "review my goal"), set from other screens.
-  final ValueNotifier<String?> chatPrompt = ValueNotifier(null);
+  final ValueNotifier<ChatRequest?> chatPrompt = ValueNotifier(null);
   String apiKey = '';
 
   /// Keys for OpenAI / xAI (Grok) voices; separate from the OpenRouter key.
@@ -351,4 +351,12 @@ class AppState extends ChangeNotifier implements TaskBackend {
     notifyListeners();
     await _reschedule();
   }
+}
+
+/// A message for the Chat tab sent from another screen; [display] is shown
+/// instead of [text] when the prompt is long.
+class ChatRequest {
+  final String text;
+  final String? display;
+  const ChatRequest(this.text, {this.display});
 }

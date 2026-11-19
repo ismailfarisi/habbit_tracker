@@ -7,13 +7,10 @@ import '../logic/stats.dart';
 import '../logic/tasks.dart';
 import '../logic/weekly_review.dart';
 import '../models.dart';
-import '../services/coach_prompts.dart';
-import '../services/openrouter.dart';
-import '../services/task_tools.dart';
-import '../widgets/assistant_chat.dart';
 import '../widgets/day_editor.dart';
 import 'habit_detail_screen.dart';
 import '../widgets/adaptive.dart';
+import '../widgets/ask_chat.dart';
 
 /// The Progress tab: streak tiles (current streak, rule, "N of last 30",
 /// freezes left), the weekly review and a 30-day grid of every tracked item
@@ -209,7 +206,14 @@ class WeeklyReviewCard extends StatelessWidget {
           if (state.apiKey.isNotEmpty)
             FilledButton.tonalIcon(
               style: compactButton,
-              onPressed: r.isEmpty ? null : () => showWeeklyReviewCoach(context, state, r),
+              onPressed: r.isEmpty
+                  ? null
+                  : () => askChat(
+                      state,
+                      '$weeklyReviewCoachPrompt\n\n${r.toPrompt()}',
+                      display: '📊 Review my week',
+                      context: context,
+                    ),
               icon: const Icon(Icons.auto_awesome),
               label: const Text('Ask coach'),
             )
@@ -220,73 +224,6 @@ class WeeklyReviewCard extends StatelessWidget {
             ),
         ]),
       ),
-    );
-  }
-}
-
-/// Opens the coach in a sheet and sends it [review] as context.
-Future<void> showWeeklyReviewCoach(
-  BuildContext context,
-  AppState state,
-  WeeklyReview review, {
-  OpenRouterClient Function()? client,
-}) {
-  return showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
-    builder: (_) => Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: _ReviewCoachSheet(state: state, review: review, client: client),
-    ),
-  );
-}
-
-class _ReviewCoachSheet extends StatefulWidget {
-  final AppState state;
-  final WeeklyReview review;
-  final OpenRouterClient Function()? client;
-  const _ReviewCoachSheet({required this.state, required this.review, this.client});
-
-  @override
-  State<_ReviewCoachSheet> createState() => _ReviewCoachSheetState();
-}
-
-class _ReviewCoachSheetState extends State<_ReviewCoachSheet> {
-  late final _chat = AssistantChat(
-    widget.state,
-    client: widget.client,
-    systemPrompt: () =>
-        '$weeklyReviewCoachPrompt\n$coachTaskPrompt\n${plannerContext(widget.state.settings, DateTime.now())}',
-  );
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _chat.send(widget.review.toPrompt(), display: '📊 Review my week');
-    });
-  }
-
-  @override
-  void dispose() {
-    _chat.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Coach · Weekly review', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 12),
-        AssistantChatView(
-          chat: _chat,
-          hint: 'Message your coach',
-          suggestions: const ['Make my plan easier', 'What should I fix first?'],
-        ),
-      ]),
     );
   }
 }

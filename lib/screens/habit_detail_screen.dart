@@ -7,8 +7,8 @@ import '../habits/habit.dart';
 import '../logic/stats.dart';
 import '../models.dart';
 import '../widgets/charts.dart';
-import '../widgets/coach_sheet.dart';
 import 'progress_screen.dart' show ruleLabel;
+import '../widgets/ask_chat.dart';
 
 /// A habit's own screen: its A2UI surface for [day] (today by default),
 /// streak and consistency, charts of its metrics over time (per practice
@@ -47,7 +47,12 @@ class HabitDetailScreen extends StatelessWidget {
               IconButton(
                 tooltip: 'Ask coach',
                 icon: const Icon(Icons.auto_awesome),
-                onPressed: () => showCoachSheet(context, state, habit: habit),
+                onPressed: () => askChat(
+                  state,
+                  'Coach me on my "${habit.title}" habit (id ${habit.id}): how am I doing and what should I adjust?',
+                  display: 'Coach me on ${habit.title}',
+                  context: context,
+                ),
               ),
               PopupMenuButton<String>(
                 onSelected: (v) async {

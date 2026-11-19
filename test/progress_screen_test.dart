@@ -4,16 +4,15 @@ import 'package:habit_tracker/agent/habit_templates.dart';
 import 'package:habit_tracker/app_state.dart';
 import 'package:habit_tracker/habits/habit.dart';
 import 'package:habit_tracker/logic/stats.dart';
-import 'package:habit_tracker/logic/weekly_review.dart';
 import 'package:habit_tracker/models.dart';
 import 'package:habit_tracker/screens/habit_detail_screen.dart';
 import 'package:habit_tracker/screens/progress_screen.dart';
-import 'package:habit_tracker/services/openrouter.dart';
 import 'package:habit_tracker/widgets/charts.dart';
 import 'package:habit_tracker/widgets/day_editor.dart';
 import 'package:intl/intl.dart';
 
 import 'support.dart';
+import 'package:habit_tracker/screens/home_screen.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -123,42 +122,19 @@ void main() {
     expect(find.text('Ask coach'), findsOneWidget);
   });
 
-  testWidgets('Ask coach sends the weekly review to the coach', (tester) async {
-    tester.view.physicalSize = const Size(420, 2400);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
+  testWidgets('Ask coach sends the weekly review to Chat', (tester) async {
     await state.setApiKey('k');
     await state.setPrayerStatus(ago(1), 'Fajr', prayerOnTime);
-    final review = weeklyReview(settings: state.settings, logs: state.logs, today: today);
-    final requests = <Map<String, dynamic>>[];
-    late BuildContext ctx;
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(builder: (c) {
-      ctx = c;
-      return const SizedBox();
-    }))));
-    showWeeklyReviewCoach(
-      ctx,
-      state,
-      review,
-      client: () => OpenRouterClient(
-        apiKey: 'k',
-        model: 'm',
-        client: fakeModel([
-          [
-            {'content': 'Fajr is strong. Fix Dhuhr first.'},
-          ],
-        ], requests),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pumpAndSettle();
-    expect(find.text('📊 Review my week'), findsOneWidget);
-    expect(find.textContaining('Fix Dhuhr first'), findsOneWidget);
-    final sent = requests.single.toString();
-    expect(sent, contains('My weekly review'));
-    expect(sent, contains('- Fajr: 1/1'));
-    expect(sent, contains('discipline coach'));
+    await pumpProgress(tester);
+    await tester.ensureVisible(find.text('Ask coach'));
+    await tester.tap(find.text('Ask coach'));
+    await tester.pump();
+    final req = state.chatPrompt.value!;
+    expect(req.display, '📊 Review my week');
+    expect(req.text, contains('My weekly review'));
+    expect(req.text, contains('- Fajr: 1/1'));
+    expect(req.text, contains('discipline coach'));
+    expect(state.requestedTab.value, HomeScreen.chatTab);
   });
 
   group('habit detail', () {

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../agent/habit_templates.dart';
 import '../app_state.dart';
-import 'coach_sheet.dart';
+import 'ask_chat.dart';
 
 /// Lets the user add a habit from the offline templates (no AI key needed)
 /// or ask the coach to build one.
@@ -40,7 +40,7 @@ Future<void> showAddHabitSheet(BuildContext context, AppState state) {
                 : 'Describe what you need, e.g. "I mumble in meetings".'),
             onTap: () {
               Navigator.of(sheet).pop();
-              showCoachSheet(context, state);
+              askChat(state, 'Help me build a new habit', context: context);
             },
           ),
         ],

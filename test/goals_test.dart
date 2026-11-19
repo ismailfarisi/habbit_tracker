@@ -169,7 +169,7 @@ void main() {
     expect(find.textContaining('1 of 2 milestones'), findsOneWidget);
     await tester.tap(find.text('Review'));
     expect(s.requestedTab.value, HomeScreen.chatTab);
-    expect(s.chatPrompt.value, contains('id g1'));
+    expect(s.chatPrompt.value!.text, contains('id g1'));
 
     await tester.tap(find.byKey(const ValueKey('goal-g1')));
     await tester.pumpAndSettle();
@@ -184,7 +184,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: GoalsCard(state: s))));
     expect(find.textContaining('a week or a few years'), findsOneWidget);
     await tester.tap(find.byKey(const Key('new-goal')));
-    expect(s.chatPrompt.value, 'Help me set a new goal');
+    expect(s.chatPrompt.value!.text, 'Help me set a new goal');
   });
 
   test('chat creates a goal through the AG-UI agent', () async {

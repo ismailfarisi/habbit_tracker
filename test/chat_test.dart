@@ -87,7 +87,7 @@ void main() {
       }
     });
     await tester.pumpAndSettle();
-    expect(find.text('Creating a task'), findsOneWidget);
+    expect(find.byKey(const ValueKey('tool-call1')), findsOneWidget);
     expect(find.textContaining('Added it.'), findsOneWidget);
     expect(s.tasks, hasLength(1));
     await tester.tap(find.text('Undo'));

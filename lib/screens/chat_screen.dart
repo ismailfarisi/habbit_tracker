@@ -16,6 +16,7 @@ import '../widgets/adaptive.dart';
 import '../widgets/ai_key_empty_state.dart';
 import '../widgets/simple_markdown.dart';
 import '../widgets/voice_input_button.dart';
+import '../services/coach_prompts.dart';
 
 const toolLabels = {
   'create_task': 'Creating a task',
@@ -74,7 +75,8 @@ class AgUiChat extends ChangeNotifier {
 
   String get systemPrompt {
     final now = DateTime.now();
-    return '$plannerSystemPrompt\n$goalsPrompt\n${plannerContext(state.settings, now)}\n${goalsContext(state, now)}';
+    return '$plannerSystemPrompt\n$goalsPrompt\nWhen the user asks for feedback on speech practice:\n$coachSystemPrompt\n'
+        '${plannerContext(state.settings, now)}\n${goalsContext(state, now)}';
   }
 
   void newChat() {
@@ -85,9 +87,9 @@ class AgUiChat extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> send(String text) async {
+  Future<void> send(String text, {String? display}) async {
     if (busy || text.trim().isEmpty) return;
-    items.add(ChatItem('user', 'u${items.length}', text.trim()));
+    items.add(ChatItem('user', 'u${items.length}', (display ?? text).trim()));
     if (state.apiKey.isEmpty) {
       items.add(ChatItem('error', 'e${items.length}', 'Add your OpenRouter API key in Settings to use the chat.'));
       notifyListeners();
@@ -255,7 +257,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final p = widget.state.chatPrompt.value;
     if (p == null || _chat.busy) return;
     widget.state.chatPrompt.value = null;
-    if (widget.state.apiKey.isNotEmpty) _send(p);
+    if (widget.state.apiKey.isNotEmpty) _chat.send(p.text, display: p.display);
   }
 
   @override
@@ -349,7 +351,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       textInputAction: TextInputAction.send,
                       onSubmitted: (_) => _send(),
                       decoration: InputDecoration(
-                        hintText: 'Message',
+                        hintText: 'Message your coach',
+                        border: const OutlineInputBorder(),
                         suffixIcon: VoiceInputButton(key: const Key('chat-tab-voice'), controller: _input),
                       ),
                     ),
@@ -359,7 +362,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     key: const Key('chat-send'),
                     tooltip: 'Send',
                     onPressed: _chat.busy ? null : _send,
-                    icon: const Icon(Icons.arrow_upward),
+                    icon: const Icon(Icons.send),
                   ),
                 ],
               ),
@@ -376,68 +379,88 @@ class _ItemView extends StatelessWidget {
   final ChatItem item;
   const _ItemView({required this.chat, required this.item});
 
+  Widget _bubble(BuildContext context, {required bool user, required Color color, required Widget child, Key? key}) =>
+      Align(
+        key: key,
+        alignment: user ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(14)),
+          child: child,
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     final c = t.colorScheme;
     switch (item.kind) {
       case 'user':
-        return Align(
-          alignment: Alignment.centerRight,
-          child: Container(
-            margin: const EdgeInsets.only(top: 8, left: 48),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(color: c.primaryContainer, borderRadius: BorderRadius.circular(18)),
-            child: Text(item.text, style: TextStyle(color: c.onPrimaryContainer)),
-          ),
+        return _bubble(
+          context,
+          user: true,
+          color: c.primary,
+          child: Text(item.text, style: TextStyle(color: c.onPrimary)),
         );
       case 'assistant':
-        return Padding(
-          padding: const EdgeInsets.only(top: 8, right: 24),
-          child: SimpleMarkdown(item.text),
+        return _bubble(
+          context,
+          user: false,
+          color: c.surfaceContainerHighest,
+          child: item.text.isEmpty
+              ? const SizedBox(width: 24, height: 16, child: LinearProgressIndicator())
+              : SimpleMarkdown(item.text, style: TextStyle(color: c.onSurface)),
         );
       case 'error':
-        return Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Text(item.text, style: TextStyle(color: c.error)),
+        return _bubble(
+          context,
+          user: false,
+          color: c.errorContainer,
+          child: Text(item.text, style: TextStyle(color: c.onErrorContainer)),
         );
     }
     final error = item.result == null ? null : LocalAgUiAgent.errorOf(item.result!);
     final label = toolLabels[item.toolName] ?? item.toolName ?? 'Working';
-    return Container(
+    final bold = TextStyle(color: c.onSurface, fontWeight: FontWeight.w600);
+    return _bubble(
+      context,
       key: ValueKey('tool-${item.id}'),
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: c.surfaceContainerHigh, borderRadius: BorderRadius.circular(16)),
+      user: false,
+      color: c.surfaceContainerHighest,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              SizedBox.square(
-                dimension: 18,
-                child: item.running
-                    ? const CircularProgressIndicator.adaptive(strokeWidth: 2)
-                    : Icon(
-                        error != null ? Icons.error_outline : Icons.check_circle,
-                        size: 18,
-                        color: error != null ? c.error : c.primary,
-                      ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(child: Text(item.running ? '$label…' : label, style: t.textTheme.labelLarge)),
-            ],
-          ),
+          if (item.activities.isEmpty)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox.square(
+                  dimension: 18,
+                  child: item.running
+                      ? const CircularProgressIndicator.adaptive(strokeWidth: 2)
+                      : Icon(
+                          error != null ? Icons.error_outline : Icons.task_alt,
+                          size: 18,
+                          color: error != null ? c.error : c.primary,
+                        ),
+                ),
+                const SizedBox(width: 6),
+                Flexible(child: Text(item.running ? '$label…' : label, style: bold)),
+              ],
+            ),
           if (error != null) Text(error, style: t.textTheme.bodySmall?.copyWith(color: c.error)),
           for (final a in item.activities)
             Row(
               children: [
+                Icon(item.undone.contains(a) ? Icons.undo : Icons.task_alt, size: 18, color: c.primary),
+                const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     a.label,
-                    style: t.textTheme.bodySmall?.copyWith(
-                      decoration: item.undone.contains(a) ? TextDecoration.lineThrough : null,
-                    ),
+                    style: bold.copyWith(decoration: item.undone.contains(a) ? TextDecoration.lineThrough : null),
                   ),
                 ),
                 if (a.undo != null)
@@ -448,22 +471,42 @@ class _ItemView extends StatelessWidget {
                   ),
               ],
             ),
-          for (final p in item.proposals) ...[
-            const SizedBox(height: 8),
-            Text('${p.habit.emoji}  ${p.habit.title}', style: t.textTheme.titleSmall),
-            if (!p.accepted) HabitSurface(chat.state, p.habit, DateTime.now(), persist: false),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: p.accepted
-                  ? Text('Added. You can find it on Today.', style: t.textTheme.bodySmall)
-                  : FilledButton.icon(
-                      style: compactButton,
-                      onPressed: () => chat.accept(p),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add habit'),
+          for (final p in item.proposals)
+            Card(
+              margin: const EdgeInsets.only(top: 8),
+              color: c.surface,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${p.habit.emoji}  ${p.habit.title}',
+                      style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                     ),
+                    Text(p.habit.describeSchedule(), style: t.textTheme.bodySmall?.copyWith(color: c.onSurfaceVariant)),
+                    const Divider(),
+                    if (!p.accepted) HabitSurface(chat.state, p.habit, DateTime.now(), persist: false),
+                    const SizedBox(height: 8),
+                    p.accepted
+                        ? Row(
+                            children: [
+                              Icon(Icons.check_circle, color: c.primary, size: 20),
+                              const SizedBox(width: 6),
+                              const Expanded(child: Text('Added. You can find it on Today.')),
+                            ],
+                          )
+                        : FilledButton.icon(
+                            style: compactButton,
+                            onPressed: () => chat.accept(p),
+                            icon: const Icon(Icons.add),
+                            label: const Text('Add habit'),
+                          ),
+                  ],
+                ),
+              ),
             ),
-          ],
         ],
       ),
     );

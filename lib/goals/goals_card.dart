@@ -3,15 +3,9 @@ import 'package:intl/intl.dart';
 
 import '../app_state.dart';
 import '../logic/tasks.dart';
-import '../screens/home_screen.dart';
+import '../widgets/ask_chat.dart';
 import '../widgets/adaptive.dart';
 import 'goal.dart';
-
-/// Opens the Chat tab and sends [text] there.
-void askChat(AppState state, String text) {
-  state.chatPrompt.value = text;
-  state.requestedTab.value = HomeScreen.chatTab;
-}
 
 String reviewPrompt(Goal g) => 'Let\'s review my goal "${g.title}" (id ${g.id}). What went well, and what should I adjust?';
 
@@ -141,10 +135,7 @@ class GoalScreen extends StatelessWidget {
         );
         final tasks = state.tasks.where((x) => g.taskIds.contains(x.id)).toList();
         final habits = state.habits.where((h) => g.habitIds.contains(h.id)).toList();
-        void review() {
-          Navigator.of(context).pop();
-          askChat(state, reviewPrompt(g));
-        }
+        void review() => askChat(state, reviewPrompt(g), context: context);
 
         return Scaffold(
           appBar: AppBar(title: Text('${g.emoji} ${g.title}')),
@@ -231,8 +222,12 @@ class GoalScreen extends StatelessWidget {
                             : () {
                                 r.applied.add(i);
                                 state.saveGoals();
-                                Navigator.of(context).pop();
-                                askChat(state, 'For my goal "${g.title}" (id ${g.id}), apply this suggestion: $s');
+                                askChat(
+                                  state,
+                                  'For my goal "${g.title}" (id ${g.id}), apply this suggestion: $s',
+                                  display: 'Apply: $s',
+                                  context: context,
+                                );
                               },
                         child: Text(r.applied.contains(i) ? 'Applied' : 'Apply'),
                       ),
