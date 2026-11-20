@@ -13,6 +13,10 @@ import '../quran/quran.dart';
 import '../quran/task_guide_screen.dart';
 import '../widgets/cards/section_card.dart';
 import '../widgets/task_editor.dart';
+import '../widgets/document_viewer.dart';
+import 'goal_agenda.dart';
+import 'goal_okf.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 String reviewPrompt(Goal g) => 'Let\'s review my goal "${g.title}" (id ${g.id}). What went well, and what should I adjust?';
 
@@ -75,7 +79,9 @@ String _modeLabel(String mode) => switch (mode) {
 /// One line for a goal habit: e.g. "Memorise Al-Mulk 3–4 · 15 min · Every day at 05:30".
 String goalHabitSubtitle(AppState state, HabitDef h, DateTime day) {
   final q = state.quranFor(h, day);
+  final s = state.sessionForHabit(h, day);
   return [
+    if (s != null) 'Session ${s.$1}/${s.$2}: ${s.$3}',
     if (q != null) '${_modeLabel(q.mode)} ${passageLabel(q.surah, q.from, q.to)}',
     if (h.guide?.minutes != null) '${h.guide!.minutes} min',
     h.describeSchedule(),
@@ -226,10 +232,22 @@ class GoalScreen extends StatelessWidget {
         );
         final tasks = state.tasks.where((x) => g.taskIds.contains(x.id)).toList();
         final habits = state.habits.where((h) => g.habitIds.contains(h.id)).toList();
-        void review() => askChat(state, reviewPrompt(g), context: context);
+        void review() => askChat(state, reviewPrompt(g), context: context, goalId: g.id);
 
         return Scaffold(
-          appBar: AppBar(title: Text('${g.emoji} ${g.title}')),
+          appBar: AppBar(
+            title: Text('${g.emoji} ${g.title}'),
+            actions: [
+              PopupMenuButton<String>(
+                key: const Key('goal-menu'),
+                onSelected: (v) => v == 'export' ? shareOkfBundle(state) : DocumentViewer.pickAndOpen(context),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'export', child: Text('Export all goals (OKF)')),
+                  PopupMenuItem(value: 'open', child: Text('Open a Markdown or HTML file')),
+                ],
+              ),
+            ],
+          ),
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             children: [
@@ -257,9 +275,33 @@ class GoalScreen extends StatelessWidget {
                     label: Text(g.reviewDue(now) ? 'Review is due' : 'Review with AI'),
                   ),
                   const SizedBox(width: 8),
-                  Text('Look back ${g.cadence.name}', style: muted),
+                  FilledButton.tonalIcon(
+                    key: const Key('goal-chat'),
+                    style: compactButton,
+                    onPressed: () => askChat(state, '', context: context, goalId: g.id),
+                    icon: const Icon(Icons.chat_bubble_outline),
+                    label: const Text('Chat'),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    key: const Key('goal-context'),
+                    style: compactButton,
+                    onPressed: () => Navigator.of(context).push(
+                      DocumentViewer.route(title: '${g.title} · context', markdown: goalOkf(state, g, now), fileName: '${okfSlug(g)}.md'),
+                    ),
+                    icon: const Icon(Icons.description_outlined),
+                    label: const Text('Context'),
+                  ),
                 ],
               ),
+              const SizedBox(height: 4),
+              Text('Looks back ${g.cadence.name}', style: muted),
+              if (g.notes.trim().isNotEmpty) ...[
+                heading('Notes'),
+                MarkdownBody(data: g.notes),
+              ],
+              heading('Next 14 days'),
+              GoalAgenda(state: state, goal: g, from: now),
               heading('Milestones'),
               if (g.milestones.isEmpty) Text('No milestones yet.', style: muted),
               for (final m in g.milestones)

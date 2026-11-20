@@ -281,7 +281,7 @@ class _DayDetails extends StatelessWidget {
         color: done ? Theme.of(context).colorScheme.primary : null,
       ),
       title: Text('${h.emoji} ${h.title}'),
-      subtitle: q == null || done ? null : Text(goalHabitSubtitle(state, h, day)),
+      subtitle: done || (q == null && state.sessionForHabit(h, day) == null) ? null : Text(goalHabitSubtitle(state, h, day)),
       trailing: h.guide == null ? null : const Icon(Icons.chevron_right),
       onTap: h.guide == null ? null : () => Navigator.of(context).push(TaskGuideScreen.route(state, habitId: h.id, day: day)),
     );

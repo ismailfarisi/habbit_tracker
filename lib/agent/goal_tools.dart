@@ -50,6 +50,11 @@ const _task = {
     },
     'done_when': {'type': 'string', 'description': 'What counts as done, observable'},
     'minutes': {'type': 'integer'},
+    'sessions': {
+      'type': 'array',
+      'items': {'type': 'string'},
+      'description': 'For repeating practice: what each session focuses on, in order (one short line each). The app shows the next one each day it is done',
+    },
     'quran': {
       'type': 'object',
       'description': 'For Quran tasks: the passage. The app shows the verified text itself; never write verses.',
@@ -88,6 +93,11 @@ const _goalHabit = {
     },
     'done_when': {'type': 'string'},
     'minutes': {'type': 'integer'},
+    'sessions': {
+      'type': 'array',
+      'items': {'type': 'string'},
+      'description': 'For repeating practice: what each session focuses on, in order (one short line each). The app shows the next one each day it is done',
+    },
     'quran': {
       'type': 'object',
       'description': 'For Quran practice: the whole passage and how many ayat per day. '
@@ -143,6 +153,10 @@ final goalToolDefinitions = <Map<String, dynamic>>[
         'enum': ReviewCadence.values.map((c) => c.name).toList(),
       },
       'add_milestones': {'type': 'array', 'items': _milestone},
+      'add_note': {
+        'type': 'string',
+        'description': "A short fact, decision or update to keep in the goal's notes (its context file)",
+      },
       'milestones_done': {
         'type': 'array',
         'items': {'type': 'string'},
@@ -275,6 +289,7 @@ class GoalTools {
       doneWhen: '${m['done_when'] ?? ''}'.trim(),
       minutes: (m['minutes'] as num?)?.toInt(),
       quran: q,
+      sessions: ((m['sessions'] as List?) ?? const []).map((e) => '$e'.trim()).where((e) => e.isNotEmpty).toList(),
     );
     return g.isEmpty ? null : g;
   }
@@ -373,6 +388,10 @@ class GoalTools {
           g.cadence = ReviewCadence.values.firstWhere((c) => c.name == a['review'], orElse: () => g.cadence);
         }
         g.milestones.addAll(_milestones(a['add_milestones']));
+        final note = '${a['add_note'] ?? ''}'.trim();
+        if (note.isNotEmpty) {
+          g.notes = '${g.notes.trimRight()}${g.notes.trim().isEmpty ? '' : '\n'}- ${dayKey(clock())}: $note';
+        }
         for (final id in ((a['milestones_done'] as List?) ?? const []).cast<String>()) {
           for (final m in g.milestones.where((m) => m.id == id)) {
             m.done = true;
@@ -439,6 +458,13 @@ String goalsContext(AppState state, DateTime now) {
   ].join('\n')}';
 }
 
+const goalChatPrompt = '''
+This conversation is about one goal. Its context file (Open Knowledge Format:
+Markdown with YAML frontmatter) follows. Answer in that context and use its
+id for update_goal. Add new tasks and habits through update_goal add_tasks /
+add_habits so they stay linked to this goal. When the user shares a fact,
+decision or update worth keeping, save it with update_goal add_note.''';
+
 const goalsPrompt = '''
 Goals: when the user describes something bigger than a single task (learn,
 memorise, build, lose, save, finish, become), help them shape it into a goal:
@@ -459,6 +485,14 @@ memorise, build, lose, save, finish, become), help them shape it into a goal:
   Use well-known methods (e.g. listen, repeat each ayah, link ayat, recite
   from memory, revise the previous day's portion). To add practice to an
   existing goal use update_goal add_habits.
+  Any goal (business, fitness, study, a project) is planned day by day the
+  same way: put the recurring work in habits or repeating tasks with
+  sessions, an ordered list of what each session focuses on, so every day
+  shows its own work. Example: "launch my bakery's online shop in 6 weeks"
+  is a weekday habit "Shop build" with sessions ["List 20 best sellers",
+  "Photograph 5 products", "Write product descriptions", ...] plus dated
+  one-off tasks (with a date) such as "Register the domain"; milestones mark
+  the weeks.
 - Plan in layers: the whole timeline as milestones, the current month as
   focus, this week as tasks. Fill in later weeks during reviews.
 - For a review ("review my goal", or a review is due): call list_goals, look

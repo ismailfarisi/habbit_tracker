@@ -60,6 +60,9 @@ class Goal {
   List<GoalReview> reviews;
   bool archived;
 
+  /// Free-form Markdown context the user and the AI add to over time.
+  String notes;
+
   Goal({
     required this.id,
     required this.title,
@@ -73,6 +76,7 @@ class Goal {
     List<String>? habitIds,
     List<GoalReview>? reviews,
     this.archived = false,
+    this.notes = '',
   }) : milestones = milestones ?? [],
        taskIds = taskIds ?? [],
        habitIds = habitIds ?? [],
@@ -126,6 +130,7 @@ class Goal {
     'habitIds': habitIds,
     'reviews': reviews.map((r) => r.toJson()).toList(),
     'archived': archived,
+    if (notes.isNotEmpty) 'notes': notes,
   };
 
   factory Goal.fromJson(Map<String, dynamic> j) => Goal(
@@ -141,6 +146,7 @@ class Goal {
     habitIds: ((j['habitIds'] as List?) ?? const []).cast<String>(),
     reviews: [for (final r in (j['reviews'] as List? ?? const [])) GoalReview.fromJson((r as Map).cast())],
     archived: j['archived'] as bool? ?? false,
+    notes: j['notes'] as String? ?? '',
   );
 
   Goal copy() => Goal.fromJson(toJson());

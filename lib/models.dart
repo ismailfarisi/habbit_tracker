@@ -460,18 +460,24 @@ class TaskGuide {
   final String doneWhen;
   final int? minutes;
   final QuranRef? quran;
-  const TaskGuide({this.steps = const [], this.doneWhen = '', this.minutes, this.quran});
-  bool get isEmpty => steps.isEmpty && doneWhen.isEmpty && minutes == null && quran == null;
+
+  /// Ordered plan for a repeating practice: what each session focuses on.
+  /// The app shows the next one each day it is done.
+  final List<String> sessions;
+  const TaskGuide({this.steps = const [], this.doneWhen = '', this.minutes, this.quran, this.sessions = const []});
+  bool get isEmpty => steps.isEmpty && doneWhen.isEmpty && minutes == null && quran == null && sessions.isEmpty;
   Map<String, dynamic> toJson() => {
     'steps': steps,
     'doneWhen': doneWhen,
     'minutes': minutes,
     if (quran != null) 'quran': quran!.toJson(),
+    if (sessions.isNotEmpty) 'sessions': sessions,
   };
   factory TaskGuide.fromJson(Map<String, dynamic> j) => TaskGuide(
     steps: ((j['steps'] as List?) ?? const []).map((e) => '$e').toList(),
     doneWhen: j['doneWhen'] as String? ?? '',
     minutes: (j['minutes'] as num?)?.toInt(),
     quran: j['quran'] is Map ? QuranRef.fromJson((j['quran'] as Map).cast<String, dynamic>()) : null,
+    sessions: ((j['sessions'] as List?) ?? const []).map((e) => '$e').toList(),
   );
 }

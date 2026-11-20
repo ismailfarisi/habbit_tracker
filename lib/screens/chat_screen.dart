@@ -10,6 +10,8 @@ import '../agent/goal_tools.dart';
 import '../agent/habit_agent.dart';
 import '../agent/habit_surface.dart';
 import '../app_state.dart';
+import '../goals/goal.dart';
+import '../goals/goal_okf.dart';
 import '../services/openrouter.dart';
 import '../services/task_tools.dart';
 import '../services/voice_input.dart';
@@ -63,13 +65,17 @@ class ChatThread {
   String title;
   DateTime updatedAt;
   List<Map<String, dynamic>> messages;
-  ChatThread(this.id, this.title, this.updatedAt, this.messages);
+
+  /// Set for a goal's own conversation.
+  final String? goalId;
+  ChatThread(this.id, this.title, this.updatedAt, this.messages, {this.goalId});
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'title': title,
     'updatedAt': updatedAt.toIso8601String(),
     'messages': messages,
+    if (goalId != null) 'goalId': goalId,
   };
 
   factory ChatThread.fromJson(Map<String, dynamic> j) => ChatThread(
@@ -77,6 +83,7 @@ class ChatThread {
     j['title'] as String? ?? 'Chat',
     DateTime.tryParse(j['updatedAt'] as String? ?? '') ?? DateTime.now(),
     ((j['messages'] as List?) ?? const []).cast<Map>().map((m) => m.cast<String, dynamic>()).toList(),
+    goalId: j['goalId'] as String?,
   );
 }
 
@@ -98,6 +105,10 @@ class AgUiChat extends ChangeNotifier {
   final items = <ChatItem>[];
   bool busy = false;
   String threadId = 'thread-${DateTime.now().millisecondsSinceEpoch}';
+
+  /// The goal this conversation is about, if any; its context file is loaded.
+  String? goalId;
+  Goal? get goal => goalId == null ? null : state.goalById(goalId!);
   late final agent = LocalAgUiAgent(state, client: client);
 
   AgUiChat(this.state, {this.client}) {
@@ -107,13 +118,15 @@ class AgUiChat extends ChangeNotifier {
   String get systemPrompt {
     final now = DateTime.now();
     return '$plannerSystemPrompt\n$goalsPrompt\nWhen the user asks for feedback on speech practice:\n$coachSystemPrompt\n'
-        '${plannerContext(state.settings, now)}\n${goalsContext(state, now)}';
+        '${plannerContext(state.settings, now)}\n${goalsContext(state, now)}'
+        '${goal == null ? '' : '\n\n$goalChatPrompt\n${goalOkf(state, goal!, now)}'}';
   }
 
-  void _reset(String id) {
+  void _reset(String id, {String? goalId}) {
     history.clear();
     items.clear();
     threadId = id;
+    this.goalId = goalId;
     state.storage.prefs.setString(_currentKey, id);
   }
 
@@ -129,8 +142,18 @@ class AgUiChat extends ChangeNotifier {
     final th = threads.where((t) => t.id == id).firstOrNull;
     if (th == null) return;
     _save();
-    _reset(id);
+    _reset(id, goalId: th.goalId);
     _restore(th.messages);
+    notifyListeners();
+  }
+
+  /// Opens [id]'s own conversation, starting one if it has none yet.
+  void openGoal(String id) {
+    if (busy || goalId == id) return;
+    final th = threads.where((t) => t.goalId == id).firstOrNull;
+    if (th != null) return open(th.id);
+    _save();
+    _reset('thread-${DateTime.now().millisecondsSinceEpoch}', goalId: id);
     notifyListeners();
   }
 
@@ -241,7 +264,7 @@ class AgUiChat extends ChangeNotifier {
     final first = history.firstWhere((m) => m.role == 'user', orElse: () => history.first).content.trim();
     final title = first.length > 60 ? '${first.substring(0, 57)}…' : first;
     threads.removeWhere((t) => t.id == threadId);
-    threads.insert(0, ChatThread(threadId, title.isEmpty ? 'Chat' : title, DateTime.now(), messages));
+    threads.insert(0, ChatThread(threadId, title.isEmpty ? 'Chat' : title, DateTime.now(), messages, goalId: goalId));
     if (threads.length > _maxThreads) threads.removeRange(_maxThreads, threads.length);
     _persist();
     state.storage.prefs.setString(_currentKey, threadId);
@@ -297,6 +320,7 @@ class AgUiChat extends ChangeNotifier {
     final current = threads.where((t) => t.id == prefs.getString(_currentKey)).firstOrNull;
     if (current != null) {
       threadId = current.id;
+      goalId = current.goalId;
       _restore(current.messages);
     }
   }
@@ -328,6 +352,7 @@ class ChatHistoryScreen extends StatelessWidget {
                   leading: Icon(th.id == chat.threadId ? Icons.chat_bubble : Icons.chat_bubble_outline),
                   title: Text(th.title, maxLines: 2, overflow: TextOverflow.ellipsis),
                   subtitle: Text(
+                    '${th.goalId == null ? '' : '${chat.state.goalById(th.goalId!)?.title ?? 'Goal'} · '}'
                     '${DateFormat.yMMMd().add_jm().format(th.updatedAt)} · ${th.messages.where((m) => m['role'] == 'user').length} messages',
                   ),
                   trailing: IconButton(
@@ -365,6 +390,11 @@ class _ChatScreenState extends State<ChatScreen> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
 
+  static const _goalSuggestions = [
+    'What should I focus on today?',
+    'Plan my next week',
+    'How am I doing so far?',
+  ];
   static const _suggestions = [
     'Help me memorise Juz Amma in 6 months',
     'Remind me to call my mother tomorrow at 8pm',
@@ -386,7 +416,8 @@ class _ChatScreenState extends State<ChatScreen> {
     final p = widget.state.chatPrompt.value;
     if (p == null || _chat.busy) return;
     widget.state.chatPrompt.value = null;
-    if (widget.state.apiKey.isNotEmpty) _chat.send(p.text, display: p.display);
+    if (p.goalId != null) _chat.openGoal(p.goalId!);
+    if (p.text.isNotEmpty && widget.state.apiKey.isNotEmpty) _chat.send(p.text, display: p.display);
   }
 
   @override
@@ -444,10 +475,16 @@ class _ChatScreenState extends State<ChatScreen> {
                               label: const Text('Past chats'),
                             ),
                           ),
-                        Text('What should we set up?', style: t.textTheme.titleLarge),
+                        Text(
+                          _chat.goal == null ? 'What should we set up?' : '${_chat.goal!.emoji} ${_chat.goal!.title}',
+                          key: const Key('chat-title'),
+                          style: t.textTheme.titleLarge,
+                        ),
                         const SizedBox(height: 4),
                         Text(
-                          'Ask for a task, a habit with its own practice screen, a reminder, or a look at your progress.',
+                          _chat.goal == null
+                              ? 'Ask for a task, a habit with its own practice screen, a reminder, or a look at your progress.'
+                              : "This chat has the goal's plan, progress and notes loaded. Ask what to do today, change the plan, or tell it something to remember.",
                           style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
                         ),
                         const SizedBox(height: 16),
@@ -455,7 +492,8 @@ class _ChatScreenState extends State<ChatScreen> {
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            for (final s in _suggestions) ActionChip(label: Text(s), onPressed: () => _send(s)),
+                            for (final s in _chat.goal == null ? _suggestions : _goalSuggestions)
+                              ActionChip(label: Text(s), onPressed: () => _send(s)),
                           ],
                         ),
                       ],
@@ -470,6 +508,15 @@ class _ChatScreenState extends State<ChatScreen> {
                           return Row(
                             mainAxisAlignment: MainAxisAlignment.end,
                             children: [
+                              if (_chat.goal case final g?)
+                                Expanded(
+                                  child: Text(
+                                    '${g.emoji} ${g.title}',
+                                    key: const Key('chat-goal'),
+                                    overflow: TextOverflow.ellipsis,
+                                    style: t.textTheme.labelLarge?.copyWith(color: t.colorScheme.primary),
+                                  ),
+                                ),
                               TextButton.icon(
                                 key: const Key('chat-history'),
                                 onPressed: _openHistory,

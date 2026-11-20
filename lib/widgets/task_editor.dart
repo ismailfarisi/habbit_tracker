@@ -283,6 +283,7 @@ class TaskTile extends StatelessWidget {
     final q = state.quranForTask(task, day);
     final subtitle = [
       if (q != null) passageLabel(q.surah, q.from, q.to),
+      if (state.sessionForTask(task, day) case final s?) 'Session ${s.$1}/${s.$2}: ${s.$3}',
       if (overdue) 'Overdue · ${task.date}' else task.describeSchedule(),
       if (task.notes.isNotEmpty) task.notes,
     ].join(' · ');

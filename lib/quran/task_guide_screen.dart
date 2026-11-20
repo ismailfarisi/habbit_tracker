@@ -101,6 +101,28 @@ class TaskGuideScreen extends StatelessWidget {
                   ].join(' · '),
                   style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
                 ),
+              if ((habit != null ? state.sessionForHabit(habit, now) : state.sessionForTask(task!, now)) case final s?) ...[
+                const SizedBox(height: 12),
+                Container(
+                  key: const Key('guide-session'),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: t.colorScheme.secondaryContainer.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${future ? 'Planned for ${DateFormat.MMMEd().format(now)}' : 'Today'} · session ${s.$1} of ${s.$2}',
+                        style: t.textTheme.labelMedium?.copyWith(color: t.colorScheme.onSecondaryContainer),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(s.$3, style: t.textTheme.titleMedium),
+                    ],
+                  ),
+                ),
+              ],
               if (g.steps.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Text('Steps', style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
