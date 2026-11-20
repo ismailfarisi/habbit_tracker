@@ -38,7 +38,7 @@ class TaskGuideScreen extends StatelessWidget {
         }
         final entry = habit == null ? null : state.habitEntry(now, habit.id);
         final g = task?.guide ?? habit?.guide ?? const TaskGuide();
-        final quran = habit != null ? state.quranFor(habit, now) : g.quran;
+        final quran = habit != null ? state.quranFor(habit, now) : state.quranForTask(task!, now);
         final t = Theme.of(context);
         final ticked = task != null
             ? task.stepsDone[today] ?? <int>{}
@@ -133,12 +133,12 @@ class TaskGuideScreen extends StatelessWidget {
               ],
               if (quran != null) ...[
                 const SizedBox(height: 16),
-                if (habit != null)
+                if (habit != null || task!.isRepeating)
                   Text(
                     "Today's portion",
                     style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
                   ),
-                if (habit != null) const SizedBox(height: 6),
+                if (habit != null || task!.isRepeating) const SizedBox(height: 6),
                 QuranPassageView(
                   key: ValueKey('passage-${quran.surah}-${quran.from}-${quran.to}'),
                   passage: quran,

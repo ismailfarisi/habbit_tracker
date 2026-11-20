@@ -182,4 +182,19 @@ void main() {
     await tester.pump();
     expect(s.habitEntry(DateTime.now(), h.id).done, isTrue);
   });
+
+  test('a repeating Quran task moves on each day it is done', () async {
+    final s = await loadState({'settings.v1': jsonEncode({'onboarded': true})});
+    final t = await s.addTask(title: 'Memorise Al-Mulk', repeat: Repeat.daily);
+    await s.updateTask(t, (x) => x.guide = const TaskGuide(steps: ['Repeat'], quran: QuranRef(67, 1, 3, mode: 'memorise')));
+    final today = DateTime(2026, 11, 20);
+    expect(s.quranForTask(t, today)!.to, 3);
+    await s.updateTask(t, (x) => x.doneDates.addAll(['2026-11-18', '2026-11-19']));
+    final q = s.quranForTask(t, today)!;
+    expect((q.from, q.to), (7, 9), reason: 'two days of 3 ayat done');
+    await s.updateTask(t, (x) => x.doneDates.add('2026-11-20'));
+    expect(s.quranForTask(t, today)!.from, 7, reason: "today's own tick does not move today's portion");
+    await s.updateTask(t, (x) => x.guide = const TaskGuide(quran: QuranRef(67, 1, 30, perDay: 5)));
+    expect(s.quranForTask(t, today)!.from, 11);
+  });
 }

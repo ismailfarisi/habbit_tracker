@@ -57,6 +57,7 @@ const _task = {
         'surah': {'type': 'integer', 'description': '1-114'},
         'from': {'type': 'integer'},
         'to': {'type': 'integer'},
+        'per_day': {'type': 'integer', 'description': 'For repeating tasks: ayat per day; the app moves on each day it is done'},
         'mode': {
           'type': 'string',
           'enum': ['memorise', 'revise', 'read'],
@@ -449,7 +450,9 @@ memorise, build, lose, save, finish, become), help them shape it into a goal:
   create_habit for a goal's items: they would not be linked or shown with
   the goal. Example: "memorise Surah Al-Mulk" is one habit with quran
   {surah: 67, from: 1, to: 30, per_day: 2, mode: memorise} (the app moves to
-  the next ayat each day it is done) plus a weekly revision task. Every task needs clear steps (what exactly to do, in order),
+  the next ayat each day it is done) plus a weekly revision task. Always
+  give the whole passage (from..to) with per_day, never only the first day's
+  ayat. Every task needs clear steps (what exactly to do, in order),
   minutes and done_when, so the user never wonders what to do. For Quran
   tasks set quran {surah, from, to, mode}; the app shows the verified
   Uthmani text, translation and recitation, so never write verses yourself.

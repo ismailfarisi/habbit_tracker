@@ -12,6 +12,7 @@ import 'services/task_tools.dart';
 import 'services/tts.dart';
 import 'services/voice_input.dart';
 import 'goals/goal.dart';
+import 'quran/surahs.dart';
 
 /// App state and the only writer of persisted data.
 ///
@@ -294,6 +295,22 @@ class AppState extends ChangeNotifier implements TaskBackend {
   int habitDaysDoneBefore(HabitDef h, DateTime day) {
     final before = dayKey(day);
     return logs.entries.where((e) => e.key.compareTo(before) < 0 && habitDone(e.value.habits[h.id], h)).length;
+  }
+
+  /// The Quran passage a task asks for on [day]. A repeating task moves on
+  /// one portion per day it was done; a repeating memorise/read task without
+  /// a per-day size uses its first passage's length as the daily portion and
+  /// continues to the end of the surah.
+  QuranRef? quranForTask(Task t, DateTime day) {
+    final q = t.guide?.quran;
+    if (q == null || !t.isRepeating) return q;
+    var ref = q;
+    if (q.perDay == null && q.mode != 'revise') {
+      final end = q.surah >= 1 && q.surah <= surahInfo.length ? surahInfo[q.surah - 1].$3 : q.to;
+      ref = QuranRef(q.surah, q.from, end, mode: q.mode, perDay: q.to - q.from + 1);
+    }
+    final before = dayKey(day);
+    return ref.portion(t.doneDates.where((d) => d.compareTo(before) < 0).length);
   }
 
   /// The Quran passage [h] asks for on [day] (its next daily portion).

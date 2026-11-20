@@ -10,6 +10,7 @@ import '../logic/spoken_task.dart';
 import '../models.dart';
 import '../services/voice_input.dart';
 import 'voice_input_button.dart';
+import '../quran/quran.dart';
 import '../quran/task_guide_screen.dart';
 
 /// Opens a bottom sheet to create a task, or edit [task] if given. With
@@ -279,7 +280,9 @@ class TaskTile extends StatelessWidget {
     final c = Theme.of(context).colorScheme;
     final done = task.isDoneOn(day);
     final overdue = isOverdue(task, day);
+    final q = state.quranForTask(task, day);
     final subtitle = [
+      if (q != null) passageLabel(q.surah, q.from, q.to),
       if (overdue) 'Overdue · ${task.date}' else task.describeSchedule(),
       if (task.notes.isNotEmpty) task.notes,
     ].join(' · ');
