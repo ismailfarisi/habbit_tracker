@@ -310,11 +310,27 @@ class AppState extends ChangeNotifier implements TaskBackend {
       ref = QuranRef(q.surah, q.from, end, mode: q.mode, perDay: q.to - q.from + 1);
     }
     final before = dayKey(day);
-    return ref.portion(t.doneDates.where((d) => d.compareTo(before) < 0).length);
+    final planned = _plannedDays(day, (d) => t.isScheduledOn(d) && !t.doneDates.contains(dayKey(d)));
+    return ref.portion(t.doneDates.where((d) => d.compareTo(before) < 0).length + planned);
+  }
+
+  /// Days from today up to (not including) a future [day] that [pending]
+  /// says are still to do: their portions are assumed done by then.
+  int _plannedDays(DateTime day, bool Function(DateTime d) pending) {
+    var d = dateOnly(DateTime.now());
+    final end = dateOnly(day);
+    var n = 0;
+    while (d.isBefore(end)) {
+      if (pending(d)) n++;
+      d = DateTime(d.year, d.month, d.day + 1);
+    }
+    return n;
   }
 
   /// The Quran passage [h] asks for on [day] (its next daily portion).
-  QuranRef? quranFor(HabitDef h, DateTime day) => h.guide?.quran?.portion(habitDaysDoneBefore(h, day));
+  QuranRef? quranFor(HabitDef h, DateTime day) => h.guide?.quran?.portion(
+    habitDaysDoneBefore(h, day) + _plannedDays(day, (d) => h.isScheduledOn(d) && !habitDone(habitEntry(d, h.id), h)),
+  );
 
   Goal? goalById(String id) {
     for (final g in goals) {

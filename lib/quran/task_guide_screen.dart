@@ -1,5 +1,6 @@
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart' show DateFormat;
 
 import '../app_state.dart';
 import '../logic/stats.dart';
@@ -20,8 +21,8 @@ class TaskGuideScreen extends StatelessWidget {
   final DateTime? day;
   const TaskGuideScreen({super.key, required this.state, this.taskId, this.habitId, this.day});
 
-  static Route<void> route(AppState state, {String? taskId, String? habitId}) => MaterialPageRoute<void>(
-    builder: (_) => TaskGuideScreen(state: state, taskId: taskId, habitId: habitId),
+  static Route<void> route(AppState state, {String? taskId, String? habitId, DateTime? day}) => MaterialPageRoute<void>(
+    builder: (_) => TaskGuideScreen(state: state, taskId: taskId, habitId: habitId, day: day),
   );
 
   @override
@@ -45,6 +46,7 @@ class TaskGuideScreen extends StatelessWidget {
             : {for (final v in (entry!.data['steps'] as List?) ?? const []) if (v is num) v.toInt()};
         final done = task != null ? task.isDoneOn(now) : habitDone(entry, habit!);
         final goal = state.goalFor(task?.id ?? habit!.id);
+        final future = dateOnly(now).isAfter(dateOnly(DateTime.now()));
         final notes = task?.notes ?? '';
         void tick(int i, bool on) {
           if (task != null) {
@@ -135,7 +137,7 @@ class TaskGuideScreen extends StatelessWidget {
                 const SizedBox(height: 16),
                 if (habit != null || task!.isRepeating)
                   Text(
-                    "Today's portion",
+                    future ? 'Portion for ${DateFormat.MMMEd().format(now)}' : "Today's portion",
                     style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
                   ),
                 if (habit != null || task!.isRepeating) const SizedBox(height: 6),
@@ -145,7 +147,12 @@ class TaskGuideScreen extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 20),
-              done
+              future
+                  ? Text(
+                      'Planned for ${DateFormat.yMMMMEEEEd().format(now)}, if each day before it is done.',
+                      style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
+                    )
+                  : done
                   ? Row(
                       children: [
                         Icon(Icons.check_circle, color: t.colorScheme.primary),

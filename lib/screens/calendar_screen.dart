@@ -8,6 +8,7 @@ import '../habits/habit.dart';
 import '../logic/stats.dart';
 import '../logic/tasks.dart';
 import '../models.dart';
+import '../quran/task_guide_screen.dart';
 import '../widgets/day_editor.dart';
 import '../widgets/task_editor.dart';
 
@@ -281,6 +282,8 @@ class _DayDetails extends StatelessWidget {
       ),
       title: Text('${h.emoji} ${h.title}'),
       subtitle: q == null || done ? null : Text(goalHabitSubtitle(state, h, day)),
+      trailing: h.guide == null ? null : const Icon(Icons.chevron_right),
+      onTap: h.guide == null ? null : () => Navigator.of(context).push(TaskGuideScreen.route(state, habitId: h.id, day: day)),
     );
   }
 }

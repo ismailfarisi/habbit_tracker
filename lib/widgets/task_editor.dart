@@ -307,7 +307,7 @@ class TaskTile extends StatelessWidget {
       trailing: task.createdByAi ? Icon(Icons.auto_awesome, size: 16, color: c.primary) : null,
       onTap: () => task.guide == null
           ? showTaskEditor(context, state, task: task)
-          : Navigator.of(context).push(TaskGuideScreen.route(state, taskId: task.id)),
+          : Navigator.of(context).push(TaskGuideScreen.route(state, taskId: task.id, day: day)),
     );
   }
 }

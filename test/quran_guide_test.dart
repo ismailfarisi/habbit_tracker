@@ -197,4 +197,17 @@ void main() {
     await s.updateTask(t, (x) => x.guide = const TaskGuide(quran: QuranRef(67, 1, 30, perDay: 5)));
     expect(s.quranForTask(t, today)!.from, 11);
   });
+
+  test('a future day shows the portion planned for that day', () async {
+    final s = await loadState({'settings.v1': jsonEncode({'onboarded': true})});
+    final now = DateTime.now();
+    final t = await s.addTask(title: 'Memorise Al-Mulk', repeat: Repeat.daily);
+    await s.updateTask(t, (x) => x.guide = const TaskGuide(quran: QuranRef(67, 1, 30, mode: 'memorise', perDay: 3)));
+    expect(s.quranForTask(t, now)!.from, 1);
+    expect(s.quranForTask(t, now.add(const Duration(days: 2)))!.from, 7);
+    await s.updateTask(t, (x) => x.doneDates.add(dayKey(now)));
+    expect(s.quranForTask(t, now.add(const Duration(days: 2)))!.from, 7, reason: 'done today is not counted twice');
+    final h = await s.upsertHabit(HabitDef(id: 'hf', title: 'Al-Mulk', guide: const TaskGuide(quran: QuranRef(67, 1, 30, perDay: 2))));
+    expect(s.quranFor(h, now.add(const Duration(days: 3)))!.from, 7);
+  });
 }

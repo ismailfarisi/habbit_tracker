@@ -112,7 +112,7 @@ class GoalHabitTile extends StatelessWidget {
       ),
       subtitle: Text(goalHabitSubtitle(state, habit, day), maxLines: 2, overflow: TextOverflow.ellipsis),
       trailing: const Icon(Icons.chevron_right),
-      onTap: () => Navigator.of(context).push(TaskGuideScreen.route(state, habitId: habit.id)),
+      onTap: () => Navigator.of(context).push(TaskGuideScreen.route(state, habitId: habit.id, day: day)),
     );
   }
 }
