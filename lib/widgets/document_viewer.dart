@@ -111,7 +111,19 @@ class _DocumentViewerState extends State<DocumentViewer> {
                       ],
                     ),
                   ),
-                if (html) HtmlWidget(body, key: const Key('doc-html')) else MarkdownBody(key: const Key('doc-md'), data: body, selectable: true),
+                if (html) HtmlWidget(body, key: const Key('doc-html')) else MarkdownBody(
+                    key: const Key('doc-md'),
+                    data: body,
+                    selectable: true,
+                    checkboxBuilder: (v) => Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: Icon(
+                        v ? Icons.check_box : Icons.check_box_outline_blank,
+                        size: 18,
+                        color: v ? t.colorScheme.primary : t.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
               ],
             ),
     );

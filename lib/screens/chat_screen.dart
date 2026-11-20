@@ -487,6 +487,16 @@ class _ChatScreenState extends State<ChatScreen> {
                               : "This chat has the goal's plan, progress and notes loaded. Ask what to do today, change the plan, or tell it something to remember.",
                           style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
                         ),
+                        if (_chat.goal != null)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                              key: const Key('leave-goal-chat'),
+                              onPressed: _chat.newChat,
+                              icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                              label: const Text('General chat instead'),
+                            ),
+                          ),
                         const SizedBox(height: 16),
                         Wrap(
                           spacing: 8,

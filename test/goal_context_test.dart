@@ -10,7 +10,6 @@ import 'package:habit_tracker/goals/goal_okf.dart';
 import 'package:habit_tracker/goals/goals_card.dart';
 import 'package:habit_tracker/logic/stats.dart';
 import 'package:habit_tracker/habits/habit.dart';
-import 'package:habit_tracker/models.dart';
 import 'package:habit_tracker/screens/chat_screen.dart';
 import 'package:habit_tracker/services/openrouter.dart';
 import 'package:habit_tracker/widgets/document_viewer.dart';
@@ -72,7 +71,7 @@ void main() {
     expect(plan(2), contains('Register the domain'));
     expect(plan(2), contains('Session 3/3'));
     expect(plan(3), contains('Milestone: Shop live'));
-    expect(plan(3), isNot(contains('Session')), reason: 'all sessions are planned by then');
+    expect(plan(3), contains('All planned sessions covered'));
 
     await s.logHabit(today, h.id, HabitEntry(done: true));
     expect(goalPlanFor(s, g, today).single.done, isTrue);
@@ -93,7 +92,7 @@ void main() {
     expect(front['description'], contains('More orders'));
     expect(front['timestamp'], isNotEmpty);
     expect(body, contains('## Milestones'));
-    expect(body, contains('1. [ ] List 20 best sellers ← today'));
+    expect(body, contains('- [ ] 1. List 20 best sellers ← today'));
     expect(body, contains('## Plan for the next 7 days'));
     expect(body, contains('Supplier is Al Noor flour'));
 

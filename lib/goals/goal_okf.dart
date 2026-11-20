@@ -25,6 +25,8 @@ class GoalDayItem {
   const GoalDayItem(this.title, {this.detail = '', this.done = false, this.habit, this.task, this.milestone});
 }
 
+const _allPlanned = "All planned sessions covered; plan more in the goal's chat";
+
 String _sessionLabel((int, int, String)? s) => s == null ? '' : 'Session ${s.$1}/${s.$2}: ${s.$3}';
 
 /// What [g] has planned on [day], as of today: future days assume every
@@ -41,6 +43,7 @@ List<GoalDayItem> goalPlanFor(AppState s, Goal g, DateTime day, {DateTime? today
         detail: [
           if (q != null) passageLabel(q.surah, q.from, q.to),
           _sessionLabel(s.sessionForHabit(h, d)),
+          if ((h.guide?.sessions ?? const []).isNotEmpty && s.sessionForHabit(h, d) == null) _allPlanned,
         ].where((e) => e.isNotEmpty).join(' · '),
         done: habitDone(s.habitEntry(d, h.id), h),
         habit: h,
@@ -56,6 +59,7 @@ List<GoalDayItem> goalPlanFor(AppState s, Goal g, DateTime day, {DateTime? today
         detail: [
           if (q != null) passageLabel(q.surah, q.from, q.to),
           _sessionLabel(s.sessionForTask(t, d)),
+          if (t.isRepeating && (t.guide?.sessions ?? const []).isNotEmpty && s.sessionForTask(t, d) == null) _allPlanned,
         ].where((e) => e.isNotEmpty).join(' · '),
         done: t.isDoneOn(d),
         task: t,
@@ -156,7 +160,7 @@ String goalOkf(AppState s, Goal g, DateTime now) {
           ..writeln('Sessions:')
           ..writeln();
         for (final (i, x) in gd.sessions.indexed) {
-          b.writeln('${i + 1}. ${_box(i < done)} $x${i == cur ? ' ← today' : ''}');
+          b.writeln('- ${_box(i < done)} ${i + 1}. $x${i == cur ? ' ← today' : ''}');
         }
       }
       b.writeln();
