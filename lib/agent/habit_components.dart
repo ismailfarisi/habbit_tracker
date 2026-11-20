@@ -15,6 +15,7 @@ import '../habits/habit.dart';
 import '../logic/speech_metrics.dart';
 import 'habit_catalog.dart';
 import 'speech_engine.dart';
+import '../widgets/adaptive.dart';
 
 /// Context a habit surface is rendered in.
 class HabitScope extends InheritedWidget {
@@ -81,7 +82,7 @@ Widget buildHabitCheck(
       color: done ? c.primaryContainer : c.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(12),
       clipBehavior: Clip.antiAlias,
-      child: CheckboxListTile(
+      child: CheckboxListTile.adaptive(
         value: done,
         onChanged: binding == null
             ? null
@@ -246,11 +247,13 @@ class _PracticeTimerViewState extends State<PracticeTimerView> {
         const SizedBox(height: 8),
         Wrap(spacing: 8, children: [
           FilledButton.tonalIcon(
+            style: compactButton,
             onPressed: _running ? _pause : _start,
             icon: Icon(_running ? Icons.pause : Icons.play_arrow),
             label: Text(_running ? 'Pause' : (e > Duration.zero ? 'Resume' : 'Start')),
           ),
           OutlinedButton(
+            style: compactButton,
             onPressed: e > Duration.zero ? _finish : null,
             child: const Text('Finish & log'),
           ),
@@ -458,13 +461,14 @@ class _ReadAloudDrillViewState extends State<ReadAloudDrillView> {
         const SizedBox(height: 8),
         Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
           FilledButton.icon(
-            style: _recording ? FilledButton.styleFrom(backgroundColor: t.colorScheme.error) : null,
+            style: _recording ? compactButton.merge(FilledButton.styleFrom(backgroundColor: t.colorScheme.error)) : compactButton,
             onPressed: _toggle,
             icon: Icon(_recording ? Icons.stop : Icons.mic),
             label: Text(_recording ? 'Stop' : 'Record'),
           ),
           if (widget.listen)
             OutlinedButton.icon(
+              style: compactButton,
               onPressed: widget.text.trim().isEmpty ? null : _speak,
               icon: Icon(_speaking ? Icons.stop : Icons.volume_up_outlined),
               label: Text(_speaking ? 'Stop' : 'Hear it'),

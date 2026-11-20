@@ -13,6 +13,8 @@
 /// rules live in `lib/logic/stats.dart`.
 library;
 
+import '../models.dart';
+
 enum HabitKind { check, count, duration, metric, practice }
 
 enum StreakRule { strict, neverMissTwice }
@@ -180,6 +182,9 @@ class HabitDef {
   /// Id of the seed template this habit was created from, if any.
   final String? templateId;
 
+  /// Steps, done-when and an optional daily Quran portion (goal habits).
+  TaskGuide? guide;
+
   HabitDef({
     required this.id,
     this.seq = 0,
@@ -197,6 +202,7 @@ class HabitDef {
     this.uiSurface,
     List<MetricField>? metricFields,
     this.templateId,
+    this.guide,
   })  : weekdays = weekdays ?? [],
         metricFields = metricFields ?? [],
         createdAt = createdAt ?? DateTime.now();
@@ -235,6 +241,7 @@ class HabitDef {
         'uiSurface': uiSurface,
         'metricFields': metricFields.map((m) => m.toJson()).toList(),
         if (templateId != null) 'templateId': templateId,
+        if (guide != null) 'guide': guide!.toJson(),
       };
 
   factory HabitDef.fromJson(Map<String, dynamic> j) => HabitDef(
@@ -262,6 +269,7 @@ class HabitDef {
               if (m is Map) MetricField.fromJson(m.cast<String, dynamic>()),
         ],
         templateId: j['templateId'] as String?,
+        guide: j['guide'] is Map ? TaskGuide.fromJson((j['guide'] as Map).cast<String, dynamic>()) : null,
       );
 
   HabitDef copy() => HabitDef.fromJson(toJson());

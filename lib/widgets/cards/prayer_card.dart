@@ -8,6 +8,7 @@ import '../../logic/stats.dart';
 import '../../models.dart';
 import '../../services/prayer_service.dart';
 import 'section_card.dart';
+import '../adaptive.dart';
 
 /// Today's five prayers with their times and status (on time / late /
 /// qada). Tap marks a prayer (status from [autoPrayerStatus]) or un-marks
@@ -83,12 +84,9 @@ class PrayerCard extends StatelessWidget {
     final small = Theme.of(context).textTheme.bodySmall?.copyWith(color: c.onSurfaceVariant);
     String hm(DateTime t) => DateFormat.jm().format(t);
     return SectionCard(
-      emoji: '🕌',
+      icon: Icons.mosque_outlined,
       title: 'Five daily prayers',
-      trailing: Chip(
-        label: Text(done > 0 && onTime < done ? '$done/5 · $onTime on time' : '$done/5'),
-        visualDensity: VisualDensity.compact,
-      ),
+      trailing: CountBadge(done > 0 && onTime < done ? '$done/5 · $onTime on time' : '$done/5'),
       children: [
         Text('Next: ${prayerLabel(next.key, next.value)} in $inText', style: TextStyle(color: c.onSurfaceVariant)),
         if (ramadan)
@@ -118,7 +116,7 @@ class PrayerCard extends StatelessWidget {
           ),
           for (final o in optional)
             if (o.after == p)
-              CheckboxListTile(
+              CheckboxListTile.adaptive(
                 key: ValueKey(o.id),
                 contentPadding: const EdgeInsets.only(left: 8),
                 dense: true,

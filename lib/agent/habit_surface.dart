@@ -26,9 +26,10 @@ import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../habits/habit.dart';
 import '../logic/stats.dart';
-import '../widgets/coach_sheet.dart';
 import 'habit_catalog.dart';
 import 'habit_components.dart';
+import '../services/coach_prompts.dart';
+import '../widgets/ask_chat.dart';
 
 typedef AskCoachHandler = void Function(HabitDef habit, Map<String, dynamic> request);
 
@@ -205,7 +206,12 @@ class HabitSurfaceState extends State<HabitSurface> {
         if (widget.onAskCoach != null) {
           widget.onAskCoach!(widget.habit, request);
         } else if (mounted) {
-          showCoachSheet(context, widget.state, habit: widget.habit, request: request);
+          askChat(
+            widget.state,
+            sessionFeedbackPrompt(widget.habit.title, request),
+            display: '🎙️ Please review my practice',
+            context: context,
+          );
         }
     }
   }
@@ -303,7 +309,7 @@ class HabitFallback extends StatelessWidget {
           ),
           IconButton.filled(tooltip: 'More', onPressed: () => bump(step), icon: const Icon(Icons.add)),
         ]),
-      CheckboxListTile(
+      CheckboxListTile.adaptive(
         contentPadding: EdgeInsets.zero,
         controlAffinity: ListTileControlAffinity.leading,
         value: habitDone(entry, habit),

@@ -130,9 +130,11 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(420, 1600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       String? shared;
-      await tester.pumpWidget(MaterialApp(
-        home: DiagnosticsScreen(diagnostics: d, onShare: (r) async => shared = r),
-      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DiagnosticsScreen(diagnostics: d, onShare: (r) async => shared = r),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.text('Diagnostics are off. Nothing is being recorded.'), findsOneWidget);
       expect(find.text('Share report'), findsNothing);
@@ -150,9 +152,11 @@ void main() {
 
       await d.count(Diagnostics.remindersScheduled, 4);
       await d.recordError('Something broke', null, source: 'platform');
-      await tester.pumpWidget(MaterialApp(
-        home: DiagnosticsScreen(key: UniqueKey(), diagnostics: d, onShare: (r) async => shared = r),
-      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DiagnosticsScreen(key: UniqueKey(), diagnostics: d, onShare: (r) async => shared = r),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.text('Reminders scheduled'), findsOneWidget);
       expect(find.text('4'), findsOneWidget);
@@ -170,9 +174,13 @@ void main() {
       final state = await loadState();
       await tester.binding.setSurfaceSize(const Size(420, 4000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(MaterialApp(home: Scaffold(body: SettingsScreen(state: state))));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: SettingsScreen(state: state)),
+        ),
+      );
       final tile = find.widgetWithText(SwitchListTile, 'Collect diagnostics on this phone');
-      await tester.ensureVisible(tile);
+      await tester.scrollUntilVisible(tile, 300, scrollable: find.byType(Scrollable).first);
       await tester.pumpAndSettle();
       expect(tester.widget<SwitchListTile>(tile).value, isFalse);
       expect(find.textContaining('Nothing is sent anywhere'), findsOneWidget);

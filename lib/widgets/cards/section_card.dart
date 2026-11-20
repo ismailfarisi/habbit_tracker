@@ -6,6 +6,9 @@ class SectionCard extends StatelessWidget {
 
   /// Shown in a tinted tile before the title.
   final String? emoji;
+
+  /// Drawn icon for app sections; used instead of [emoji] when set.
+  final IconData? icon;
   final Widget? trailing;
   final VoidCallback? onTitleTap;
   final List<Widget> children;
@@ -13,6 +16,7 @@ class SectionCard extends StatelessWidget {
     super.key,
     required this.title,
     this.emoji,
+    this.icon,
     this.trailing,
     this.onTitleTap,
     required this.children,
@@ -22,16 +26,18 @@ class SectionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     final heading = Row(children: [
-      if (emoji != null) ...[
+      if (emoji != null || icon != null) ...[
         Container(
-          width: 40,
-          height: 40,
+          width: 36,
+          height: 36,
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: t.colorScheme.primaryContainer.withValues(alpha: 0.6),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Text(emoji!, style: const TextStyle(fontSize: 20)),
+          child: icon != null
+              ? Icon(icon, size: 20, color: t.colorScheme.onPrimaryContainer)
+              : Text(emoji!, style: const TextStyle(fontSize: 18)),
         ),
         const SizedBox(width: 12),
       ],
@@ -39,7 +45,7 @@ class SectionCard extends StatelessWidget {
     ]);
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -47,7 +53,7 @@ class SectionCard extends StatelessWidget {
               Expanded(child: onTitleTap == null ? heading : InkWell(onTap: onTitleTap, child: heading)),
               ?trailing,
             ]),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             ...children,
           ],
         ),

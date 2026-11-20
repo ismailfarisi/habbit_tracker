@@ -29,6 +29,8 @@ import '../services/openrouter.dart';
 import '../services/task_tools.dart';
 import 'habit_catalog.dart';
 import 'habit_templates.dart';
+import 'app_tools.dart';
+import 'goal_tools.dart';
 
 const habitToolNames = {
   'create_habit',
@@ -479,6 +481,8 @@ class HabitAgent {
 
   late final habitTools = HabitTools(state, onActivity: onActivity, onProposal: onProposal, clock: clock);
   late final taskTools = TaskTools(state, onActivity: onActivity, clock: clock);
+  late final appTools = AppTools(state, onActivity: onActivity, clock: clock);
+  late final goalTools = GoalTools(state, onActivity: onActivity, clock: clock);
 
   HabitAgent(
     this.state, {
@@ -489,10 +493,15 @@ class HabitAgent {
   })  : clock = clock ?? DateTime.now,
         _client = client ?? (() => OpenRouterClient(apiKey: state.apiKey, model: state.settings.model));
 
-  List<Map<String, dynamic>> get tools => [...taskToolDefinitions, ...habitToolDefinitions];
+  List<Map<String, dynamic>> get tools => [...taskToolDefinitions, ...habitToolDefinitions, ...appToolDefinitions, ...goalToolDefinitions];
 
-  Future<String> execute(ToolCall call) =>
-      habitToolNames.contains(call.name) ? habitTools.execute(call) : taskTools.execute(call);
+  Future<String> execute(ToolCall call) => habitToolNames.contains(call.name)
+      ? habitTools.execute(call)
+      : appToolNames.contains(call.name)
+      ? appTools.execute(call)
+      : goalToolNames.contains(call.name)
+      ? goalTools.execute(call)
+      : taskTools.execute(call);
 
   /// Runs the model on [history] (which gains every assistant and tool
   /// message) until it stops calling tools. [system] is the caller's prompt;
@@ -502,6 +511,8 @@ class HabitAgent {
     required String system,
     void Function(String delta)? onText,
     void Function()? onToolCall,
+    void Function(ToolCall call)? onToolStart,
+    void Function(ToolCall call, String result)? onToolResult,
   }) async {
     final client = _client();
     try {
@@ -509,9 +520,17 @@ class HabitAgent {
         history,
         system: '$system\n\n${habitAgentPrompt(state, clock())}',
         tools: tools,
-        execute: (call) {
+        execute: (call) async {
           onToolCall?.call();
-          return execute(call);
+          onToolStart?.call(call);
+          String result;
+          try {
+            result = await execute(call);
+          } catch (e) {
+            result = jsonEncode({'error': e.toString()});
+          }
+          onToolResult?.call(call, result);
+          return result;
         },
         onText: onText,
       );

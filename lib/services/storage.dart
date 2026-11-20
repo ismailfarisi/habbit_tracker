@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../agent/habit_templates.dart';
 import '../habits/habit.dart';
 import '../models.dart';
+import '../goals/goal.dart';
 
 /// Persists settings, daily logs, tasks and habits. Safe to use from the
 /// background notification-action isolate as well as the UI isolate.
@@ -20,8 +21,11 @@ class Storage {
   static const _logsKey = 'logs.v1';
   static const _tasksKey = 'tasks.v1';
   static const _habitsKey = 'habits.v1';
+  static const _goalsKey = 'goals.v1';
   static const backupVersion = 2;
   static const _apiKeyKey = 'openrouter_api_key';
+  static const openaiKeyName = 'openai_api_key';
+  static const xaiKeyName = 'xai_api_key';
   static const _secure = FlutterSecureStorage();
 
   final SharedPreferences prefs;
@@ -98,6 +102,19 @@ class Storage {
   Future<void> saveHabits(List<HabitDef> habits) =>
       prefs.setString(_habitsKey, jsonEncode(habits.map((h) => h.toJson()).toList()));
 
+  List<Goal> loadGoals() {
+    try {
+      return [
+        for (final g in jsonDecode(prefs.getString(_goalsKey) ?? '[]') as List) Goal.fromJson((g as Map).cast()),
+      ];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveGoals(List<Goal> goals) =>
+      prefs.setString(_goalsKey, jsonEncode(goals.map((g) => g.toJson()).toList()));
+
   Future<String> loadApiKey() async {
     try {
       return await _secure.read(key: _apiKeyKey) ?? '';
@@ -110,6 +127,19 @@ class Storage {
       ? _secure.delete(key: _apiKeyKey)
       : _secure.write(key: _apiKeyKey, value: key);
 
+  /// Another provider's API key kept in secure storage ([openaiKeyName],
+  /// [xaiKeyName]); never part of backups.
+  Future<String> loadSecret(String name) async {
+    try {
+      return await _secure.read(key: name) ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<void> saveSecret(String name, String value) =>
+      value.isEmpty ? _secure.delete(key: name) : _secure.write(key: name, value: value);
+
   /// True when there is nothing worth backing up (fresh install or reset).
   bool get hasNoData => loadLogs().isEmpty && loadTasks().isEmpty && loadHabits().isEmpty;
 
@@ -121,6 +151,7 @@ class Storage {
         'logs': {for (final e in loadLogs().entries) e.key: e.value.toJson()},
         'tasks': jsonDecode(prefs.getString(_tasksKey) ?? '[]'),
         'habits': loadHabits().map((h) => h.toJson()).toList(),
+        'goals': loadGoals().map((g) => g.toJson()).toList(),
       });
 
   /// Restores a backup made by [exportJson] (version 2) or by an older
@@ -143,6 +174,9 @@ class Storage {
     await saveLogs(logs);
     await saveTasks(tasks);
     await saveHabits(habits);
+    await saveGoals([
+      for (final g in (j['goals'] as List? ?? const [])) Goal.fromJson((g as Map).cast<String, dynamic>()),
+    ]);
   }
 
   /// Checks [raw] without restoring it, for a confirmation prompt.
@@ -185,6 +219,8 @@ class Storage {
     await prefs.remove(_tasksKey);
     await saveHabits([]);
     await saveApiKey('');
+    await saveSecret(openaiKeyName, '');
+    await saveSecret(xaiKeyName, '');
   }
 }
 

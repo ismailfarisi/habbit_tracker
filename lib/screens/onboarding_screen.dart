@@ -160,6 +160,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         if (optional)
                           TextButton(onPressed: _finishing ? null : _next, child: Text(_last ? 'Skip' : 'Not now')),
                         FilledButton(
+                          style: FilledButton.styleFrom(minimumSize: const Size(120, 48)),
                           onPressed: _finishing ? null : _next,
                           child: Text(switch (_step) {
                             0 => 'Get started',
@@ -184,13 +185,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     const Text('🌅', textAlign: TextAlign.center, style: TextStyle(fontSize: 72)),
     const SizedBox(height: 16),
     Text(
-      'Daily Discipline',
+      'Your Personal Islamic Growth Companion',
       textAlign: TextAlign.center,
       style: t.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
     ),
     const SizedBox(height: 12),
     Text(
-      'Wake up early, pray the five prayers on time and keep the habits that matter to you. '
+      'Build better habits. Strengthen your connection with Allah. Improve yourself, one day at a time.\n\n'
+      'Consistency matters more than perfection: a missed day is just a day to begin again. '
       'Setup takes about a minute.',
       textAlign: TextAlign.center,
       style: t.textTheme.bodyLarge,
@@ -232,7 +234,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       ),
       const SizedBox(height: 16),
       Text('Sleep goal: $hours hours', style: t.textTheme.titleMedium),
-      Slider(
+      Slider.adaptive(
         value: s.sleepHours.clamp(5, 10),
         min: 5,
         max: 10,
@@ -251,7 +253,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     ),
     for (final h in habitTemplates)
       Card(
-        child: CheckboxListTile(
+        child: CheckboxListTile.adaptive(
           value: _picked.contains(h.id),
           onChanged: (v) => setState(() => v == true ? _picked.add(h.id) : _picked.remove(h.id)),
           secondary: Text(h.emoji, style: const TextStyle(fontSize: 28)),
@@ -387,7 +389,7 @@ class _LocationStepState extends State<_LocationStep> {
         FilledButton.tonalIcon(
           onPressed: _locating ? null : _useLocation,
           icon: _locating
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator.adaptive(strokeWidth: 2))
               : const Icon(Icons.my_location),
           label: const Text('Use my location'),
         ),

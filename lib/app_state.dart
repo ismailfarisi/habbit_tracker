@@ -9,6 +9,10 @@ import 'services/notification_service.dart';
 import 'services/reminders.dart';
 import 'services/storage.dart';
 import 'services/task_tools.dart';
+import 'services/tts.dart';
+import 'services/voice_input.dart';
+import 'goals/goal.dart';
+import 'quran/surahs.dart';
 
 /// App state and the only writer of persisted data.
 ///
@@ -32,7 +36,15 @@ class AppState extends ChangeNotifier implements TaskBackend {
   /// Every habit, archived ones included. Mutate through [upsertHabit],
   /// [archiveHabit] and [deleteHabit].
   List<HabitDef> habits;
+  List<Goal> goals = [];
+
+  /// Text to send in the Chat tab (e.g. "review my goal"), set from other screens.
+  final ValueNotifier<ChatRequest?> chatPrompt = ValueNotifier(null);
   String apiKey = '';
+
+  /// Keys for OpenAI / xAI (Grok) voices; separate from the OpenRouter key.
+  String openaiKey = '';
+  String xaiKey = '';
 
   /// Set when a notification asks the UI to open a tab.
   final ValueNotifier<int?> requestedTab = ValueNotifier(null);
@@ -52,7 +64,12 @@ class AppState extends ChangeNotifier implements TaskBackend {
       storage.loadHabits(),
     );
     if (!storage.hasHabits) await storage.saveHabits(s.habits);
+    s.goals = storage.loadGoals();
     s.apiKey = await storage.loadApiKey();
+    s.openaiKey = await storage.loadSecret(Storage.openaiKeyName);
+    s.xaiKey = await storage.loadSecret(Storage.xaiKeyName);
+    voiceSettings = () => s.settings;
+    ttsKeys = () => TtsKeys(openai: s.openaiKey, xai: s.xaiKey);
     return s;
   }
 
@@ -81,6 +98,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
     logs = storage.loadLogs();
     tasks = storage.loadTasks();
     habits = storage.loadHabits();
+    goals = storage.loadGoals();
     notifyListeners();
     await _reschedule();
   }
@@ -88,8 +106,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
   /// Sets (or with null clears) the wake time logged for [day]. The date
   /// part of [at] is replaced by [day].
   Future<void> setWake(DateTime day, DateTime? at) async {
-    _mutableDay(day).wakeAt =
-        at == null ? null : DateTime(day.year, day.month, day.day, at.hour, at.minute, at.second);
+    _mutableDay(day).wakeAt = at == null ? null : DateTime(day.year, day.month, day.day, at.hour, at.minute, at.second);
     // Silence the wake alarm if it is still ringing.
     if (at != null) await notifications.cancel(reminderId(day, 0));
     await _commit();
@@ -266,6 +283,95 @@ class AppState extends ChangeNotifier implements TaskBackend {
     await _commitTasks();
   }
 
+  /// The active goal a task or habit belongs to, if any.
+  Goal? goalFor(String id) {
+    for (final g in goals) {
+      if (!g.archived && (g.taskIds.contains(id) || g.habitIds.contains(id))) return g;
+    }
+    return null;
+  }
+
+  /// Days before [day] on which [h] was done.
+  int habitDaysDoneBefore(HabitDef h, DateTime day) {
+    final before = dayKey(day);
+    return logs.entries.where((e) => e.key.compareTo(before) < 0 && habitDone(e.value.habits[h.id], h)).length;
+  }
+
+  /// The Quran passage a task asks for on [day]. A repeating task moves on
+  /// one portion per day it was done; a repeating memorise/read task without
+  /// a per-day size uses its first passage's length as the daily portion and
+  /// continues to the end of the surah.
+  QuranRef? quranForTask(Task t, DateTime day) {
+    final q = t.guide?.quran;
+    if (q == null || !t.isRepeating) return q;
+    var ref = q;
+    if (q.perDay == null && q.mode != 'revise') {
+      final end = q.surah >= 1 && q.surah <= surahInfo.length ? surahInfo[q.surah - 1].$3 : q.to;
+      ref = QuranRef(q.surah, q.from, end, mode: q.mode, perDay: q.to - q.from + 1);
+    }
+    return ref.portion(taskSessionsBefore(t, day));
+  }
+
+  /// Sessions of a repeating task done before [day], plus those planned
+  /// between today and a future [day].
+  int taskSessionsBefore(Task t, DateTime day) {
+    final before = dayKey(day);
+    final planned = _plannedDays(day, (d) => t.isScheduledOn(d) && !t.doneDates.contains(dayKey(d)));
+    return t.doneDates.where((d) => d.compareTo(before) < 0).length + planned;
+  }
+
+  /// Sessions of [h] done before [day], plus those planned until [day].
+  int habitSessionsBefore(HabitDef h, DateTime day) =>
+      habitDaysDoneBefore(h, day) + _plannedDays(day, (d) => h.isScheduledOn(d) && !habitDone(habitEntry(d, h.id), h));
+
+  /// The planned session ([index], [count], [text]) for [day], if any.
+  (int, int, String)? _session(List<String> s, int done) => s.isEmpty ? null : done < s.length ? (done + 1, s.length, s[done]) : null;
+
+  (int, int, String)? sessionForHabit(HabitDef h, DateTime day) => _session(h.guide?.sessions ?? const [], habitSessionsBefore(h, day));
+
+  (int, int, String)? sessionForTask(Task t, DateTime day) =>
+      t.isRepeating ? _session(t.guide?.sessions ?? const [], taskSessionsBefore(t, day)) : null;
+
+  /// Days from today up to (not including) a future [day] that [pending]
+  /// says are still to do: their portions are assumed done by then.
+  int _plannedDays(DateTime day, bool Function(DateTime d) pending) {
+    var d = dateOnly(DateTime.now());
+    final end = dateOnly(day);
+    var n = 0;
+    while (d.isBefore(end)) {
+      if (pending(d)) n++;
+      d = DateTime(d.year, d.month, d.day + 1);
+    }
+    return n;
+  }
+
+  /// The Quran passage [h] asks for on [day] (its next daily portion).
+  QuranRef? quranFor(HabitDef h, DateTime day) => h.guide?.quran?.portion(habitSessionsBefore(h, day));
+
+  Goal? goalById(String id) {
+    for (final g in goals) {
+      if (g.id == id) return g;
+    }
+    return null;
+  }
+
+  /// Adds [goal], or replaces the stored goal with the same id.
+  Future<void> upsertGoal(Goal goal) async {
+    final i = goals.indexWhere((g) => g.id == goal.id);
+    i < 0 ? goals.add(goal) : goals[i] = goal;
+    await saveGoals();
+  }
+
+  Future<void> deleteGoal(String id) async {
+    goals.removeWhere((g) => g.id == id);
+    await saveGoals();
+  }
+
+  Future<void> saveGoals() async {
+    await storage.saveGoals(goals);
+    notifyListeners();
+  }
+
   Future<void> updateSettings(void Function(Settings s) change) async {
     change(settings);
     notifyListeners();
@@ -279,12 +385,21 @@ class AppState extends ChangeNotifier implements TaskBackend {
     await storage.saveApiKey(apiKey);
   }
 
+  /// Saves the key for a cloud voice: [provider] is 'openai' or 'grok'.
+  Future<void> setVoiceKey(String provider, String key) async {
+    final k = key.trim();
+    provider == 'openai' ? openaiKey = k : xaiKey = k;
+    notifyListeners();
+    await storage.saveSecret(provider == 'openai' ? Storage.openaiKeyName : Storage.xaiKeyName, k);
+  }
+
   Future<void> importBackup(String raw) async {
     await storage.importJson(raw);
     settings = storage.loadSettings();
     logs = storage.loadLogs();
     tasks = storage.loadTasks();
     habits = storage.loadHabits();
+    goals = storage.loadGoals();
     notifyListeners();
     await _reschedule();
   }
@@ -295,8 +410,22 @@ class AppState extends ChangeNotifier implements TaskBackend {
     logs = {};
     tasks = [];
     habits = [];
+    goals = [];
     apiKey = '';
+    openaiKey = '';
+    xaiKey = '';
     notifyListeners();
     await _reschedule();
   }
+}
+
+/// A message for the Chat tab sent from another screen; [display] is shown
+/// instead of [text] when the prompt is long.
+class ChatRequest {
+  final String text;
+  final String? display;
+
+  /// Opens (or starts) this goal's own conversation first.
+  final String? goalId;
+  const ChatRequest(this.text, {this.display, this.goalId});
 }

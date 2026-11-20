@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -104,9 +105,11 @@ ThemeData appTheme(Brightness b) {
     bodyMedium: tt.bodyMedium?.copyWith(letterSpacing: -0.1),
   );
   final r14 = RoundedRectangleBorder(borderRadius: BorderRadius.circular(14));
-  const buttonSize = Size(0, 48);
+  const buttonSize = Size(64, 40);
+  const buttonPadding = EdgeInsets.symmetric(horizontal: 20);
   return base.copyWith(
     textTheme: text,
+    cupertinoOverrideTheme: CupertinoThemeData(primaryColor: scheme.primary, brightness: b),
     scaffoldBackgroundColor: scheme.surface,
     cardTheme: CardThemeData(
       margin: const EdgeInsets.only(bottom: 14),
@@ -120,11 +123,17 @@ ThemeData appTheme(Brightness b) {
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(minimumSize: buttonSize, shape: r14, textStyle: text.labelLarge),
+      style: FilledButton.styleFrom(
+        minimumSize: buttonSize,
+        padding: buttonPadding,
+        shape: r14,
+        textStyle: text.labelLarge,
+      ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         minimumSize: buttonSize,
+        padding: buttonPadding,
         shape: r14,
         textStyle: text.labelLarge,
         side: BorderSide(color: scheme.outlineVariant),
@@ -159,7 +168,7 @@ ThemeData appTheme(Brightness b) {
       surfaceTintColor: Colors.transparent,
       indicatorColor: scheme.primaryContainer,
       elevation: 0,
-      height: 66,
+      height: 64,
       labelTextStyle: WidgetStateProperty.resolveWith(
         (s) => text.labelSmall?.copyWith(
           fontWeight: s.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,

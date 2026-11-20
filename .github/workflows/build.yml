@@ -28,6 +28,10 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+      # whisper_ggml needs NDK 29; Gradle can't auto-install it without an accepted licence.
+      - name: Install Android NDK 29
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;29.0.13113456" > /dev/null
+
       # Retry: the Gradle distribution download from GitHub occasionally times out.
       - name: Build APK
         run: |

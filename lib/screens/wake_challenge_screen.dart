@@ -6,6 +6,7 @@ import '../agent/speech_engine.dart';
 import '../app_state.dart';
 import '../logic/wake_challenge.dart';
 import '../models.dart';
+import '../widgets/adaptive.dart';
 
 /// Marks today's wake-up, through the anti-snooze challenge when it is on.
 /// Returns whether the wake-up was logged.
@@ -180,6 +181,7 @@ class _WakeChallengeScreenState extends State<WakeChallengeScreen> {
       ),
       const SizedBox(height: 16),
       FilledButton.icon(
+        style: primaryButton,
         onPressed: _done ? null : _listen,
         icon: Icon(_listening ? Icons.stop : Icons.mic),
         label: Text(_listening ? 'Stop' : 'Start reading'),
@@ -222,7 +224,7 @@ class _WakeChallengeScreenState extends State<WakeChallengeScreen> {
         decoration: InputDecoration(labelText: 'Answer', border: const OutlineInputBorder(), errorText: _mathHint),
       ),
       const SizedBox(height: 12),
-      FilledButton(onPressed: _done ? null : _check, child: const Text('Check')),
+      FilledButton(style: primaryButton, onPressed: _done ? null : _check, child: const Text('Check')),
     ];
   }
 }

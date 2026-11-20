@@ -1,6 +1,9 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import '../widgets/adaptive.dart';
+import 'chat_screen.dart';
 import 'plan_screen.dart';
 import 'settings_screen.dart';
 import 'progress_screen.dart';
@@ -19,12 +22,13 @@ class HomeTab {
 /// the gear in the app bar, and [settingsTab] (passed to `goTo` or
 /// `AppState.requestedTab`) opens it too.
 class HomeScreen extends StatefulWidget {
-  static const todayTab = 0, planTab = 1, progressTab = 2;
-  static const settingsTab = 3;
+  static const todayTab = 0, planTab = 1, chatTab = 2, progressTab = 3;
+  static const settingsTab = 4;
 
   static final tabs = <HomeTab>[
     HomeTab('Today', Icons.today_outlined, Icons.today, (s, goTo) => TodayScreen(state: s, onNavigate: goTo)),
     HomeTab('Plan', Icons.event_note_outlined, Icons.event_note, (s, _) => PlanScreen(state: s)),
+    HomeTab('Chat', Icons.chat_bubble_outline, Icons.chat_bubble, (s, _) => ChatScreen(state: s)),
     HomeTab('Progress', Icons.insights_outlined, Icons.insights, (s, _) => ProgressScreen(state: s)),
   ];
 
@@ -76,13 +80,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final ios = isCupertino(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Daily Discipline'),
+        title: Text(HomeScreen.tabs[_tab].label),
         actions: [
           IconButton(
             tooltip: 'Settings',
-            icon: const Icon(Icons.settings_outlined),
+            icon: Icon(ios ? CupertinoIcons.gear : Icons.settings_outlined),
             onPressed: () => openSettings(context, widget.state),
           ),
         ],
@@ -91,7 +96,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         top: false,
         child: IndexedStack(index: _tab, children: [for (final t in HomeScreen.tabs) t.build(widget.state, goTo)]),
       ),
-      bottomNavigationBar: SafeArea(
+      bottomNavigationBar: ios
+          ? CupertinoTabBar(
+              currentIndex: _tab,
+              onTap: goTo,
+              activeColor: Theme.of(context).colorScheme.primary,
+              backgroundColor: Theme.of(context).colorScheme.surface.withValues(alpha: 0.92),
+              items: [
+                for (final t in HomeScreen.tabs)
+                  BottomNavigationBarItem(icon: Icon(t.icon), activeIcon: Icon(t.selectedIcon), label: t.label),
+              ],
+            )
+          : SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
           child: DecoratedBox(

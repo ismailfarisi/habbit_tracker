@@ -15,6 +15,8 @@ import 'reminders_screen.dart';
 import 'wake_challenge_screen.dart';
 import '../services/storage.dart';
 import 'diagnostics_screen.dart';
+import '../widgets/voice_settings.dart';
+import '../widgets/adaptive.dart';
 
 class SettingsScreen extends StatefulWidget {
   final AppState state;
@@ -103,7 +105,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('Paste backup'),
-        content: TextField(controller: ctl, maxLines: 8, decoration: const InputDecoration(hintText: 'Paste backup JSON here')),
+        content: TextField(
+          controller: ctl,
+          maxLines: 8,
+          decoration: const InputDecoration(hintText: 'Paste backup JSON here'),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(c, ctl.text), child: const Text('Continue')),
@@ -146,23 +152,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       showDragHandle: true,
       builder: (c) => SafeArea(
-        child: ListView(shrinkWrap: true, children: [
-          const ListTile(
-            title: Text('Restore from automatic backup'),
-            subtitle: Text('A copy is saved on this phone once a day (last ${BackupService.keepDaily} kept), '
-                'and before every restore.'),
-          ),
-          if (list.isEmpty)
-            const ListTile(leading: Icon(Icons.info_outline), title: Text('No automatic backups yet.'))
-          else
-            for (final b in list)
-              ListTile(
-                leading: Icon(b.beforeRestore ? Icons.restore : Icons.event_available_outlined),
-                title: Text(DateFormat.yMMMEd().add_jm().format(b.at)),
-                subtitle: Text(b.beforeRestore ? 'Saved before a restore' : 'Daily backup'),
-                onTap: () => Navigator.pop(c, b),
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(
+              title: Text('Restore from automatic backup'),
+              subtitle: Text(
+                'A copy is saved on this phone once a day (last ${BackupService.keepDaily} kept), '
+                'and before every restore.',
               ),
-        ]),
+            ),
+            if (list.isEmpty)
+              const ListTile(leading: Icon(Icons.info_outline), title: Text('No automatic backups yet.'))
+            else
+              for (final b in list)
+                ListTile(
+                  leading: Icon(b.beforeRestore ? Icons.restore : Icons.event_available_outlined),
+                  title: Text(DateFormat.yMMMEd().add_jm().format(b.at)),
+                  subtitle: Text(b.beforeRestore ? 'Saved before a restore' : 'Daily backup'),
+                  onTap: () => Navigator.pop(c, b),
+                ),
+          ],
+        ),
       ),
     );
     if (picked == null) return;
@@ -184,21 +195,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     if (!mounted) return;
-    final made = info.exportedAt == null ? '' : ' Made ${DateFormat.yMMMd().add_jm().format(info.exportedAt!.toLocal())}.';
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Restore backup?'),
-        content: Text('Restore $what: ${info.describe()}.$made\n\n'
-            'This replaces the data on this phone. A copy of your current data is saved first, so you can '
-            'undo this from "Restore from automatic backup". Your API key is not part of backups.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Restore')),
-        ],
-      ),
+    final made = info.exportedAt == null
+        ? ''
+        : ' Made ${DateFormat.yMMMd().add_jm().format(info.exportedAt!.toLocal())}.';
+    final ok = await confirmDialog(
+      context,
+      title: 'Restore backup?',
+      message:
+          'Restore $what: ${info.describe()}.$made\n\n'
+          'This replaces the data on this phone. A copy of your current data is saved first, so you can '
+          'undo this from "Restore from automatic backup". Your API key is not part of backups.',
+      confirm: 'Restore',
     );
-    if (ok != true) return;
+    if (!ok) return;
     try {
       await _backup.restore(state, raw);
       _syncFields();
@@ -216,19 +225,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _reset() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Reset everything?'),
-        content: const Text('This deletes all your history, settings, API key and diagnostics. '
-            'Automatic backups stay on this phone, so you can still restore one.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Reset')),
-        ],
-      ),
+    final ok = await confirmDialog(
+      context,
+      title: 'Reset everything?',
+      message:
+          'This deletes all your history, settings, API key and diagnostics. '
+          'Automatic backups stay on this phone, so you can still restore one.',
+      confirm: 'Reset',
+      destructive: true,
     );
-    if (ok != true) return;
+    if (!ok) return;
     await state.resetAll();
     await _diagnostics.clear();
     _lat.clear();
@@ -248,7 +254,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text('$v $unit', style: Theme.of(c).textTheme.headlineMedium),
-              Slider(
+              Slider.adaptive(
                 value: v.toDouble(),
                 min: min.toDouble(),
                 max: max.toDouble(),
@@ -314,7 +320,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (v != null) await state.updateSettings((x) => x.wakeGraceMin = v);
             },
           ),
-          SwitchListTile(
+          SwitchListTile.adaptive(
             secondary: const Icon(Icons.volume_up_outlined),
             title: const Text('Loud alarm'),
             subtitle: const Text('Full-screen alarm that keeps ringing until you tap "I\'m up"'),
@@ -332,7 +338,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 FilledButton.tonalIcon(
                   onPressed: _locating ? null : _useMyLocation,
                   icon: _locating
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator.adaptive(strokeWidth: 2))
                       : const Icon(Icons.my_location),
                   label: const Text('Use my current location'),
                 ),
@@ -388,7 +394,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
-          SwitchListTile(
+          SwitchListTile.adaptive(
             title: const Text('Use manual prayer times'),
             subtitle: const Text('e.g. to match your local mosque timetable'),
             value: s.useManualPrayer,
@@ -422,7 +428,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           _header('Reminders'),
-          SwitchListTile(
+          SwitchListTile.adaptive(
             secondary: const Icon(Icons.notifications_active_outlined),
             title: const Text('Reminders'),
             subtitle: const Text('Wake-up alarm, each prayer, habits and tasks'),
@@ -434,9 +440,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: const Text('Upcoming reminders'),
             subtitle: const Text('Everything planned for the next days'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => RemindersScreen(state: state)),
-            ),
+            onTap: () =>
+                Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => RemindersScreen(state: state))),
           ),
           ListTile(
             leading: const Icon(Icons.more_time),
@@ -453,6 +458,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               spacing: 8,
               children: [
                 OutlinedButton(
+                  style: compactButton,
                   onPressed: () async {
                     final ok = await state.notifications.requestPermissions();
                     await state.rescheduleNow();
@@ -463,12 +469,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: const Text('Grant permissions'),
                 ),
                 OutlinedButton(
+                  style: compactButton,
                   onPressed: () => state.notifications.showTest(s),
                   child: const Text('Send test notification'),
                 ),
               ],
             ),
           ),
+
+          _header('Voice'),
+          VoiceSettingsSection(state: state),
 
           _header('AI coach (OpenRouter)'),
           AiKeySection(state: state),
@@ -506,7 +516,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           _header('Diagnostics'),
-          SwitchListTile(
+          SwitchListTile.adaptive(
             secondary: const Icon(Icons.monitor_heart_outlined),
             title: const Text('Collect diagnostics on this phone'),
             subtitle: const Text(diagnosticsExplanation),
@@ -523,9 +533,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: const Text('Counters, error log and "Share report"'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () async {
-              await Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => DiagnosticsScreen(diagnostics: _diagnostics)),
-              );
+              await Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => DiagnosticsScreen(diagnostics: _diagnostics)));
               if (mounted) setState(() {});
             },
           ),
@@ -555,10 +565,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (c) => StatefulBuilder(
         builder: (c, set) => AlertDialog(
           title: Text(title),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(fmtSleepHours(v), style: Theme.of(c).textTheme.headlineMedium),
-            Slider(value: v, min: 5, max: 10, divisions: 20, onChanged: (x) => set(() => v = x)),
-          ]),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(fmtSleepHours(v), style: Theme.of(c).textTheme.headlineMedium),
+              Slider.adaptive(value: v, min: 5, max: 10, divisions: 20, onChanged: (x) => set(() => v = x)),
+            ],
+          ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
             FilledButton(onPressed: () => Navigator.pop(c, v), child: const Text('Save')),
@@ -574,9 +587,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ListTile(
         leading: const Icon(Icons.verified_user_outlined),
         title: const Text('Wake challenge'),
-        subtitle: Text(s.wakeChallenge == WakeChallenge.off
-            ? 'Off. "I\'m up" counts right away'
-            : '${_challengeLabels[s.wakeChallenge]} before "I\'m up" counts'),
+        subtitle: Text(
+          s.wakeChallenge == WakeChallenge.off
+              ? 'Off. "I\'m up" counts right away'
+              : '${_challengeLabels[s.wakeChallenge]} before "I\'m up" counts',
+        ),
         onTap: () async {
           final v = await showDialog<WakeChallenge>(
             context: context,
@@ -586,11 +601,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 for (final e in _challengeLabels.entries)
                   SimpleDialogOption(
                     onPressed: () => Navigator.pop(c, e.key),
-                    child: Row(children: [
-                      Icon(e.key == s.wakeChallenge ? Icons.radio_button_checked : Icons.radio_button_unchecked),
-                      const SizedBox(width: 12),
-                      Text(e.value),
-                    ]),
+                    child: Row(
+                      children: [
+                        Icon(e.key == s.wakeChallenge ? Icons.radio_button_checked : Icons.radio_button_unchecked),
+                        const SizedBox(width: 12),
+                        Text(e.value),
+                      ],
+                    ),
                   ),
               ],
             ),
@@ -600,9 +617,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         trailing: s.wakeChallenge == WakeChallenge.off
             ? null
             : TextButton(
-                onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => WakeChallengeScreen(state: state, mode: s.wakeChallenge, practice: true),
-                )),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => WakeChallengeScreen(state: state, mode: s.wakeChallenge, practice: true),
+                  ),
+                ),
                 child: const Text('Try it'),
               ),
       ),
@@ -610,7 +629,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ListTile(
         leading: const Icon(Icons.bedtime_outlined),
         title: const Text('Sleep goal'),
-        subtitle: Text('${fmtSleepHours(s.sleepHours)} a night, bed by ${_fmt(TimeOfDay.fromDateTime(bedtimeFor(s, night)))}'),
+        subtitle: Text(
+          '${fmtSleepHours(s.sleepHours)} a night, bed by ${_fmt(TimeOfDay.fromDateTime(bedtimeFor(s, night)))}',
+        ),
         onTap: () async {
           final v = await _pickHours('Sleep goal', s.sleepHours);
           if (v != null) await state.updateSettings((x) => x.sleepHours = v);
@@ -625,10 +646,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (v != null) await state.updateSettings((x) => x.windDownMinutes = v);
         },
       ),
-      SwitchListTile(
+      SwitchListTile.adaptive(
         secondary: const Icon(Icons.nights_stay_outlined),
         title: const Text('Bedtime reminder'),
-        subtitle: Text('Every night at ${_fmt(TimeOfDay.fromDateTime(windDownFor(s, night)))} with a "Going to bed" button'),
+        subtitle: Text(
+          'Every night at ${_fmt(TimeOfDay.fromDateTime(windDownFor(s, night)))} with a "Going to bed" button',
+        ),
         value: s.bedtimeReminder,
         onChanged: (v) => state.updateSettings((x) => x.bedtimeReminder = v),
       ),
@@ -639,11 +662,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _pickJumuahTime() async {
     final choice = await showDialog<String>(
       context: context,
-      builder: (c) => SimpleDialog(title: const Text("Jumu'ah time"), children: [
-        SimpleDialogOption(onPressed: () => Navigator.pop(c, ''), child: const Text('Same as Dhuhr')),
-        SimpleDialogOption(onPressed: () => Navigator.pop(c, '13:15'), child: const Text('1:15 PM (UAE mosques)')),
-        SimpleDialogOption(onPressed: () => Navigator.pop(c, 'pick'), child: const Text('Pick a time…')),
-      ]),
+      builder: (c) => SimpleDialog(
+        title: const Text("Jumu'ah time"),
+        children: [
+          SimpleDialogOption(onPressed: () => Navigator.pop(c, ''), child: const Text('Same as Dhuhr')),
+          SimpleDialogOption(onPressed: () => Navigator.pop(c, '13:15'), child: const Text('1:15 PM (UAE mosques)')),
+          SimpleDialogOption(onPressed: () => Navigator.pop(c, 'pick'), child: const Text('Pick a time…')),
+        ],
+      ),
     );
     if (choice == null) return;
     var v = choice;
@@ -663,8 +689,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ListTile(
         leading: const Icon(Icons.calendar_month_outlined),
         title: const Text('Hijri date adjustment'),
-        subtitle: Text('Today: ${hijriToday(s, now)}'
-            '${s.hijriOffsetDays == 0 ? '' : ' (${s.hijriOffsetDays > 0 ? '+' : ''}${s.hijriOffsetDays} days)'}'),
+        subtitle: Text(
+          'Today: ${hijriToday(s, now)}'
+          '${s.hijriOffsetDays == 0 ? '' : ' (${s.hijriOffsetDays > 0 ? '+' : ''}${s.hijriOffsetDays} days)'}',
+        ),
         onTap: () async {
           final v = await _pickNumber('Hijri date adjustment', s.hijriOffsetDays, -2, 2, unit: 'days');
           if (v != null) await state.updateSettings((x) => x.hijriOffsetDays = v);
@@ -689,7 +717,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           onChanged: (v) => state.updateSettings((x) => x.ramadanMode = v ?? x.ramadanMode),
         ),
       ),
-      SwitchListTile(
+      SwitchListTile.adaptive(
         secondary: const Icon(Icons.alarm_on_outlined),
         title: const Text('Suhoor wake alarm'),
         subtitle: Text('In Ramadan, ${s.suhoorMinutes} min before Fajr'),
@@ -706,7 +734,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             if (v != null) await state.updateSettings((x) => x.suhoorMinutes = v);
           },
         ),
-      SwitchListTile(
+      SwitchListTile.adaptive(
         secondary: const Icon(Icons.star_outline),
         title: const Text('Taraweeh'),
         subtitle: const Text('Optional item after Isha in Ramadan'),
@@ -719,7 +747,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         subtitle: Text(s.jumuahTime.isEmpty ? 'Same as Dhuhr' : _fmt(parseHm(s.jumuahTime))),
         onTap: _pickJumuahTime,
       ),
-      SwitchListTile(
+      SwitchListTile.adaptive(
         secondary: const Icon(Icons.notifications_outlined),
         title: const Text("Early Jumu'ah reminder"),
         subtitle: Text('Fridays, ${s.jumuahReminderMinutes} min before'),
@@ -736,14 +764,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             if (v != null) await state.updateSettings((x) => x.jumuahReminderMinutes = v);
           },
         ),
-      SwitchListTile(
+      SwitchListTile.adaptive(
         secondary: const Icon(Icons.wb_sunny_outlined),
         title: const Text('Duha prayer'),
         subtitle: const Text('Optional, not counted in the 5-prayer streak'),
         value: s.sunnahDuha,
         onChanged: (v) => state.updateSettings((x) => x.sunnahDuha = v),
       ),
-      SwitchListTile(
+      SwitchListTile.adaptive(
         secondary: const Icon(Icons.bedtime_outlined),
         title: const Text('Witr prayer'),
         subtitle: const Text('Optional, not counted in the 5-prayer streak'),
@@ -911,7 +939,7 @@ class _AiKeySectionState extends State<AiKeySection> {
             spacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              OutlinedButton(onPressed: _test, child: const Text('Save & test')),
+              OutlinedButton(style: compactButton, onPressed: _test, child: const Text('Save & test')),
               if (on) TextButton(onPressed: _remove, child: const Text('Remove key')),
             ],
           ),
@@ -1038,7 +1066,7 @@ class _ModelPickerState extends State<ModelPicker> {
               suffixIcon: _loading
                   ? const Padding(
                       padding: EdgeInsets.all(14),
-                      child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                      child: SizedBox.square(dimension: 18, child: CircularProgressIndicator.adaptive(strokeWidth: 2)),
                     )
                   : IconButton(
                       tooltip: 'Show models',

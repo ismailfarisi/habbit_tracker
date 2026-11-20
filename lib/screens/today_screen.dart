@@ -18,8 +18,12 @@ import '../widgets/cards/wake_card.dart';
 import '../widgets/yesterday_prompt.dart';
 import 'habit_detail_screen.dart';
 import 'home_screen.dart';
+import '../widgets/adaptive.dart';
+import '../goals/goal.dart';
+import '../goals/goals_card.dart';
+import '../logic/tasks.dart';
 
-enum TodayKind { wake, prayers, habit, tasks }
+enum TodayKind { wake, prayers, habit, goal, tasks }
 
 /// One card on Today: when it is next due (null = any time) and whether it
 /// is finished for the day.
@@ -28,9 +32,10 @@ class TodayItem {
   final DateTime? due;
   final bool done;
   final HabitDef? habit;
-  const TodayItem(this.kind, {this.due, required this.done, this.habit});
+  final Goal? goal;
+  const TodayItem(this.kind, {this.due, required this.done, this.habit, this.goal});
 
-  String get id => habit?.id ?? kind.name;
+  String get id => goal != null ? 'goal-${goal!.id}' : habit?.id ?? kind.name;
 
   @override
   String toString() => '$id${done ? ' (done)' : ''}';
@@ -60,8 +65,21 @@ List<TodayItem> todayItems(AppState state, DateTime now) {
       due: nextPrayer == null ? times[prayerNames.last] : times[nextPrayer],
       done: nextPrayer == null && optionalPrayersOn(s, now).every((p) => log.habits[p.id]?.done ?? false),
     ),
+    for (final g in state.goals.where((g) => !g.archived))
+      if (GoalTodayCard.itemsFor(state, g, now) case (final habits, final tasks) when habits.isNotEmpty || tasks.isNotEmpty)
+        TodayItem(
+          TodayKind.goal,
+          goal: g,
+          due: [
+            for (final h in habits)
+              if (h.reminder != null && !habitDone(log.habits[h.id], h)) at(parseHm(h.reminder!)),
+            for (final t in tasks)
+              if (!t.isDoneOn(now) && t.reminderOn(now) != null) t.reminderOn(now)!,
+          ].fold<DateTime?>(null, (a, b) => a == null || b.isBefore(a) ? b : a),
+          done: habits.every((h) => habitDone(log.habits[h.id], h)) && tasks.every((t) => t.isDoneOn(now)),
+        ),
     for (final h in state.activeHabits)
-      if (h.isScheduledOn(now))
+      if (h.isScheduledOn(now) && state.goalFor(h.id) == null)
         TodayItem(
           TodayKind.habit,
           habit: h,
@@ -163,6 +181,7 @@ class _TodayScreenState extends State<TodayScreen> {
         now: now,
       ),
       TodayKind.habit => HabitCard(key: ValueKey(i.habit!.id), state: state, habit: i.habit!, day: now),
+      TodayKind.goal => GoalTodayCard(key: ValueKey(i.id), state: state, goal: i.goal!, now: now),
       TodayKind.tasks => TasksCard(
         key: const ValueKey('today-tasks'),
         state: state,
@@ -206,10 +225,13 @@ class _TodayScreenState extends State<TodayScreen> {
             for (final i in pending) _card(i, now),
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: FilledButton.tonalIcon(
-                onPressed: () => showAddHabitSheet(context, widget.state),
-                icon: const Icon(Icons.add),
-                label: const Text('Add habit'),
+              child: Center(
+                child: FilledButton.tonalIcon(
+                  style: compactButton,
+                  onPressed: () => showAddHabitSheet(context, widget.state),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add habit'),
+                ),
               ),
             ),
             if (done.isNotEmpty) ...[

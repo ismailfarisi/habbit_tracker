@@ -25,12 +25,12 @@ const _v1Logs = {
 };
 
 String _v1Backup() => jsonEncode({
-      'app': 'daily-discipline',
-      'version': 1,
-      'settings': Settings(trainingGoalMin: 15).toJson(),
-      'logs': _v1Logs,
-      'tasks': [Task(id: 't1', seq: 1, title: 'Read', repeat: Repeat.daily).toJson()],
-    });
+  'app': 'daily-discipline',
+  'version': 1,
+  'settings': Settings(trainingGoalMin: 15).toJson(),
+  'logs': _v1Logs,
+  'tasks': [Task(id: 't1', seq: 1, title: 'Read', repeat: Repeat.daily).toJson()],
+});
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -80,7 +80,8 @@ void main() {
       expect(() => Storage.describeBackup('{"app":"other"}'), throwsFormatException);
       expect(() => Storage.describeBackup('{"app":"daily-discipline","version":1}'), throwsFormatException);
       expect(
-        () => Storage.describeBackup(jsonEncode({'app': 'daily-discipline', 'version': 99, 'settings': {}, 'logs': {}})),
+        () =>
+            Storage.describeBackup(jsonEncode({'app': 'daily-discipline', 'version': 99, 'settings': {}, 'logs': {}})),
         throwsFormatException,
       );
     });
@@ -195,11 +196,15 @@ void main() {
       final svc = BackupService(state.storage, documents: () async => docs, clock: () => DateTime(2026, 5, 1, 8));
       await tester.binding.setSurfaceSize(const Size(420, 4000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(body: SettingsScreen(state: state, backup: svc, pickBackupFile: () async => _v1Backup())),
-      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SettingsScreen(state: state, backup: svc, pickBackupFile: () async => _v1Backup()),
+          ),
+        ),
+      );
 
-      await tester.ensureVisible(find.text('Import backup file'));
+      await tester.scrollUntilVisible(find.text('Import backup file'), 300, scrollable: find.byType(Scrollable).first);
       await tester.pumpAndSettle();
       expect(find.text('Export backup file'), findsOneWidget);
       expect(find.text('Restore from automatic backup'), findsOneWidget);
@@ -229,10 +234,14 @@ void main() {
       await state.upsertHabit(habitFromTemplate(waterTemplate));
       await tester.binding.setSurfaceSize(const Size(420, 4000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(body: SettingsScreen(state: state, pickBackupFile: () async => 'hello')),
-      ));
-      await tester.ensureVisible(find.text('Import backup file'));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SettingsScreen(state: state, pickBackupFile: () async => 'hello'),
+          ),
+        ),
+      );
+      await tester.scrollUntilVisible(find.text('Import backup file'), 300, scrollable: find.byType(Scrollable).first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Import backup file'));
       await tester.pumpAndSettle();

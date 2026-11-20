@@ -39,12 +39,12 @@ void main() {
     addTearDown(tester.view.reset);
   }
 
-  testWidgets('three tabs render and Settings opens from the gear on every tab', (tester) async {
+  testWidgets('four tabs render and Settings opens from the gear on every tab', (tester) async {
     phone(tester);
     await pumpApp(tester);
     expect(find.textContaining('Wake up early'), findsOneWidget);
-    expect(find.byType(NavigationDestination), findsNWidgets(3));
-    for (final tab in ['Plan', 'Progress', 'Today']) {
+    expect(find.byType(NavigationDestination), findsNWidgets(4));
+    for (final tab in ['Plan', 'Chat', 'Progress', 'Today']) {
       await tester.tap(find.text(tab).last);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: tab);
@@ -114,7 +114,7 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(find.text(AiKeyEmptyState.message), findsNothing);
-    expect(find.text('What do I have today?'), findsOneWidget, reason: 'the chat appears once a key is set');
+    expect(find.text('How did my week go?'), findsOneWidget, reason: 'the chat appears once a key is set');
   });
 
   testWidgets('the coach sheet shows the empty state without a key', (tester) async {

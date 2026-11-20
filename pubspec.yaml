@@ -55,6 +55,14 @@ dependencies:
   share_plus: ^13.3.1
   file_picker: ^13.3.3
   path_provider: ^2.1.6
+  whisper_ggml: ^2.9.0
+  record: ^7.2.0
+  sherpa_onnx: ^1.13.8
+  audioplayers: ^6.8.1
+  archive: ^4.7.1
+  ag_ui: ^0.3.0
+  flutter_markdown_plus: ^1.0.12
+  flutter_widget_from_html_core: ^0.17.4
 
 dev_dependencies:
   flutter_test:
@@ -90,6 +98,9 @@ flutter:
           weight: 700
         - asset: assets/fonts/Inter-ExtraBold.ttf
           weight: 800
+
+  assets:
+    - assets/quran/quran-uthmani.txt
 
   # To add assets to your application, add an assets section, like this:
   # assets:
