@@ -37,6 +37,28 @@ TimeOfDay parseHm(String s, {TimeOfDay fallback = const TimeOfDay(hour: 0, minut
 /// Anti-snooze check before "I'm up" counts.
 enum WakeChallenge { off, readAloud, math }
 
+/// An app paused by Focus once [limitMin] minutes are used in a day;
+/// 0 means no daily limit (paused during sleep time only).
+class FocusApp {
+  final String package, name;
+  final int limitMin;
+  const FocusApp(this.package, this.name, {this.limitMin = 30});
+
+  Map<String, dynamic> toJson() => {'package': package, 'name': name, 'limitMin': limitMin};
+
+  static FocusApp? fromJson(Object? j) {
+    if (j is! Map || j['package'] is! String) return null;
+    final pkg = j['package'] as String;
+    return FocusApp(
+      pkg,
+      j['name'] as String? ?? pkg,
+      limitMin: ((j['limitMin'] as num?)?.toInt() ?? 30).clamp(0, 24 * 60),
+    );
+  }
+
+  FocusApp withLimit(int minutes) => FocusApp(package, name, limitMin: minutes);
+}
+
 class Settings {
   TimeOfDay wakeTime;
   int wakeGraceMin;
@@ -114,6 +136,14 @@ class Settings {
   int windDownMinutes;
   bool bedtimeReminder;
 
+  // Focus (Android): pause chosen apps after their daily limit and at sleep time.
+  bool focusEnabled;
+  List<FocusApp> focusApps;
+  bool focusSleep;
+
+  /// No "5 more minutes" on the pause screen.
+  bool focusStrict;
+
   Settings({
     this.wakeTime = const TimeOfDay(hour: 5, minute: 0),
     this.wakeGraceMin = 30,
@@ -156,7 +186,12 @@ class Settings {
     this.sleepHours = 7.5,
     this.windDownMinutes = 30,
     this.bedtimeReminder = true,
-  }) : manualTimes = manualTimes ?? Map.of(defaultManualTimes);
+    this.focusEnabled = false,
+    List<FocusApp>? focusApps,
+    this.focusSleep = true,
+    this.focusStrict = false,
+  }) : manualTimes = manualTimes ?? Map.of(defaultManualTimes),
+       focusApps = focusApps ?? [];
 
   bool get hasLocation => latitude != null && longitude != null;
 
@@ -202,6 +237,10 @@ class Settings {
     'sleepHours': sleepHours,
     'windDownMinutes': windDownMinutes,
     'bedtimeReminder': bedtimeReminder,
+    'focusEnabled': focusEnabled,
+    'focusApps': [for (final a in focusApps) a.toJson()],
+    'focusSleep': focusSleep,
+    'focusStrict': focusStrict,
   };
 
   factory Settings.fromJson(Map<String, dynamic> j) {
@@ -258,6 +297,10 @@ class Settings {
       sleepHours: ((j['sleepHours'] as num?)?.toDouble() ?? d.sleepHours).clamp(3.0, 12.0),
       windDownMinutes: ((j['windDownMinutes'] as num?)?.toInt() ?? d.windDownMinutes).clamp(0, 180),
       bedtimeReminder: j['bedtimeReminder'] as bool? ?? d.bedtimeReminder,
+      focusEnabled: j['focusEnabled'] as bool? ?? d.focusEnabled,
+      focusApps: [...?(j['focusApps'] as List?)?.map(FocusApp.fromJson).nonNulls],
+      focusSleep: j['focusSleep'] as bool? ?? d.focusSleep,
+      focusStrict: j['focusStrict'] as bool? ?? d.focusStrict,
     );
   }
 

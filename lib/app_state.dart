@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import 'habits/habit.dart';
 import 'logic/stats.dart';
 import 'logic/tasks.dart';
 import 'models.dart';
+import 'services/focus_guard.dart';
 import 'services/home_widget_service.dart';
 import 'services/notification_service.dart';
 import 'services/reminders.dart';
@@ -84,6 +86,11 @@ class AppState extends ChangeNotifier implements TaskBackend {
   Future<void> _reschedule() async {
     await notifications.reschedule(settings, logs, tasks, habits: habits);
     await HomeWidgetService.publish(settings, logs, habits: habits, tasks: tasks);
+    try {
+      await FocusGuard.instance.configure(settings);
+    } on PlatformException catch (e) {
+      debugPrint('Focus config not saved: $e');
+    }
   }
 
   Future<void> _commit({bool reschedule = true}) async {

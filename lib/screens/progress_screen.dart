@@ -12,6 +12,7 @@ import 'calendar_screen.dart';
 import 'habit_detail_screen.dart';
 import '../widgets/adaptive.dart';
 import '../widgets/ask_chat.dart';
+import '../widgets/focus_settings.dart';
 
 /// The Progress tab: streak tiles (current streak, rule, "N of last 30",
 /// freezes left), the weekly review and a 30-day grid of every tracked item
@@ -33,6 +34,7 @@ class ProgressScreen extends StatelessWidget {
             const SizedBox(height: 12),
             _StreakGrid(state: state, today: today),
             const SizedBox(height: 12),
+            ScreenTimeCard(state: state),
             WeeklyReviewCard(
               state: state,
               review: weeklyReview(

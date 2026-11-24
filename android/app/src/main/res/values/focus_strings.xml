@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="focus_guard_label">Daily Discipline app pause</string>
+    <string name="focus_guard_description">Pauses the apps you chose in Daily Discipline once their daily limit is used up, and during your sleep time. It only sees which app is open, never what is on the screen, and nothing leaves your phone.</string>
+</resources>

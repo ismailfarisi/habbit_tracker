@@ -15,6 +15,7 @@ import 'reminders_screen.dart';
 import 'wake_challenge_screen.dart';
 import '../services/storage.dart';
 import 'diagnostics_screen.dart';
+import '../widgets/focus_settings.dart';
 import '../widgets/voice_settings.dart';
 import '../widgets/adaptive.dart';
 
@@ -24,6 +25,7 @@ enum SettingsSection {
   prayers('Prayer times', Icons.mosque_outlined),
   islamic("Ramadan, Jumu'ah & sunnah", Icons.nightlight_outlined),
   reminders('Reminders', Icons.notifications_active_outlined),
+  focus('Focus & screen time', Icons.hourglass_bottom),
   general('Appearance & streaks', Icons.palette_outlined),
   voice('Voice', Icons.record_voice_over_outlined),
   ai('AI coach', Icons.auto_awesome_outlined),
@@ -351,6 +353,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ? 'On · prayers ${s.prayerOffsetMin == 0 ? 'at prayer time' : '${s.prayerOffsetMin} min before'}'
             : 'Off',
       ),
+      if (Theme.of(context).platform == TargetPlatform.android)
+        _entry(
+          SettingsSection.focus,
+          s.focusEnabled && s.focusApps.isNotEmpty
+              ? 'Pausing ${s.focusApps.length} ${s.focusApps.length == 1 ? 'app' : 'apps'}${s.focusSleep ? ' · also at sleep time' : ''}'
+              : 'Pause apps after a daily limit and at sleep time',
+        ),
       _header('App'),
       _entry(SettingsSection.general, 'Theme: ${s.themeMode[0].toUpperCase()}${s.themeMode.substring(1)} · ${s.freezesPerMonth} streak freezes a month'),
       _entry(SettingsSection.voice, 'Dictation and the spoken voice'),
@@ -599,6 +608,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         onTap: _pasteBackup,
       ),
     ],
+    SettingsSection.focus => [FocusSettingsSection(state: state)],
     SettingsSection.diagnostics => [
       SwitchListTile.adaptive(
         secondary: const Icon(Icons.monitor_heart_outlined),
