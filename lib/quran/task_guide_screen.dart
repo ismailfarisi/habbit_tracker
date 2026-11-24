@@ -163,9 +163,10 @@ class TaskGuideScreen extends StatelessWidget {
                     style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
                   ),
                 if (habit != null || task!.isRepeating) const SizedBox(height: 6),
-                QuranPassageView(
-                  key: ValueKey('passage-${quran.surah}-${quran.from}-${quran.to}'),
-                  passage: quran,
+                QuranPractice(
+                  portion: quran,
+                  whole: habit != null ? habit.guide?.quran : state.quranPlanForTask(task!),
+                  newLabel: future ? 'New on ${DateFormat.MMMEd().format(now)}' : 'New today',
                 ),
               ],
               const SizedBox(height: 20),
@@ -197,12 +198,82 @@ class TaskGuideScreen extends StatelessWidget {
   }
 }
 
+enum _Scope { portion, withLast, allLearned }
+
+/// A memorisation portion with a switch to recite it together with the
+/// ayat already learned from the same passage.
+class QuranPractice extends StatefulWidget {
+  final QuranRef portion;
+  final QuranRef? whole;
+  final String newLabel;
+  final AssetBundle? bundle;
+  const QuranPractice({super.key, required this.portion, this.whole, this.newLabel = 'New today', this.bundle});
+
+  @override
+  State<QuranPractice> createState() => _QuranPracticeState();
+}
+
+class _QuranPracticeState extends State<QuranPractice> {
+  _Scope _scope = _Scope.portion;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.portion;
+    final w = widget.whole;
+    QuranPassageView view(int from) => QuranPassageView(
+      key: ValueKey('passage-${p.surah}-$from-${p.to}'),
+      passage: from == p.from ? p : QuranRef(p.surah, from, p.to, mode: p.mode),
+      newFrom: from == p.from ? null : p.from,
+      newLabel: widget.newLabel,
+      bundle: widget.bundle,
+    );
+    if (w == null || p.mode != 'memorise' || w.surah != p.surah || p.from <= w.from) return view(p.from);
+    final size = w.perDay ?? (p.to - p.from + 1);
+    final lastFrom = p.from - size < w.from ? w.from : p.from - size;
+    final scope = lastFrom == w.from && _scope == _Scope.withLast ? _Scope.allLearned : _scope;
+    final t = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Recite together with what you learned',
+          style: t.textTheme.labelMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 6),
+        SegmentedButton<_Scope>(
+          key: const Key('quran-scope'),
+          showSelectedIcon: false,
+          segments: [
+            const ButtonSegment(value: _Scope.portion, label: Text('New only')),
+            if (lastFrom > w.from)
+              ButtonSegment(value: _Scope.withLast, label: Text('+ ${_range(lastFrom, p.from - 1)}')),
+            ButtonSegment(value: _Scope.allLearned, label: Text('All ${_range(w.from, p.to)}')),
+          ],
+          selected: {scope},
+          onSelectionChanged: (v) => setState(() => _scope = v.first),
+        ),
+        const SizedBox(height: 8),
+        view(switch (scope) {
+          _Scope.portion => p.from,
+          _Scope.withLast => lastFrom,
+          _Scope.allLearned => w.from,
+        }),
+      ],
+    );
+  }
+}
+
+String _range(int from, int to) => from == to ? '$from' : '$from–$to';
+
 /// Verses of a passage from the bundled Tanzil text, with an optional
 /// translation, per-ayah recitation, a hide-to-test mode and a repeat counter.
+/// With [newFrom], ayat before it are marked as already learned.
 class QuranPassageView extends StatefulWidget {
   final QuranRef passage;
   final AssetBundle? bundle;
-  const QuranPassageView({super.key, required this.passage, this.bundle});
+  final int? newFrom;
+  final String newLabel;
+  const QuranPassageView({super.key, required this.passage, this.bundle, this.newFrom, this.newLabel = 'New today'});
 
   @override
   State<QuranPassageView> createState() => _QuranPassageViewState();
@@ -297,7 +368,11 @@ class _QuranPassageViewState extends State<QuranPassageView> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       if (tr.hasError) Text('Translation needs the internet the first time.', style: muted),
-                      for (final (i, v) in verses.indexed) _verse(context, p.from + i, v, tr.data),
+                      for (final (i, v) in verses.indexed) ...[
+                        if (widget.newFrom case final n? when p.from + i == p.from || p.from + i == n)
+                          _divider(context, p.from + i < n ? 'Learned · ayat ${_range(p.from, n - 1)}' : widget.newLabel),
+                        _verse(context, p.from + i, v, tr.data),
+                      ],
                     ],
                   ),
                 ),
@@ -328,6 +403,20 @@ class _QuranPassageViewState extends State<QuranPassageView> {
             );
           },
         ),
+      ),
+    );
+  }
+
+  Widget _divider(BuildContext context, String label) {
+    final t = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        children: [
+          Text(label, style: t.textTheme.labelMedium?.copyWith(color: t.colorScheme.primary)),
+          const SizedBox(width: 8),
+          const Expanded(child: Divider()),
+        ],
       ),
     );
   }

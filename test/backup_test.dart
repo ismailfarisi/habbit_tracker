@@ -204,6 +204,9 @@ void main() {
         ),
       );
 
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Backup & restore'));
+      await tester.pumpAndSettle();
       await tester.scrollUntilVisible(find.text('Import backup file'), 300, scrollable: find.byType(Scrollable).first);
       await tester.pumpAndSettle();
       expect(find.text('Export backup file'), findsOneWidget);
@@ -241,6 +244,9 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Backup & restore'));
+      await tester.pumpAndSettle();
       await tester.scrollUntilVisible(find.text('Import backup file'), 300, scrollable: find.byType(Scrollable).first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Import backup file'));

@@ -50,11 +50,11 @@ void main() {
       expect(tester.takeException(), isNull, reason: tab);
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      expect(find.text('Target wake-up time'), findsOneWidget, reason: tab);
+      expect(find.text('Wake-up & sleep'), findsOneWidget, reason: tab);
       await tester.pageBack();
       await tester.pumpAndSettle();
     }
-    expect(find.text('Target wake-up time'), findsNothing);
+    expect(find.text('Wake-up & sleep'), findsNothing);
   });
 
   testWidgets('requesting the settings tab opens the Settings page', (tester) async {
@@ -62,7 +62,7 @@ void main() {
     final state = await pumpApp(tester);
     state.requestedTab.value = HomeScreen.settingsTab;
     await tester.pumpAndSettle();
-    expect(find.text('Target wake-up time'), findsOneWidget);
+    expect(find.text('Wake-up & sleep'), findsOneWidget);
   });
 
   testWidgets('create a task on Plan and tick it off', (tester) async {

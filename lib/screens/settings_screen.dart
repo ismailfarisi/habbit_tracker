@@ -18,14 +18,34 @@ import 'diagnostics_screen.dart';
 import '../widgets/voice_settings.dart';
 import '../widgets/adaptive.dart';
 
+/// A Settings subpage; the main page lists these.
+enum SettingsSection {
+  wake('Wake-up & sleep', Icons.alarm),
+  prayers('Prayer times', Icons.mosque_outlined),
+  islamic("Ramadan, Jumu'ah & sunnah", Icons.nightlight_outlined),
+  reminders('Reminders', Icons.notifications_active_outlined),
+  general('Appearance & streaks', Icons.palette_outlined),
+  voice('Voice', Icons.record_voice_over_outlined),
+  ai('AI coach', Icons.auto_awesome_outlined),
+  backup('Backup & restore', Icons.backup_outlined),
+  diagnostics('Diagnostics', Icons.monitor_heart_outlined);
+
+  final String label;
+  final IconData icon;
+  const SettingsSection(this.label, this.icon);
+}
+
 class SettingsScreen extends StatefulWidget {
   final AppState state;
+
+  /// Shows one subpage instead of the list of sections.
+  final SettingsSection? section;
 
   /// Overrides for tests; default to the real file-backed services.
   final BackupService? backup;
   final Future<String?> Function()? pickBackupFile;
 
-  const SettingsScreen({super.key, required this.state, this.backup, this.pickBackupFile});
+  const SettingsScreen({super.key, required this.state, this.section, this.backup, this.pickBackupFile});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -278,279 +298,333 @@ class _SettingsScreenState extends State<SettingsScreen> {
       listenable: state,
       builder: (context, _) => ListView(
         padding: const EdgeInsets.symmetric(vertical: 16),
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'Settings',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-            ),
-          ),
-          _header('Appearance'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: SegmentedButton<String>(
-              key: const Key('theme-mode'),
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: 'system', label: Text('System')),
-                ButtonSegment(value: 'light', label: Text('Light')),
-                ButtonSegment(value: 'dark', label: Text('Dark')),
-              ],
-              selected: {s.themeMode},
-              onSelectionChanged: (v) => state.updateSettings((x) => x.themeMode = v.first),
-            ),
-          ),
-          _header('Wake up'),
-          ListTile(
-            leading: const Icon(Icons.alarm),
-            title: const Text('Target wake-up time'),
-            subtitle: Text(_fmt(s.wakeTime)),
-            onTap: () async {
-              final t = await _pickTime(s.wakeTime);
-              if (t != null) await state.updateSettings((x) => x.wakeTime = t);
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.timelapse),
-            title: const Text('Grace period'),
-            subtitle: Text('Counts as on time if you check in within ${s.wakeGraceMin} min'),
-            onTap: () async {
-              final v = await _pickNumber('Grace period', s.wakeGraceMin, 0, 120);
-              if (v != null) await state.updateSettings((x) => x.wakeGraceMin = v);
-            },
-          ),
-          SwitchListTile.adaptive(
-            secondary: const Icon(Icons.volume_up_outlined),
-            title: const Text('Loud alarm'),
-            subtitle: const Text('Full-screen alarm that keeps ringing until you tap "I\'m up"'),
-            value: s.wakeAlarmLoud,
-            onChanged: (v) => state.updateSettings((x) => x.wakeAlarmLoud = v),
-          ),
-          ..._wakeChallengeAndSleep(),
-
-          _header('Prayer times'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                FilledButton.tonalIcon(
-                  onPressed: _locating ? null : _useMyLocation,
-                  icon: _locating
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator.adaptive(strokeWidth: 2))
-                      : const Icon(Icons.my_location),
-                  label: const Text('Use my current location'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _locName,
-                  decoration: const InputDecoration(labelText: 'Place name (optional)', border: OutlineInputBorder()),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _lat,
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                        decoration: const InputDecoration(labelText: 'Latitude', border: OutlineInputBorder()),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _lng,
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                        decoration: const InputDecoration(labelText: 'Longitude', border: OutlineInputBorder()),
-                      ),
-                    ),
-                  ],
-                ),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(onPressed: _saveLocation, child: const Text('Save location')),
-                ),
-                DropdownButtonFormField<String>(
-                  initialValue: s.calcMethod,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Calculation method', border: OutlineInputBorder()),
-                  items: [
-                    for (final e in calcMethodLabels.entries) DropdownMenuItem(value: e.key, child: Text(e.value)),
-                  ],
-                  onChanged: (v) => state.updateSettings((x) => x.calcMethod = v ?? x.calcMethod),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: s.madhab,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Asr calculation', border: OutlineInputBorder()),
-                  items: const [
-                    DropdownMenuItem(value: 'shafi', child: Text("Standard (Shafi'i, Maliki, Hanbali)")),
-                    DropdownMenuItem(value: 'hanafi', child: Text('Hanafi')),
-                  ],
-                  onChanged: (v) => state.updateSettings((x) => x.madhab = v ?? x.madhab),
-                ),
-              ],
-            ),
-          ),
-          SwitchListTile.adaptive(
-            title: const Text('Use manual prayer times'),
-            subtitle: const Text('e.g. to match your local mosque timetable'),
-            value: s.useManualPrayer,
-            onChanged: (v) => state.updateSettings((x) => x.useManualPrayer = v),
-          ),
-          if (s.useManualPrayer)
-            for (final p in prayerNames)
-              ListTile(
-                contentPadding: const EdgeInsets.only(left: 32, right: 16),
-                title: Text(p),
-                trailing: Text(_fmt(parseHm(s.manualTimes[p]!))),
-                onTap: () async {
-                  final t = await _pickTime(parseHm(s.manualTimes[p]!));
-                  if (t != null) await state.updateSettings((x) => x.manualTimes[p] = fmtHm(t));
-                },
-              ),
-
-          ..._muslimSection(),
-
-          _header('Streaks'),
-          ListTile(
-            leading: const Icon(Icons.ac_unit),
-            title: const Text('Streak freezes per month'),
-            subtitle: Text(
-              '${s.freezesPerMonth} missed ${s.freezesPerMonth == 1 ? 'day' : 'days'} a month keep your perfect-day streak',
-            ),
-            onTap: () async {
-              final v = await _pickNumber('Streak freezes per month', s.freezesPerMonth, 0, 10);
-              if (v != null) await state.updateSettings((x) => x.freezesPerMonth = v);
-            },
-          ),
-
-          _header('Reminders'),
-          SwitchListTile.adaptive(
-            secondary: const Icon(Icons.notifications_active_outlined),
-            title: const Text('Reminders'),
-            subtitle: const Text('Wake-up alarm, each prayer, habits and tasks'),
-            value: s.remindersEnabled,
-            onChanged: (v) => state.updateSettings((x) => x.remindersEnabled = v),
-          ),
-          ListTile(
-            leading: const Icon(Icons.schedule),
-            title: const Text('Upcoming reminders'),
-            subtitle: const Text('Everything planned for the next days'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () =>
-                Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => RemindersScreen(state: state))),
-          ),
-          ListTile(
-            leading: const Icon(Icons.more_time),
-            title: const Text('Prayer reminder'),
-            subtitle: Text(s.prayerOffsetMin == 0 ? 'At prayer time' : '${s.prayerOffsetMin} min before prayer time'),
-            onTap: () async {
-              final v = await _pickNumber('Remind me before prayer', s.prayerOffsetMin, 0, 30);
-              if (v != null) await state.updateSettings((x) => x.prayerOffsetMin = v);
-            },
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Wrap(
-              spacing: 8,
-              children: [
-                OutlinedButton(
-                  style: compactButton,
-                  onPressed: () async {
-                    final ok = await state.notifications.requestPermissions();
-                    await state.rescheduleNow();
-                    _snack(
-                      ok ? 'Notifications allowed.' : 'Notifications are blocked. Enable them in system settings.',
-                    );
-                  },
-                  child: const Text('Grant permissions'),
-                ),
-                OutlinedButton(
-                  style: compactButton,
-                  onPressed: () => state.notifications.showTest(s),
-                  child: const Text('Send test notification'),
-                ),
-              ],
-            ),
-          ),
-
-          _header('Voice'),
-          VoiceSettingsSection(state: state),
-
-          _header('AI coach (OpenRouter)'),
-          AiKeySection(state: state),
-
-          _header('Backup'),
-          Builder(
-            builder: (tile) => ListTile(
-              leading: const Icon(Icons.ios_share),
-              title: const Text('Export backup file'),
-              subtitle: const Text('Save or send your history, habits, tasks and settings as a file'),
-              onTap: () => _exportFile(tile),
-            ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.file_open_outlined),
-            title: const Text('Import backup file'),
-            subtitle: const Text('Restore from a file you exported'),
-            onTap: _importFile,
-          ),
-          ListTile(
-            leading: const Icon(Icons.history),
-            title: const Text('Restore from automatic backup'),
-            subtitle: const Text('Saved on this phone once a day, last ${BackupService.keepDaily} kept'),
-            onTap: _pickAutomaticBackup,
-          ),
-          ListTile(
-            leading: const Icon(Icons.copy_outlined),
-            title: const Text('Copy backup to clipboard'),
-            onTap: _copyBackup,
-          ),
-          ListTile(
-            leading: const Icon(Icons.content_paste_outlined),
-            title: const Text('Paste backup'),
-            onTap: _pasteBackup,
-          ),
-
-          _header('Diagnostics'),
-          SwitchListTile.adaptive(
-            secondary: const Icon(Icons.monitor_heart_outlined),
-            title: const Text('Collect diagnostics on this phone'),
-            subtitle: const Text(diagnosticsExplanation),
-            isThreeLine: true,
-            value: _diagnostics.enabled,
-            onChanged: (v) async {
-              await _diagnostics.setEnabled(v);
-              setState(() {});
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.bug_report_outlined),
-            title: const Text('Diagnostics'),
-            subtitle: const Text('Counters, error log and "Share report"'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () async {
-              await Navigator.of(
-                context,
-              ).push(MaterialPageRoute(builder: (_) => DiagnosticsScreen(diagnostics: _diagnostics)));
-              if (mounted) setState(() {});
-            },
-          ),
-
-          _header('Data'),
-          ListTile(
-            leading: Icon(Icons.delete_forever_outlined, color: Theme.of(context).colorScheme.error),
-            title: Text('Reset all data', style: TextStyle(color: Theme.of(context).colorScheme.error)),
-            onTap: _reset,
-          ),
-          const SizedBox(height: 24),
-        ],
+        children: widget.section == null ? _overview() : [..._sectionTiles(widget.section!), const SizedBox(height: 24)],
       ),
     );
   }
+
+  void _open(SettingsSection section) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: Text(section.label)),
+          body: SafeArea(
+            child: SettingsScreen(
+              state: state,
+              section: section,
+              backup: widget.backup,
+              pickBackupFile: widget.pickBackupFile,
+            ),
+          ),
+        ),
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
+  Widget _entry(SettingsSection section, String subtitle) => ListTile(
+    key: ValueKey('settings-${section.name}'),
+    leading: Icon(section.icon),
+    title: Text(section.label),
+    subtitle: Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
+    trailing: const Icon(Icons.chevron_right),
+    onTap: () => _open(section),
+  );
+
+  List<Widget> _overview() {
+    final place = s.latitude == null ? 'Location not set' : (s.locationName.isEmpty ? 'Location set' : s.locationName);
+    return [
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Text(
+          'Settings',
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+        ),
+      ),
+      _header('Your day'),
+      _entry(SettingsSection.wake, 'Up at ${_fmt(s.wakeTime)} · sleep goal ${fmtSleepHours(s.sleepHours)}'),
+      _entry(SettingsSection.prayers, '$place · ${calcMethodLabels[s.calcMethod] ?? s.calcMethod}'),
+      _entry(SettingsSection.islamic, "Hijri date, Ramadan, Jumu'ah, Duha and Witr"),
+      _entry(
+        SettingsSection.reminders,
+        s.remindersEnabled
+            ? 'On · prayers ${s.prayerOffsetMin == 0 ? 'at prayer time' : '${s.prayerOffsetMin} min before'}'
+            : 'Off',
+      ),
+      _header('App'),
+      _entry(SettingsSection.general, 'Theme: ${s.themeMode[0].toUpperCase()}${s.themeMode.substring(1)} · ${s.freezesPerMonth} streak freezes a month'),
+      _entry(SettingsSection.voice, 'Dictation and the spoken voice'),
+      _entry(SettingsSection.ai, 'OpenRouter key and model'),
+      _header('Data'),
+      _entry(SettingsSection.backup, 'Export, import and automatic backups'),
+      _entry(SettingsSection.diagnostics, _diagnostics.enabled ? 'Collecting on this phone' : 'Off'),
+      ListTile(
+        leading: Icon(Icons.delete_forever_outlined, color: Theme.of(context).colorScheme.error),
+        title: Text('Reset all data', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        onTap: _reset,
+      ),
+      const SizedBox(height: 24),
+    ];
+  }
+
+  List<Widget> _sectionTiles(SettingsSection section) => switch (section) {
+    SettingsSection.general => [
+      _header('Appearance'),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: SegmentedButton<String>(
+          key: const Key('theme-mode'),
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(value: 'system', label: Text('System')),
+            ButtonSegment(value: 'light', label: Text('Light')),
+            ButtonSegment(value: 'dark', label: Text('Dark')),
+          ],
+          selected: {s.themeMode},
+          onSelectionChanged: (v) => state.updateSettings((x) => x.themeMode = v.first),
+        ),
+      ),
+      _header('Streaks'),
+      ListTile(
+        leading: const Icon(Icons.ac_unit),
+        title: const Text('Streak freezes per month'),
+        subtitle: Text(
+          '${s.freezesPerMonth} missed ${s.freezesPerMonth == 1 ? 'day' : 'days'} a month keep your perfect-day streak',
+        ),
+        onTap: () async {
+          final v = await _pickNumber('Streak freezes per month', s.freezesPerMonth, 0, 10);
+          if (v != null) await state.updateSettings((x) => x.freezesPerMonth = v);
+        },
+      ),
+    ],
+    SettingsSection.wake => [
+      ListTile(
+        leading: const Icon(Icons.alarm),
+        title: const Text('Target wake-up time'),
+        subtitle: Text(_fmt(s.wakeTime)),
+        onTap: () async {
+          final t = await _pickTime(s.wakeTime);
+          if (t != null) await state.updateSettings((x) => x.wakeTime = t);
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.timelapse),
+        title: const Text('Grace period'),
+        subtitle: Text('Counts as on time if you check in within ${s.wakeGraceMin} min'),
+        onTap: () async {
+          final v = await _pickNumber('Grace period', s.wakeGraceMin, 0, 120);
+          if (v != null) await state.updateSettings((x) => x.wakeGraceMin = v);
+        },
+      ),
+      SwitchListTile.adaptive(
+        secondary: const Icon(Icons.volume_up_outlined),
+        title: const Text('Loud alarm'),
+        subtitle: const Text('Full-screen alarm that keeps ringing until you tap "I\'m up"'),
+        value: s.wakeAlarmLoud,
+        onChanged: (v) => state.updateSettings((x) => x.wakeAlarmLoud = v),
+      ),
+      ..._wakeChallengeAndSleep(),
+    ],
+    SettingsSection.prayers => [
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            FilledButton.tonalIcon(
+              onPressed: _locating ? null : _useMyLocation,
+              icon: _locating
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator.adaptive(strokeWidth: 2))
+                  : const Icon(Icons.my_location),
+              label: const Text('Use my current location'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _locName,
+              decoration: const InputDecoration(labelText: 'Place name (optional)', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _lat,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                    decoration: const InputDecoration(labelText: 'Latitude', border: OutlineInputBorder()),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _lng,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                    decoration: const InputDecoration(labelText: 'Longitude', border: OutlineInputBorder()),
+                  ),
+                ),
+              ],
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(onPressed: _saveLocation, child: const Text('Save location')),
+            ),
+            DropdownButtonFormField<String>(
+              initialValue: s.calcMethod,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Calculation method', border: OutlineInputBorder()),
+              items: [
+                for (final e in calcMethodLabels.entries) DropdownMenuItem(value: e.key, child: Text(e.value)),
+              ],
+              onChanged: (v) => state.updateSettings((x) => x.calcMethod = v ?? x.calcMethod),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: s.madhab,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Asr calculation', border: OutlineInputBorder()),
+              items: const [
+                DropdownMenuItem(value: 'shafi', child: Text("Standard (Shafi'i, Maliki, Hanbali)")),
+                DropdownMenuItem(value: 'hanafi', child: Text('Hanafi')),
+              ],
+              onChanged: (v) => state.updateSettings((x) => x.madhab = v ?? x.madhab),
+            ),
+          ],
+        ),
+      ),
+      SwitchListTile.adaptive(
+        title: const Text('Use manual prayer times'),
+        subtitle: const Text('e.g. to match your local mosque timetable'),
+        value: s.useManualPrayer,
+        onChanged: (v) => state.updateSettings((x) => x.useManualPrayer = v),
+      ),
+      if (s.useManualPrayer)
+        for (final p in prayerNames)
+          ListTile(
+            contentPadding: const EdgeInsets.only(left: 32, right: 16),
+            title: Text(p),
+            trailing: Text(_fmt(parseHm(s.manualTimes[p]!))),
+            onTap: () async {
+              final t = await _pickTime(parseHm(s.manualTimes[p]!));
+              if (t != null) await state.updateSettings((x) => x.manualTimes[p] = fmtHm(t));
+            },
+          ),
+    ],
+    SettingsSection.islamic => [
+      ..._muslimSection().skip(1),
+    ],
+    SettingsSection.reminders => [
+      SwitchListTile.adaptive(
+        secondary: const Icon(Icons.notifications_active_outlined),
+        title: const Text('Reminders'),
+        subtitle: const Text('Wake-up alarm, each prayer, habits and tasks'),
+        value: s.remindersEnabled,
+        onChanged: (v) => state.updateSettings((x) => x.remindersEnabled = v),
+      ),
+      ListTile(
+        leading: const Icon(Icons.schedule),
+        title: const Text('Upcoming reminders'),
+        subtitle: const Text('Everything planned for the next days'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () =>
+            Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => RemindersScreen(state: state))),
+      ),
+      ListTile(
+        leading: const Icon(Icons.more_time),
+        title: const Text('Prayer reminder'),
+        subtitle: Text(s.prayerOffsetMin == 0 ? 'At prayer time' : '${s.prayerOffsetMin} min before prayer time'),
+        onTap: () async {
+          final v = await _pickNumber('Remind me before prayer', s.prayerOffsetMin, 0, 30);
+          if (v != null) await state.updateSettings((x) => x.prayerOffsetMin = v);
+        },
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Wrap(
+          spacing: 8,
+          children: [
+            OutlinedButton(
+              style: compactButton,
+              onPressed: () async {
+                final ok = await state.notifications.requestPermissions();
+                await state.rescheduleNow();
+                _snack(
+                  ok ? 'Notifications allowed.' : 'Notifications are blocked. Enable them in system settings.',
+                );
+              },
+              child: const Text('Grant permissions'),
+            ),
+            OutlinedButton(
+              style: compactButton,
+              onPressed: () => state.notifications.showTest(s),
+              child: const Text('Send test notification'),
+            ),
+          ],
+        ),
+      ),
+    ],
+    SettingsSection.voice => [
+      VoiceSettingsSection(state: state),
+    ],
+    SettingsSection.ai => [
+      AiKeySection(state: state),
+    ],
+    SettingsSection.backup => [
+      Builder(
+        builder: (tile) => ListTile(
+          leading: const Icon(Icons.ios_share),
+          title: const Text('Export backup file'),
+          subtitle: const Text('Save or send your history, habits, tasks and settings as a file'),
+          onTap: () => _exportFile(tile),
+        ),
+      ),
+      ListTile(
+        leading: const Icon(Icons.file_open_outlined),
+        title: const Text('Import backup file'),
+        subtitle: const Text('Restore from a file you exported'),
+        onTap: _importFile,
+      ),
+      ListTile(
+        leading: const Icon(Icons.history),
+        title: const Text('Restore from automatic backup'),
+        subtitle: const Text('Saved on this phone once a day, last ${BackupService.keepDaily} kept'),
+        onTap: _pickAutomaticBackup,
+      ),
+      ListTile(
+        leading: const Icon(Icons.copy_outlined),
+        title: const Text('Copy backup to clipboard'),
+        onTap: _copyBackup,
+      ),
+      ListTile(
+        leading: const Icon(Icons.content_paste_outlined),
+        title: const Text('Paste backup'),
+        onTap: _pasteBackup,
+      ),
+    ],
+    SettingsSection.diagnostics => [
+      SwitchListTile.adaptive(
+        secondary: const Icon(Icons.monitor_heart_outlined),
+        title: const Text('Collect diagnostics on this phone'),
+        subtitle: const Text(diagnosticsExplanation),
+        isThreeLine: true,
+        value: _diagnostics.enabled,
+        onChanged: (v) async {
+          await _diagnostics.setEnabled(v);
+          setState(() {});
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.bug_report_outlined),
+        title: const Text('Diagnostics'),
+        subtitle: const Text('Counters, error log and "Share report"'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () async {
+          await Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => DiagnosticsScreen(diagnostics: _diagnostics)));
+          if (mounted) setState(() {});
+        },
+      ),
+    ],
+  };
 
   static const _challengeLabels = {
     WakeChallenge.off: 'Off',

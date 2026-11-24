@@ -302,14 +302,17 @@ class AppState extends ChangeNotifier implements TaskBackend {
   /// a per-day size uses its first passage's length as the daily portion and
   /// continues to the end of the surah.
   QuranRef? quranForTask(Task t, DateTime day) {
-    final q = t.guide?.quran;
-    if (q == null || !t.isRepeating) return q;
-    var ref = q;
-    if (q.perDay == null && q.mode != 'revise') {
-      final end = q.surah >= 1 && q.surah <= surahInfo.length ? surahInfo[q.surah - 1].$3 : q.to;
-      ref = QuranRef(q.surah, q.from, end, mode: q.mode, perDay: q.to - q.from + 1);
-    }
+    final ref = quranPlanForTask(t);
+    if (ref == null || !t.isRepeating) return ref;
     return ref.portion(taskSessionsBefore(t, day));
+  }
+
+  /// The whole passage a task works through, with its daily portion size.
+  QuranRef? quranPlanForTask(Task t) {
+    final q = t.guide?.quran;
+    if (q == null || !t.isRepeating || q.perDay != null || q.mode == 'revise') return q;
+    final end = q.surah >= 1 && q.surah <= surahInfo.length ? surahInfo[q.surah - 1].$3 : q.to;
+    return QuranRef(q.surah, q.from, end, mode: q.mode, perDay: q.to - q.from + 1);
   }
 
   /// Sessions of a repeating task done before [day], plus those planned

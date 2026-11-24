@@ -210,4 +210,59 @@ void main() {
     final h = await s.upsertHabit(HabitDef(id: 'hf', title: 'Al-Mulk', guide: const TaskGuide(quran: QuranRef(67, 1, 30, perDay: 2))));
     expect(s.quranFor(h, now.add(const Duration(days: 3)))!.from, 7);
   });
+
+  testWidgets('a memorise portion can be recited together with the ayat learned before it', (tester) async {
+    final s = await loadState({'settings.v1': jsonEncode({'onboarded': true})});
+    final h = await s.upsertHabit(
+      HabitDef(id: 'hr', title: 'Memorise Al-Mulk', guide: const TaskGuide(quran: QuranRef(67, 1, 30, mode: 'memorise', perDay: 2))),
+    );
+    final now = DateTime.now();
+    for (final d in [1, 2]) {
+      final day = now.subtract(Duration(days: d));
+      await s.logHabit(day, h.id, s.habitEntry(day, h.id).copy()..done = true);
+    }
+    final mulk = QuranText.parse(raw)[67]!;
+    QuranText.cache = QuranText.parse(raw);
+    tester.view.physicalSize = const Size(600, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(home: TaskGuideScreen(state: s, habitId: h.id)));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Al-Mulk 5–6'), findsOneWidget);
+    expect(find.textContaining(mulk[2]), findsNothing);
+
+    await tester.tap(find.text('+ 3–4'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Al-Mulk 3–6'), findsOneWidget);
+    expect(find.text('Learned · ayat 3–4'), findsOneWidget);
+    expect(find.text('New today'), findsOneWidget);
+    expect(find.textContaining(mulk[2]), findsOneWidget);
+    expect(find.textContaining(mulk[0]), findsNothing);
+
+    await tester.tap(find.text('All 1–6'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Al-Mulk 1–6'), findsOneWidget);
+    expect(find.text('Learned · ayat 1–4'), findsOneWidget);
+    expect(find.textContaining(mulk[1]), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('quran-hide')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('hidden-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('hidden-6')), findsOneWidget);
+  });
+
+  testWidgets('the first portion has nothing learned before it to add', (tester) async {
+    final s = await loadState({'settings.v1': jsonEncode({'onboarded': true})});
+    final h = await s.upsertHabit(
+      HabitDef(id: 'h1', title: 'Memorise Al-Mulk', guide: const TaskGuide(quran: QuranRef(67, 1, 30, mode: 'memorise', perDay: 2))),
+    );
+    QuranText.cache = QuranText.parse(raw);
+    await tester.pumpWidget(MaterialApp(home: TaskGuideScreen(state: s, habitId: h.id)));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(const Key('quran-scope')), findsNothing);
+  });
 }

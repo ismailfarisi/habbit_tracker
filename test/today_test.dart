@@ -313,9 +313,38 @@ void main() {
     expect(find.text('Reminders are turned off.'), findsOneWidget);
   });
 
+  testWidgets('Settings lists sections and opens each as its own page', (tester) async {
+    tallView(tester);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: SettingsScreen(state: state))));
+    await tester.pumpAndSettle();
+    for (final x in SettingsSection.values) {
+      expect(find.byKey(ValueKey('settings-${x.name}')), findsOneWidget);
+    }
+    expect(find.text('Target wake-up time'), findsNothing);
+    expect(find.text('Reset all data'), findsOneWidget);
+    await tester.tap(find.text('Wake-up & sleep'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'Wake-up & sleep'), findsOneWidget);
+    expect(find.text('Target wake-up time'), findsOneWidget);
+    expect(find.text('Sleep goal'), findsOneWidget);
+    expect(find.text('Calculation method'), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Appearance & streaks'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dark'));
+    await tester.pumpAndSettle();
+    expect(state.settings.themeMode, 'dark');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Theme: Dark'), findsOneWidget);
+  });
+
   testWidgets('Settings opens the Reminders page', (tester) async {
     tallView(tester);
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: SettingsScreen(state: state))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reminders'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Upcoming reminders'));
     await tester.pumpAndSettle();

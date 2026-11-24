@@ -179,6 +179,9 @@ void main() {
           home: Scaffold(body: SettingsScreen(state: state)),
         ),
       );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Diagnostics'));
+      await tester.pumpAndSettle();
       final tile = find.widgetWithText(SwitchListTile, 'Collect diagnostics on this phone');
       await tester.scrollUntilVisible(tile, 300, scrollable: find.byType(Scrollable).first);
       await tester.pumpAndSettle();
