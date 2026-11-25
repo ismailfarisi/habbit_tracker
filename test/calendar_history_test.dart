@@ -1,11 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:habit_tracker/logic/stats.dart';
 import 'package:habit_tracker/habits/habit.dart';
-import 'dart:ui' show Tristate;
 import 'package:habit_tracker/models.dart';
 import 'package:habit_tracker/quran/quran.dart';
 import 'package:habit_tracker/screens/calendar_screen.dart';
@@ -51,6 +51,9 @@ void main() {
     await s.addTask(title: 'Call mum', date: dayKey(today.add(const Duration(days: 2))));
     final info = calendarDay(s, yesterday, today);
     expect(info.done, 1);
+    final oneOff = await s.addTask(title: 'Reviewed budget', date: dayKey(yesterday));
+    await s.setTaskDone(oneOff, yesterday, true);
+    expect(calendarDay(s, yesterday, today).done, 2);
     expect(calendarDay(s, today.add(const Duration(days: 2)), today).tasks, 1);
 
     tester.view.physicalSize = const Size(800, 2400);
@@ -87,6 +90,23 @@ void main() {
     await tester.tap(find.text('Today'));
     await tester.pumpAndSettle();
     expect(find.text('Saturday, January 31, 2032'), findsOneWidget);
+  });
+
+  testWidgets('wide calendar puts the selected agenda beside its month', (tester) async {
+    final state = await loadState();
+    tester.view.physicalSize = const Size(1024, 620);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(home: CalendarScreen(state: state, clock: () => DateTime(2026, 11, 19))));
+    await tester.pumpAndSettle();
+    final grid = tester.getRect(find.byType(GridView));
+    final details = tester.getRect(find.text('Thursday, November 19, 2026'));
+    expect(details.left, greaterThan(grid.right));
+    expect(details.top, lessThan(grid.bottom));
+    await tester.tap(find.byKey(const ValueKey('cal-2026-11-20')));
+    await tester.pumpAndSettle();
+    expect(find.text('Friday, November 20, 2026'), findsOneWidget);
+    expect(find.byKey(const Key('cal-add-task')).hitTestable(), findsOneWidget);
   });
 
   for (final brightness in Brightness.values) {

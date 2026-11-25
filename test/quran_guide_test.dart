@@ -232,7 +232,7 @@ void main() {
     expect(find.text('Al-Mulk 5–6'), findsOneWidget);
     expect(find.textContaining(mulk[2]), findsNothing);
 
-    await tester.tap(find.text('+ 3–4'));
+    await tester.tap(find.text('Previous + today'));
     await tester.pump();
     await tester.pump();
     expect(find.text('Al-Mulk 3–6'), findsOneWidget);
@@ -241,17 +241,47 @@ void main() {
     expect(find.textContaining(mulk[2]), findsOneWidget);
     expect(find.textContaining(mulk[0]), findsNothing);
 
-    await tester.tap(find.text('All 1–6'));
+    await tester.tap(find.text('All learned'));
+    await tester.pumpAndSettle();
     await tester.pump();
+    expect(find.text('Al-Mulk 1–4'), findsOneWidget);
+    expect(find.byKey(const ValueKey('hidden-4')), findsOneWidget);
+    expect(find.byKey(const ValueKey('hidden-5')), findsNothing);
+    expect(find.byKey(const Key('guide-done')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('hidden-2')));
     await tester.pump();
-    expect(find.text('Al-Mulk 1–6'), findsOneWidget);
-    expect(find.text('Learned · ayat 1–4'), findsOneWidget);
     expect(find.textContaining(mulk[1]), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('quran-hide')));
+    await tester.tap(find.byKey(const Key('quran-rep')));
+    await tester.tap(find.byTooltip('Bookmark ayah 2'));
+    await tester.tap(find.byKey(const Key('quran-revision')));
     await tester.pump();
-    expect(find.byKey(const ValueKey('hidden-1')), findsOneWidget);
-    expect(find.byKey(const ValueKey('hidden-6')), findsOneWidget);
+    expect(s.storage.loadSettings().quranBookmarks, {'67:2'});
+    final saved = s.storage.loadLogs()[dayKey(now)]!.quranPractice.values.single;
+    expect((saved.revised, saved.repetitions, saved.revealed.single), (true, 1, 2));
+    expect(s.habitEntry(now, h.id).done, isFalse);
+    expect(s.quranFor(h, now)!.from, 5);
+    final nextDay = DateTime(now.year, now.month, now.day + 1);
+    expect(s.quranFor(h, nextDay, today: nextDay)!.from, 5, reason: 'Revision alone does not advance tomorrow');
+
+    await tester.tap(find.text('Today'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Review a bookmarked ayah'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ayah 2'));
+    await tester.pumpAndSettle();
+    expect(find.text('Al-Mulk 2'), findsOneWidget);
+    expect(find.byKey(const Key('guide-done')), findsNothing);
+    await tester.tap(find.text('All learned'));
+    await tester.pumpAndSettle();
+    expect(find.text('Revision saved · portion unchanged'), findsOneWidget);
+    expect(find.text('Repetitions: 1'), findsOneWidget);
+    expect(find.byKey(const ValueKey('hidden-2')), findsNothing);
+
+    final backup = s.storage.exportJson();
+    final restored = await loadState();
+    await restored.storage.importJson(backup);
+    expect(restored.storage.loadSettings().quranBookmarks, {'67:2'});
+    expect(restored.storage.loadLogs()[dayKey(now)]!.quranPractice.values.single.toJson(), saved.toJson());
   });
 
   testWidgets('the first portion has nothing learned before it to add', (tester) async {

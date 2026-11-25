@@ -324,7 +324,9 @@ class GoalScreen extends StatelessWidget {
               ],
               heading('Tasks'),
               if (tasks.isEmpty) Text('No linked tasks.', style: muted),
-              for (final x in tasks) TaskTile(state: state, task: x, day: now),
+              for (final x in tasks)
+                TaskTile(state: state, task: x,
+                    day: x.date != null && x.date!.compareTo(dayKey(now)) > 0 ? (DateTime.tryParse(x.date!) ?? now) : now),
               heading('Reviews'),
               if (g.reviews.isEmpty) Text('Your first look back is ${f.format(g.lastLookBack.add(g.cadenceLength))}.', style: muted),
               for (final r in g.reviews.reversed) ...[

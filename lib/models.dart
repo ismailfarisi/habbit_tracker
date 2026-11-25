@@ -127,6 +127,9 @@ class Settings {
     return history[latest] ?? false;
   }
 
+  /// Bookmarked ayat, keyed by "surah:ayah" independently of the current plan.
+  Set<String> quranBookmarks;
+
   /// Legacy (v1): only read when migrating the old articulation trainer
   /// into the "Articulation practice" habit.
   TimeOfDay trainingTime;
@@ -206,6 +209,7 @@ class Settings {
     this.showMoneyShortcut = false,
     List<String>? dismissedTodaySetup,
     Map<String, Map<String, bool>>? trackingHistory,
+    Set<String>? quranBookmarks,
     this.trainingTime = const TimeOfDay(hour: 7, minute: 0),
     this.trainingGoalMin = 15,
     this.model = 'openai/gpt-4o-mini',
@@ -234,6 +238,7 @@ class Settings {
        todayPinned = todayPinned ?? [],
        dismissedTodaySetup = dismissedTodaySetup ?? [],
        trackingHistory = trackingHistory ?? {},
+       quranBookmarks = quranBookmarks ?? <String>{},
        manualTimes = manualTimes ?? Map.of(defaultManualTimes),
        focusApps = focusApps ?? [];
 
@@ -268,6 +273,7 @@ class Settings {
     'showMoneyShortcut': showMoneyShortcut,
     'dismissedTodaySetup': dismissedTodaySetup,
     if (trackingHistory.isNotEmpty) 'trackingHistory': trackingHistory,
+    if (quranBookmarks.isNotEmpty) 'quranBookmarks': quranBookmarks.toList(),
     'trainingTime': fmtHm(trainingTime),
     'trainingGoalMin': trainingGoalMin,
     'model': model,
@@ -326,6 +332,7 @@ class Settings {
       prayerHadith: j['prayerHadith'] as bool? ?? d.prayerHadith,
       wakeAlarmLoud: j['wakeAlarmLoud'] as bool? ?? true,
       todayHidden: [for (final v in (j['todayHidden'] as List? ?? const [])) '$v'],
+      quranBookmarks: (j['quranBookmarks'] as List? ?? []).whereType<String>().toSet(),
       todayPinned: [for (final v in (j['todayPinned'] as List? ?? const [])) '$v'],
       showMoneyShortcut: j['showMoneyShortcut'] == true,
       dismissedTodaySetup: [for (final v in (j['dismissedTodaySetup'] as List? ?? const [])) '$v'],
@@ -388,23 +395,30 @@ class DayLog {
   /// Entries keyed by `HabitDef.id`.
   Map<String, HabitEntry> habits;
 
+  /// Recall and revision for each goal activity and passage. Reading or
+  /// revising a passage does not add a completion to its task or habit.
+  Map<String, QuranPracticeLog> quranPractice;
+
   DayLog({
     this.wakeAt,
     Set<String>? prayers,
     Map<String, String>? prayerStatus,
     this.bedtimeAt,
     Map<String, HabitEntry>? habits,
+    Map<String, QuranPracticeLog>? quranPractice,
   }) : prayers = prayers ?? <String>{},
        prayerStatus = prayerStatus ?? {},
-       habits = habits ?? {};
+       habits = habits ?? {},
+       quranPractice = quranPractice ?? {};
 
-  bool get isEmpty => wakeAt == null && bedtimeAt == null && prayers.isEmpty && habits.values.every((e) => e.isEmpty);
+  bool get isEmpty => quranPractice.isEmpty && wakeAt == null && bedtimeAt == null && prayers.isEmpty && habits.values.every((e) => e.isEmpty);
 
   Map<String, dynamic> toJson() => {
     if (wakeAt != null) 'wakeAt': wakeAt!.toIso8601String(),
     if (bedtimeAt != null) 'bedtimeAt': bedtimeAt!.toIso8601String(),
     'prayers': prayers.toList(),
     if (prayerStatus.isNotEmpty) 'prayerStatus': prayerStatus,
+    if (quranPractice.isNotEmpty) 'quranPractice': quranPractice.map((k, v) => MapEntry(k, v.toJson())),
     if (habits.isNotEmpty)
       'habits': {
         for (final e in habits.entries)
@@ -435,8 +449,36 @@ class DayLog {
             if (prayers.contains(e.key) && prayerStatuses.contains(e.value)) e.key.toString(): e.value.toString(),
       },
       habits: habits,
+      quranPractice: {
+        if (j['quranPractice'] is Map)
+          for (final e in (j['quranPractice'] as Map).entries)
+            if (e.value is Map) '${e.key}': QuranPracticeLog.fromJson(e.value as Map),
+      },
     );
   }
+}
+
+class QuranPracticeLog {
+  int repetitions;
+  bool recall, revised;
+  Set<int> revealed;
+
+  QuranPracticeLog({this.repetitions = 0, this.recall = false, this.revised = false, Set<int>? revealed})
+      : revealed = revealed ?? {};
+
+  Map<String, dynamic> toJson() => {
+    'repetitions': repetitions,
+    'recall': recall,
+    'revised': revised,
+    'revealed': revealed.toList(),
+  };
+
+  factory QuranPracticeLog.fromJson(Map j) => QuranPracticeLog(
+    repetitions: (j['repetitions'] as num?)?.toInt() ?? 0,
+    recall: j['recall'] == true,
+    revised: j['revised'] == true,
+    revealed: (j['revealed'] as List? ?? []).whereType<int>().toSet(),
+  );
 }
 
 enum Repeat { none, daily, weekly }

@@ -19,16 +19,18 @@ class GoalAgenda extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context);
     final muted = t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant);
-    final today = dateOnly(from);
+    final today = dateOnly(DateTime.now());
     final rows = <Widget>[];
     for (var i = 0; i < days; i++) {
-      final d = DateTime(today.year, today.month, today.day + i);
+      final d = DateTime(from.year, from.month, from.day + i);
+      final forecast = isForecastDay(d, today: today);
       final items = goalPlanFor(state, goal, d, today: today);
       if (items.isEmpty) continue;
       rows.add(
         Padding(
           padding: const EdgeInsets.only(top: 10, bottom: 2),
-          child: Text(i == 0 ? 'Today' : DateFormat('EEE d MMM').format(d), style: t.textTheme.labelLarge),
+          child: Text(DateUtils.isSameDay(today, d) ? 'Today' : '${DateFormat('EEE d MMM').format(d)}${forecast ? ' · Forecast' : ''}',
+              style: t.textTheme.labelLarge),
         ),
       );
       for (final it in items) {
@@ -40,7 +42,7 @@ class GoalAgenda extends StatelessWidget {
             contentPadding: EdgeInsets.zero,
             visualDensity: VisualDensity.compact,
             leading: Icon(
-              it.milestone != null ? Icons.flag_outlined : (it.done ? Icons.check_circle : Icons.radio_button_unchecked),
+              it.milestone != null ? Icons.flag_outlined : forecast ? Icons.schedule : (it.done ? Icons.check_circle : Icons.radio_button_unchecked),
               size: 20,
               color: it.done ? t.colorScheme.primary : t.colorScheme.onSurfaceVariant,
             ),
