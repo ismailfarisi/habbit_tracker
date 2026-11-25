@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../app_state.dart';
+import '../finance/money_screen.dart';
 import '../logic/tasks.dart';
 import '../widgets/ask_chat.dart';
 import '../widgets/adaptive.dart';
@@ -16,9 +17,13 @@ import '../widgets/task_editor.dart';
 import '../widgets/document_viewer.dart';
 import 'goal_agenda.dart';
 import 'goal_okf.dart';
-import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'goal_outcomes.dart';
+import 'goal_workspace_actions.dart';
+import 'goal_guide_editor.dart';
+import 'local_goal_editor.dart';
 
-String reviewPrompt(Goal g) => 'Let\'s review my goal "${g.title}" (id ${g.id}). What went well, and what should I adjust?';
+String reviewPrompt(Goal g) =>
+    'Let\'s review my goal "${g.title}" (id ${g.id}). What went well, and what should I adjust?';
 
 /// Plan's Goals section: each goal's timeline and progress, and a nudge when
 /// a look-back is due.
@@ -47,7 +52,7 @@ class GoalsCard extends StatelessWidget {
                 ),
                 TextButton.icon(
                   key: const Key('new-goal'),
-                  onPressed: () => askChat(state, 'Help me set a new goal'),
+                  onPressed: () => showLocalGoalEditor(context, state),
                   icon: const Icon(Icons.flag_outlined),
                   label: const Text('New goal'),
                 ),
@@ -57,12 +62,28 @@ class GoalsCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Text(
-                  'Plan something bigger, a week or a few years long. The AI breaks it into milestones and tasks, '
-                  'and looks back with you along the way.',
+                  'Choose an outcome and the first practice that will move it forward.',
                   style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
                 ),
               ),
             for (final g in goals) _GoalTile(state: state, goal: g, now: now),
+            if (state.goals.any((g) => g.archived))
+              ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: const Text('Archived goals'),
+                children: [
+                  for (final g in state.goals.where((g) => g.archived))
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(g.title),
+                      subtitle: Text(g.workPaused ? 'Work and reminders paused' : 'Work kept standalone'),
+                      trailing: TextButton(
+                        onPressed: () => state.setGoalArchived(g, archived: false),
+                        child: const Text('Restore'),
+                      ),
+                    ),
+                ],
+              ),
           ],
         ),
       ),
@@ -140,14 +161,17 @@ class GoalTodayCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final (habits, tasks) = itemsFor(state, goal, now);
     final done =
-        habits.where((h) => habitDone(state.habitEntry(now, h.id), h)).length + tasks.where((t) => t.isDoneOn(now)).length;
+        habits.where((h) => habitDone(state.habitEntry(now, h.id), h)).length +
+        tasks.where((t) => t.isDoneOn(now)).length;
     return SectionCard(
       emoji: goal.emoji,
       title: goal.title,
       trailing: CountBadge('$done/${habits.length + tasks.length}'),
-      onTitleTap: () => Navigator.of(
-        context,
-      ).push(MaterialPageRoute<void>(builder: (_) => GoalScreen(state: state, goalId: goal.id))),
+      onTitleTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => GoalScreen(state: state, goalId: goal.id),
+        ),
+      ),
       children: [
         for (final h in habits) GoalHabitTile(state: state, habit: h, day: now),
         for (final t in tasks) TaskTile(state: state, task: t, day: now),
@@ -165,13 +189,16 @@ class _GoalTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
-    final p = goal.progress(state.tasks);
+    final outcomes = goalOutcomes(state, goal, now, includeSavings: true);
+    final measure = outcomes.firstOrNull;
     return InkWell(
       key: ValueKey('goal-${goal.id}'),
       borderRadius: BorderRadius.circular(12),
-      onTap: () => Navigator.of(
-        context,
-      ).push(MaterialPageRoute<void>(builder: (_) => GoalScreen(state: state, goalId: goal.id))),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => GoalScreen(state: state, goalId: goal.id),
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Column(
@@ -185,19 +212,20 @@ class _GoalTile extends StatelessWidget {
                 if (goal.reviewDue(now))
                   TextButton(
                     style: compactButton,
-                    onPressed: () => askChat(state, reviewPrompt(goal)),
+                    onPressed: () => askChat(state, reviewPrompt(goal), goalId: goal.id),
                     child: const Text('Review'),
                   ),
               ],
             ),
             const SizedBox(height: 6),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(value: p, minHeight: 6),
-            ),
+            if (measure?.fraction case final value?)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(value: value, minHeight: 6),
+              ),
             const SizedBox(height: 4),
             Text(
-              '${goal.horizon} · ${goal.milestones.isEmpty ? '${(p * 100).round()}%' : '${goal.milestonesDone} of ${goal.milestones.length} milestones'}'
+              '${measure?.label ?? goal.horizon}'
               ' · until ${DateFormat('d MMM y').format(goal.endDate)}',
               style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant),
             ),
@@ -221,7 +249,11 @@ class GoalScreen extends StatelessWidget {
       listenable: state,
       builder: (context, _) {
         final g = state.goalById(goalId);
-        if (g == null) return Scaffold(appBar: AppBar(), body: const Center(child: Text('This goal was removed.')));
+        if (g == null)
+          return Scaffold(
+            appBar: AppBar(),
+            body: const Center(child: Text('This goal was removed.')),
+          );
         final t = Theme.of(context);
         final muted = t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant);
         final f = DateFormat('d MMM y');
@@ -234,157 +266,203 @@ class GoalScreen extends StatelessWidget {
         final habits = state.habits.where((h) => g.habitIds.contains(h.id)).toList();
         void review() => askChat(state, reviewPrompt(g), context: context, goalId: g.id);
 
+        final outcomes = goalOutcomes(state, g, now, includeSavings: true);
+        void preview() => Navigator.of(context).push(
+          DocumentViewer.route(
+            title: '${g.title} · shared with this chat',
+            markdown: goalOkf(state, g, now),
+            fileName: '${okfSlug(g)}.md',
+          ),
+        );
+        void edit({HabitDef? habit, Task? task}) => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => GoalGuideEditor(state: state, habit: habit, task: task),
+          ),
+        );
         return Scaffold(
           appBar: AppBar(
             title: Text('${g.emoji} ${g.title}'),
             actions: [
               PopupMenuButton<String>(
                 key: const Key('goal-menu'),
-                onSelected: (v) => v == 'export' ? shareOkfBundle(state) : DocumentViewer.pickAndOpen(context),
+                onSelected: (v) {
+                  if (v == 'context') preview();
+                  if (v == 'bundle') {
+                    confirmDialog(
+                      context,
+                      title: 'Export all goals?',
+                      message:
+                          'Include the shared context of all ${state.goals.length} goals, including archived goals. Private notes stay on this device.',
+                      confirm: 'Export',
+                    ).then((ok) {
+                      if (ok) shareOkfBundle(state);
+                    });
+                  }
+                  if (v == 'open') DocumentViewer.pickAndOpen(context);
+                  if (v == 'archive') chooseGoalArchive(context, state, g);
+                },
                 itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'export', child: Text('Export all goals (OKF)')),
+                  PopupMenuItem(
+                    key: Key('goal-context'),
+                    value: 'context',
+                    child: Text('View or export shared context'),
+                  ),
+                  PopupMenuItem(value: 'bundle', child: Text('Export all goals (OKF)')),
                   PopupMenuItem(value: 'open', child: Text('Open a Markdown or HTML file')),
+                  PopupMenuItem(value: 'archive', child: Text('Archive goal')),
                 ],
               ),
             ],
           ),
-          body: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-            children: [
-              if (g.why.isNotEmpty) Text('Why: ${g.why}', style: t.textTheme.bodyLarge),
-              const SizedBox(height: 12),
-              Text('${f.format(g.startDate)} → ${f.format(g.endDate)} · ${g.horizon}', style: muted),
-              const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(value: g.progress(state.tasks), minHeight: 8),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${(g.progress(state.tasks) * 100).round()}% done · ${(g.elapsed(now) * 100).round()}% of the time passed',
-                style: muted,
-              ),
-              const SizedBox(height: 12),
-              Row(
+          body: Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
                 children: [
-                  FilledButton.tonalIcon(
-                    key: const Key('review-goal'),
-                    style: compactButton,
-                    onPressed: review,
-                    icon: const Icon(Icons.auto_awesome),
-                    label: Text(g.reviewDue(now) ? 'Review is due' : 'Review with AI'),
+                  _NextGoalSession(state: state, goal: g, now: now),
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: const Text('Next 14 days'),
+                    children: [GoalAgenda(state: state, goal: g, from: now)],
                   ),
-                  const SizedBox(width: 8),
-                  FilledButton.tonalIcon(
-                    key: const Key('goal-chat'),
-                    style: compactButton,
-                    onPressed: () => askChat(state, '', context: context, goalId: g.id),
-                    icon: const Icon(Icons.chat_bubble_outline),
-                    label: const Text('Chat'),
+                  heading('Progress'),
+                  if (g.why.isNotEmpty) Text(g.why, style: t.textTheme.bodyMedium),
+                  for (final outcome in outcomes)
+                    if (outcome.pot case final pot?)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(outcome.label),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => editPot(context, state, pot: pot),
+                      )
+                    else
+                      Text(outcome.label),
+                  Text(
+                    '${f.format(g.startDate)} → ${f.format(g.endDate)} · ${(g.elapsed(now) * 100).round()}% of time passed',
+                    style: muted,
                   ),
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    key: const Key('goal-context'),
-                    style: compactButton,
-                    onPressed: () => Navigator.of(context).push(
-                      DocumentViewer.route(title: '${g.title} · context', markdown: goalOkf(state, g, now), fileName: '${okfSlug(g)}.md'),
+                  if (g.milestones.isNotEmpty) heading('Milestones'),
+                  for (final m in g.milestones)
+                    CheckboxListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      value: m.done,
+                      title: Text(m.title),
+                      subtitle: m.due == null ? null : Text('By ${f.format(DateTime.parse(m.due!))}'),
+                      onChanged: (v) {
+                        m.done = v ?? false;
+                        state.saveGoals();
+                      },
                     ),
-                    icon: const Icon(Icons.description_outlined),
-                    label: const Text('Context'),
+                  if (habits.isNotEmpty || tasks.isNotEmpty) heading('Linked work'),
+                  for (final h in habits)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.repeat),
+                      title: Text(h.title),
+                      subtitle: Text(h.describeSchedule()),
+                      trailing: const Icon(Icons.edit_outlined),
+                      onTap: () => edit(habit: h),
+                    ),
+                  for (final x in tasks)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.checklist),
+                      title: Text(x.title),
+                      subtitle: Text(x.describeSchedule()),
+                      trailing: const Icon(Icons.edit_outlined),
+                      onTap: () => edit(task: x),
+                    ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => attachGoalWork(context, state, g),
+                      icon: const Icon(Icons.link),
+                      label: const Text('Attach existing work'),
+                    ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text('Looks back ${g.cadence.name}', style: muted),
-              if (g.notes.trim().isNotEmpty) ...[
-                heading('Notes'),
-                MarkdownBody(data: g.notes),
-              ],
-              heading('Next 14 days'),
-              GoalAgenda(state: state, goal: g, from: now),
-              heading('Milestones'),
-              if (g.milestones.isEmpty) Text('No milestones yet.', style: muted),
-              for (final m in g.milestones)
-                CheckboxListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  value: m.done,
-                  title: Text(m.title),
-                  subtitle: m.due == null ? null : Text('By ${f.format(DateTime.parse(m.due!))}'),
-                  onChanged: (v) {
-                    m.done = v ?? false;
-                    state.saveGoals();
-                  },
-                ),
-              if (habits.isNotEmpty) ...[
-                heading('Daily practice'),
-                for (final h in habits) GoalHabitTile(state: state, habit: h, day: now),
-              ],
-              heading('Tasks'),
-              if (tasks.isEmpty) Text('No linked tasks.', style: muted),
-              for (final x in tasks) TaskTile(state: state, task: x, day: now),
-              heading('Reviews'),
-              if (g.reviews.isEmpty) Text('Your first look back is ${f.format(g.lastLookBack.add(g.cadenceLength))}.', style: muted),
-              for (final r in g.reviews.reversed) ...[
-                const SizedBox(height: 8),
-                Text(f.format(r.at), style: muted),
-                Text(r.summary),
-                for (final (i, s) in r.suggestions.indexed)
-                  Row(
+                  heading('Notes'),
+                  GoalNotes(state: state, goal: g, preview: preview),
+                  heading('Reviews'),
+                  Text('Looks back ${g.cadence.name}', style: muted),
+                  Wrap(
+                    spacing: 8,
                     children: [
-                      const Icon(Icons.lightbulb_outline, size: 16),
-                      const SizedBox(width: 6),
-                      Expanded(child: Text(s, style: t.textTheme.bodySmall)),
-                      TextButton(
+                      FilledButton.tonalIcon(
+                        key: const Key('review-goal'),
                         style: compactButton,
-                        onPressed: r.applied.contains(i)
-                            ? null
-                            : () {
-                                r.applied.add(i);
-                                state.saveGoals();
-                                askChat(
-                                  state,
-                                  'For my goal "${g.title}" (id ${g.id}), apply this suggestion: $s',
-                                  display: 'Apply: $s',
-                                  context: context,
-                                );
-                              },
-                        child: Text(r.applied.contains(i) ? 'Applied' : 'Apply'),
+                        onPressed: review,
+                        icon: const Icon(Icons.auto_awesome),
+                        label: Text(g.reviewDue(now) ? 'Review is due' : 'Review with AI'),
+                      ),
+                      TextButton.icon(
+                        key: const Key('goal-chat'),
+                        style: compactButton,
+                        onPressed: () => askChat(state, '', context: context, goalId: g.id),
+                        icon: const Icon(Icons.chat_bubble_outline),
+                        label: const Text('Chat'),
                       ),
                     ],
                   ),
-              ],
-              const SizedBox(height: 24),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  key: const Key('archive-goal'),
-                  onPressed: () {
-                    g.archived = true;
-                    state.saveGoals();
-                    final messenger = ScaffoldMessenger.of(context);
-                    Navigator.of(context).pop();
-                    messenger.showSnackBar(
-                      SnackBar(
-                        content: Text('Archived "${g.title}"'),
-                        action: SnackBarAction(
-                          label: 'Undo',
-                          onPressed: () {
-                            g.archived = false;
-                            state.saveGoals();
-                          },
-                        ),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.archive_outlined),
-                  label: const Text('Archive goal'),
-                ),
+                  if (g.reviews.isEmpty)
+                    Text('Your first look back is ${f.format(g.lastLookBack.add(g.cadenceLength))}.', style: muted),
+                  for (final r in g.reviews.reversed) ...[
+                    const SizedBox(height: 8),
+                    Text(f.format(r.at), style: muted),
+                    Text(r.summary),
+                    for (final (i, _) in r.suggestions.indexed)
+                      GoalSuggestion(key: ValueKey('${r.at}-$i'), state: state, goal: g, review: r, index: i),
+                  ],
+                ],
               ),
-            ],
+            ),
           ),
         );
       },
     );
+  }
+}
+
+class _NextGoalSession extends StatelessWidget {
+  final AppState state;
+  final Goal goal;
+  final DateTime now;
+  const _NextGoalSession({required this.state, required this.goal, required this.now});
+
+  @override
+  Widget build(BuildContext context) {
+    final today = dateOnly(now);
+    // Check the next weekly cycle, plus later start dates and dated work.
+    final candidates = <DateTime>{
+      for (var i = 0; i <= 7; i++) DateTime(today.year, today.month, today.day + i),
+      for (final t in state.tasks.where((t) => goal.taskIds.contains(t.id) && t.date != null))
+        for (var i = 0; i <= (t.isRepeating ? 6 : 0); i++) DateTime.parse(t.date!).add(Duration(days: i)),
+    }.where((d) => !d.isBefore(today)).toList()..sort();
+    for (final d in candidates) {
+      final item = goalPlanFor(
+        state,
+        goal,
+        d,
+        today: today,
+      ).where((i) => !i.done && (i.task != null || i.habit != null)).firstOrNull;
+      if (item == null) continue;
+      return ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(item.title, style: Theme.of(context).textTheme.titleLarge),
+        subtitle: Text(
+          [
+            'Next session · ${d == today ? 'Today' : DateFormat.MMMEd().format(d)}',
+            if (item.detail.isNotEmpty) item.detail,
+          ].join('\n'),
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.of(
+          context,
+        ).push(TaskGuideScreen.route(state, habitId: item.habit?.id, taskId: item.task?.id, day: d)),
+      );
+    }
+    return const ListTile(contentPadding: EdgeInsets.zero, title: Text('No upcoming session'));
   }
 }

@@ -158,13 +158,13 @@ String goalOkf(AppState s, Goal g, DateTime now) {
         }
       }
       if (gd != null && gd.sessions.isNotEmpty) {
-        final cur = s.habitSessionsBefore(h, today);
+        final cur = s.habitSessionsBefore(h, today) - gd.sessionStart;
         b
           ..writeln()
           ..writeln('Sessions:')
           ..writeln();
         for (final (i, x) in gd.sessions.indexed) {
-          b.writeln('- ${_box(i < done)} ${i + 1}. $x${i == cur ? ' ← today' : ''}');
+          b.writeln('- ${_box(i < done - gd.sessionStart)} ${i + 1}. $x${i == cur ? ' ← today' : ''}');
         }
       }
       b.writeln();

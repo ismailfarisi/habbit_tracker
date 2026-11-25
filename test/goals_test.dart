@@ -9,6 +9,7 @@ import 'package:habit_tracker/app_state.dart';
 import 'package:habit_tracker/goals/goal.dart';
 import 'package:habit_tracker/goals/goals_card.dart';
 import 'package:habit_tracker/screens/home_screen.dart';
+import 'package:habit_tracker/habits/habit.dart';
 import 'package:habit_tracker/services/openrouter.dart';
 import 'package:habit_tracker/services/task_tools.dart';
 import 'package:http/http.dart' as http;
@@ -182,9 +183,24 @@ void main() {
   testWidgets('empty Goals card invites a new goal', (tester) async {
     final s = await state();
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: GoalsCard(state: s))));
-    expect(find.textContaining('a week or a few years'), findsOneWidget);
+    expect(find.textContaining('first practice'), findsOneWidget);
     await tester.tap(find.byKey(const Key('new-goal')));
-    expect(s.chatPrompt.value!.text, 'Help me set a new goal');
+    await tester.pumpAndSettle();
+    expect(s.chatPrompt.value, isNull);
+    expect(s.goals, isEmpty);
+    await tester.enterText(find.byKey(const Key('goal-outcome')), 'Launch the shop');
+    await tester.enterText(find.byKey(const Key('goal-practice')), 'List one product');
+    final save = find.widgetWithText(FilledButton, 'Create goal');
+    await tester.ensureVisible(save);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    final goal = s.goals.single;
+    final (habits, _) = GoalTodayCard.itemsFor(s, goal, DateTime.now());
+    expect(habits.single.title, 'List one product');
+    expect(s.goalFor(habits.single.id)?.id, goal.id);
+    await s.logHabit(DateTime.now(), habits.single.id, HabitEntry(done: true));
+    expect(s.chatPrompt.value, isNull);
+    expect(s.storage.loadGoals().single.habitIds, goal.habitIds);
   });
 
   test('chat creates a goal through the AG-UI agent', () async {

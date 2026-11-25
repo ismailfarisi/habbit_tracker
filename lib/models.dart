@@ -492,21 +492,61 @@ class QuranRef {
 
   /// For daily habits: ayat per day, moving through [from]..[to].
   final int? perDay;
-  const QuranRef(this.surah, this.from, this.to, {this.mode = 'read', this.perDay});
+  // Replanning after completed sessions keeps their portions and coverage.
+  final int startSession, coveredBefore;
+  final List<QuranRef> earlier;
+  const QuranRef(this.surah, this.from, this.to, {this.mode = 'read', this.perDay,
+    this.startSession = 0, this.coveredBefore = 0, this.earlier = const []});
+
+  QuranRef replan(QuranRef? previous, int completed) {
+    if (previous == null || completed == 0) {
+      return QuranRef(surah, from, to, mode: mode, perDay: perDay, startSession: completed);
+    }
+    if (surah == previous.surah && from == previous.from && to == previous.to &&
+        mode == previous.mode && perDay == previous.perDay) {
+      return previous;
+    }
+    final samePassage = surah == previous.surah && from == previous.from && mode == previous.mode;
+    return QuranRef(surah, from, to, mode: mode, perDay: perDay, startSession: completed,
+      coveredBefore: samePassage ? previous.covered(completed).clamp(0, to - from + 1) : 0,
+      earlier: [
+        ...previous.earlier.where((p) => p.startSession < completed),
+        if (previous.startSession < completed)
+          QuranRef(previous.surah, previous.from, previous.to, mode: previous.mode, perDay: previous.perDay,
+            startSession: previous.startSession, coveredBefore: previous.coveredBefore),
+      ]);
+  }
+
+  int covered(int done) {
+    final length = to - from + 1;
+    if (done < startSession) {
+      final old = earlier.where((p) => p.startSession <= done).lastOrNull;
+      if (old == null || old.surah != surah || old.mode != mode || old.from != from) return 0;
+      return old.covered(done).clamp(0, length);
+    }
+    return (coveredBefore + (done - startSession) * (perDay ?? length)).clamp(0, length);
+  }
   Map<String, dynamic> toJson() => {
     'surah': surah,
     'from': from,
     'to': to,
     'mode': mode,
     if (perDay != null) 'perDay': perDay,
+    if (startSession > 0) 'startSession': startSession,
+    if (coveredBefore > 0) 'coveredBefore': coveredBefore,
+    if (earlier.isNotEmpty) 'earlier': earlier.map((ref) => ref.toJson()).toList(),
   };
 
   /// The day's portion after [daysDone] completed days: the next [perDay]
   /// ayat, or the whole passage to revise once every portion is done.
   QuranRef portion(int daysDone) {
+    if (daysDone < startSession) {
+      final old = earlier.where((p) => p.startSession <= daysDone).lastOrNull;
+      if (old != null) return old.portion(daysDone);
+    }
     final n = perDay;
     if (n == null || n <= 0) return this;
-    final start = from + daysDone * n;
+    final start = from + covered(daysDone);
     if (start > to) return QuranRef(surah, from, to, mode: 'revise');
     return QuranRef(surah, start, start + n - 1 > to ? to : start + n - 1, mode: mode);
   }
@@ -517,6 +557,9 @@ class QuranRef {
     (j['to'] as num?)?.toInt() ?? (j['from'] as num?)?.toInt() ?? 1,
     mode: j['mode'] as String? ?? 'read',
     perDay: (j['perDay'] as num?)?.toInt(),
+    startSession: (j['startSession'] as num?)?.toInt() ?? 0,
+    coveredBefore: (j['coveredBefore'] as num?)?.toInt() ?? 0,
+    earlier: [for (final p in (j['earlier'] as List? ?? const []).whereType<Map>()) QuranRef.fromJson(p.cast())],
   );
 }
 
@@ -530,7 +573,8 @@ class TaskGuide {
   /// Ordered plan for a repeating practice: what each session focuses on.
   /// The app shows the next one each day it is done.
   final List<String> sessions;
-  const TaskGuide({this.steps = const [], this.doneWhen = '', this.minutes, this.quran, this.sessions = const []});
+  final int sessionStart;
+  const TaskGuide({this.sessionStart = 0, this.steps = const [], this.doneWhen = '', this.minutes, this.quran, this.sessions = const []});
   bool get isEmpty => steps.isEmpty && doneWhen.isEmpty && minutes == null && quran == null && sessions.isEmpty;
   Map<String, dynamic> toJson() => {
     'steps': steps,
@@ -538,6 +582,7 @@ class TaskGuide {
     'minutes': minutes,
     if (quran != null) 'quran': quran!.toJson(),
     if (sessions.isNotEmpty) 'sessions': sessions,
+    if (sessionStart > 0) 'sessionStart': sessionStart,
   };
   factory TaskGuide.fromJson(Map<String, dynamic> j) => TaskGuide(
     steps: ((j['steps'] as List?) ?? const []).map((e) => '$e').toList(),
@@ -545,5 +590,6 @@ class TaskGuide {
     minutes: (j['minutes'] as num?)?.toInt(),
     quran: j['quran'] is Map ? QuranRef.fromJson((j['quran'] as Map).cast<String, dynamic>()) : null,
     sessions: ((j['sessions'] as List?) ?? const []).map((e) => '$e').toList(),
+    sessionStart: (j['sessionStart'] as num?)?.toInt() ?? 0,
   );
 }

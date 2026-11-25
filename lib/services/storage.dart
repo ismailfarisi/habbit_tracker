@@ -105,8 +105,7 @@ class Storage {
     }
   }
 
-  Future<void> saveHabits(List<HabitDef> habits) =>
-      prefs.setString(_habitsKey, jsonEncode(habits.map((h) => h.toJson()).toList()));
+  Future<void> saveHabits(List<HabitDef> habits) => _saveCollection(_habitsKey, habits.map((h) => h.toJson()));
 
   List<Goal> loadGoals() {
     try {
@@ -116,9 +115,17 @@ class Storage {
     }
   }
 
-  Future<void> saveGoals(List<Goal> goals) async {
-    if (!await prefs.setString(_goalsKey, jsonEncode(goals.map((g) => g.toJson()).toList()))) {
-      throw StateError('Could not save goals.');
+  Future<void> saveGoals(List<Goal> goals) => _saveCollection(_goalsKey, goals.map((g) => g.toJson()));
+
+  Future<void> _saveCollection(String key, Iterable<Map<String, dynamic>> records) async {
+    try {
+      if (!await prefs.setString(key, jsonEncode(records.toList()))) {
+        throw StateError('Could not save $key.');
+      }
+    } catch (_) {
+      // SharedPreferences updates its memory cache before the platform write.
+      await prefs.reload();
+      rethrow;
     }
   }
 
