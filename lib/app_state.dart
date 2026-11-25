@@ -1,14 +1,26 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import 'habits/habit.dart';
 import 'logic/stats.dart';
+import 'logic/tracking.dart' as tracking;
 import 'logic/tasks.dart';
 import 'models.dart';
+import 'services/focus_guard.dart';
 import 'services/home_widget_service.dart';
 import 'services/notification_service.dart';
 import 'services/reminders.dart';
 import 'services/storage.dart';
 import 'services/task_tools.dart';
+import 'services/tts.dart';
+import 'services/voice_input.dart';
+import 'goals/goal.dart';
+import 'goals/goal_pause.dart';
+import 'quran/surahs.dart';
+import 'finance/finance.dart';
 
 /// App state and the only writer of persisted data.
 ///
@@ -32,7 +44,18 @@ class AppState extends ChangeNotifier implements TaskBackend {
   /// Every habit, archived ones included. Mutate through [upsertHabit],
   /// [archiveHabit] and [deleteHabit].
   List<HabitDef> habits;
+  List<Goal> goals = [];
+  Finance finance = Finance();
+
+  /// Text to draft in the Chat tab (e.g. "review my goal"), set from other screens.
+  final ValueNotifier<ChatRequest?> chatPrompt = ValueNotifier(null);
+  /// Invalidates conversations and routes that were built with replaced data.
+  int dataGeneration = 0;
   String apiKey = '';
+
+  /// Keys for OpenAI / xAI (Grok) voices; separate from the OpenRouter key.
+  String openaiKey = '';
+  String xaiKey = '';
 
   /// Set when a notification asks the UI to open a tab.
   final ValueNotifier<int?> requestedTab = ValueNotifier(null);
@@ -43,6 +66,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
   AppState._(this.storage, this.notifications, this.settings, this.logs, this.tasks, this.habits);
 
   static Future<AppState> load(Storage storage, NotificationService n) async {
+    await storage.recoverInterruptedRestore();
     final s = AppState._(
       storage,
       n,
@@ -52,7 +76,15 @@ class AppState extends ChangeNotifier implements TaskBackend {
       storage.loadHabits(),
     );
     if (!storage.hasHabits) await storage.saveHabits(s.habits);
+    s.goals = storage.loadGoals();
+    s.finance = storage.hasFinance
+        ? storage.loadFinance()
+        : Finance(currency: currencyForLocale(ui.PlatformDispatcher.instance.locale.toString()));
     s.apiKey = await storage.loadApiKey();
+    s.openaiKey = await storage.loadSecret(Storage.openaiKeyName);
+    s.xaiKey = await storage.loadSecret(Storage.xaiKeyName);
+    voiceSettings = () => s.settings;
+    ttsKeys = () => TtsKeys(openai: s.openaiKey, xai: s.xaiKey);
     return s;
   }
 
@@ -64,9 +96,34 @@ class AppState extends ChangeNotifier implements TaskBackend {
 
   DayLog _mutableDay(DateTime d) => logs.putIfAbsent(dayKey(d), DayLog.new);
 
+  // Finish an already-issued native update before clearing the widget,
+  // notifications and focus state. Queued work from an old generation expires.
+  Future<void>? _reminderUpdates;
+  bool _resetting = false;
+
   Future<void> _reschedule() async {
-    await notifications.reschedule(settings, logs, tasks, habits: habits);
-    await HomeWidgetService.publish(settings, logs, habits: habits, tasks: tasks);
+    if (_resetting) return;
+    final generation = dataGeneration;
+    final previous = _reminderUpdates;
+    final finished = Completer<void>();
+    _reminderUpdates = finished.future;
+    try {
+      if (previous != null) await previous;
+      if (!_resetting && generation == dataGeneration) await _applyReminderState();
+    } finally {
+      if (identical(_reminderUpdates, finished.future)) _reminderUpdates = null;
+      finished.complete();
+    }
+  }
+
+  Future<void> _applyReminderState() async {
+    await notifications.reschedule(settings, logs, trackedTasks, habits: trackedHabits, finance: finance);
+    await HomeWidgetService.publish(settings, logs, habits: habits, tasks: tasks, goals: goals);
+    try {
+      await FocusGuard.instance.configure(settings);
+    } on PlatformException catch (e) {
+      debugPrint('Focus config not saved: $e');
+    }
   }
 
   Future<void> _commit({bool reschedule = true}) async {
@@ -81,6 +138,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
     logs = storage.loadLogs();
     tasks = storage.loadTasks();
     habits = storage.loadHabits();
+    goals = storage.loadGoals();
     notifyListeners();
     await _reschedule();
   }
@@ -88,8 +146,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
   /// Sets (or with null clears) the wake time logged for [day]. The date
   /// part of [at] is replaced by [day].
   Future<void> setWake(DateTime day, DateTime? at) async {
-    _mutableDay(day).wakeAt =
-        at == null ? null : DateTime(day.year, day.month, day.day, at.hour, at.minute, at.second);
+    _mutableDay(day).wakeAt = at == null ? null : DateTime(day.year, day.month, day.day, at.hour, at.minute, at.second);
     // Silence the wake alarm if it is still ringing.
     if (at != null) await notifications.cancel(reminderId(day, 0));
     await _commit();
@@ -127,7 +184,11 @@ class AppState extends ChangeNotifier implements TaskBackend {
       setPrayerStatus(day, name, done ? (logFor(day).prayerStatus[name] ?? prayerOnTime) : null);
 
   // ---------- Habits ----------
-  List<HabitDef> get activeHabits => habits.where((h) => !h.archived).toList();
+  List<HabitDef> get activeHabits => habits.where((h) => !h.archived && !h.goalPauses.any((p) => p.end == null)).toList();
+
+  bool tracksItem(String id, {bool task = false}) => tracking.tracksItem(settings, goals, id, task: task);
+  List<HabitDef> get trackedHabits => activeHabits.where((h) => tracksItem(h.id)).toList();
+  List<Task> get trackedTasks => tasks.where((t) => tracksItem(t.id, task: true)).toList();
 
   HabitDef? habitById(String id) {
     for (final h in habits) {
@@ -151,6 +212,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
     final i = habits.indexWhere((h) => h.id == habit.id);
     var stored = habit;
     if (i >= 0) {
+      habit.rememberScreen(habits[i]);
       habits[i] = habit;
     } else {
       if (habit.seq == 0) {
@@ -158,6 +220,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
       }
       habits.add(stored);
     }
+    projectGoalPauses(goals, habits: [stored]);
     await _commitHabits();
     return stored;
   }
@@ -177,10 +240,23 @@ class AppState extends ChangeNotifier implements TaskBackend {
   }
 
   /// Replaces what is logged for [habitId] on [day].
-  Future<void> logHabit(DateTime day, String habitId, HabitEntry entry) async {
+  Future<void> logHabit(DateTime day, String habitId, HabitEntry entry, {bool reschedule = true}) async {
     final log = _mutableDay(day);
     entry.isEmpty ? log.habits.remove(habitId) : log.habits[habitId] = entry;
-    await _commit();
+    await _commit(reschedule: reschedule);
+  }
+
+  Future<void> saveQuranPractice(DateTime day, String passageKey, QuranPracticeLog practice, {DateTime? today}) async {
+    if (isForecastDay(day, today: today)) return;
+    _mutableDay(day).quranPractice[passageKey] = practice;
+    await _commit(reschedule: false);
+  }
+
+  Future<void> toggleQuranBookmark(int surah, int ayah) async {
+    final key = '$surah:$ayah';
+    if (!settings.quranBookmarks.remove(key)) settings.quranBookmarks.add(key);
+    notifyListeners();
+    await storage.saveSettings(settings);
   }
 
   Future<void> applyNotificationAction(String payload) async {
@@ -266,8 +342,254 @@ class AppState extends ChangeNotifier implements TaskBackend {
     await _commitTasks();
   }
 
+  /// Owner used for grouping. Paused work stays grouped until restored.
+  Goal? goalFor(String id) {
+    for (final g in goals) {
+      if (!g.archived && g.owns(id)) return g;
+    }
+    return goals.where((g) => g.workPaused && g.owns(id)).firstOrNull;
+  }
+
+  /// Days before [day] on which [h] was done.
+  int habitDaysDoneBefore(HabitDef h, DateTime day) {
+    final before = dayKey(day);
+    return logs.entries.where((e) => e.key.compareTo(before) < 0 && habitDone(e.value.habits[h.id], h)).length;
+  }
+
+  /// The Quran passage a task asks for on [day]. A repeating task moves on
+  /// one portion per day it was done; a repeating memorise/read task without
+  /// a per-day size uses its first passage's length as the daily portion and
+  /// continues to the end of the surah.
+  QuranRef? quranForTask(Task t, DateTime day, {DateTime? today}) {
+    final ref = quranPlanForTask(t);
+    if (ref == null || !t.isRepeating) return ref;
+    return ref.portion(taskSessionsBefore(t, day, today: today));
+  }
+
+  /// The whole passage a task works through, with its daily portion size.
+  QuranRef? quranPlanForTask(Task t) {
+    final q = t.guide?.quran;
+    if (q == null || !t.isRepeating || q.perDay != null || q.mode == 'revise') return q;
+    final end = q.surah >= 1 && q.surah <= surahInfo.length ? surahInfo[q.surah - 1].$3 : q.to;
+    return QuranRef(q.surah, q.from, end, mode: q.mode, perDay: q.to - q.from + 1,
+      startSession: q.startSession, coveredBefore: q.coveredBefore, earlier: q.earlier);
+  }
+
+  /// Sessions of a repeating task done before [day], plus those planned
+  /// between today and a future [day].
+  int taskSessionsBefore(Task t, DateTime day, {DateTime? today}) {
+    final before = dayKey(day);
+    final planned = _plannedDays(day, (d) => t.isScheduledOn(d) && !t.doneDates.contains(dayKey(d)), today);
+    return t.doneDates.where((d) => d.compareTo(before) < 0).length + planned;
+  }
+
+  /// Sessions of [h] done before [day], plus those planned until [day].
+  int habitSessionsBefore(HabitDef h, DateTime day, {DateTime? today}) =>
+      habitDaysDoneBefore(h, day) + _plannedDays(day, (d) => h.isScheduledOn(d) && !habitDone(habitEntry(d, h.id), h), today);
+
+  /// The planned session ([index], [count], [text]) for [day], if any.
+  (int, int, String)? _session(List<String> s, int done) => s.isEmpty
+      ? null
+      : done >= 0 && done < s.length
+      ? (done + 1, s.length, s[done])
+      : null;
+
+  (int, int, String)? sessionForHabit(HabitDef h, DateTime day, {DateTime? today}) =>
+      _session(h.guide?.sessions ?? const [], habitSessionsBefore(h, day, today: today) - (h.guide?.sessionStart ?? 0));
+
+  (int, int, String)? sessionForTask(Task t, DateTime day, {DateTime? today}) =>
+      t.isRepeating ? _session(t.guide?.sessions ?? const [], taskSessionsBefore(t, day, today: today) - (t.guide?.sessionStart ?? 0)) : null;
+
+  /// Days from today up to (not including) a future [day] that [pending]
+  /// says are still to do: their portions are assumed done by then.
+  int _plannedDays(DateTime day, bool Function(DateTime d) pending, DateTime? today) {
+    var d = dateOnly(today ?? DateTime.now());
+    final end = dateOnly(day);
+    var n = 0;
+    while (d.isBefore(end)) {
+      if (pending(d)) n++;
+      d = DateTime(d.year, d.month, d.day + 1);
+    }
+    return n;
+  }
+
+  /// The Quran passage [h] asks for on [day] (its next daily portion).
+  QuranRef? quranFor(HabitDef h, DateTime day, {DateTime? today}) =>
+      h.guide?.quran?.portion(habitSessionsBefore(h, day, today: today));
+
+  Goal? goalById(String id) {
+    for (final g in goals) {
+      if (g.id == id) return g;
+    }
+    return null;
+  }
+
+  Future<void> setGoalArchived(Goal goal, {required bool archived, bool pauseWork = true, DateTime? at}) async {
+    if (goal.archived == archived) return;
+    final day = dayKey(at ?? DateTime.now());
+    final next = goal.copy()..archived = archived;
+    if (archived && pauseWork) next.pauses.add(GoalPause(day));
+    if (!archived && next.pauses.isNotEmpty && next.pauses.last.end == null) {
+      final from = next.pauses.removeLast().start;
+      if (from.compareTo(day) < 0) next.pauses.add(GoalPause(from, day));
+    }
+    await upsertGoal(next, expected: goal);
+    await _reschedule();
+  }
+
+  /// All review state and its linked milestone are committed in one goals write.
+  Future<void> applyGoalSuggestion(Goal g, GoalReview review, int index, {required String title, String? due}) async {
+    if (goalById(g.id) != g || !g.reviews.contains(review)) throw StateError('The review has changed.');
+    if (title.trim().isEmpty) throw ArgumentError('Enter a milestone.');
+    if (review.milestoneLinks.containsKey(index)) return;
+    final next = g.copy();
+    final r = next.reviews[g.reviews.indexOf(review)];
+    final m = Milestone(id: 'm${newTaskId()}', title: title.trim(), due: due);
+    next.milestones.add(m);
+    r.milestoneLinks[index] = m.id;
+    r.applied.add(index);
+    await upsertGoal(next, expected: g);
+  }
+
+  Future<void> undoGoalSuggestion(Goal g, GoalReview review, int index) async {
+    if (goalById(g.id) != g || !g.reviews.contains(review)) throw StateError('The review has changed.');
+    final next = g.copy();
+    final r = next.reviews[g.reviews.indexOf(review)];
+    final id = r.milestoneLinks.remove(index);
+    if (id == null) return;
+    r.applied.remove(index);
+    next.milestones.removeWhere((m) => m.id == id);
+    await upsertGoal(next, expected: g);
+  }
+
+  Future<Goal> createLocalGoal({required String outcome, required String practice, required List<int> weekdays,
+      String? reminder, required DateTime end}) async {
+    if (outcome.trim().isEmpty || practice.trim().isEmpty) throw ArgumentError('Enter an outcome and a practice.');
+    final now = DateTime.now();
+    final h = HabitDef(id: newHabitId(), seq: nextHabitSeq(habits), title: practice.trim(),
+      weekdays: List.of(weekdays), reminder: reminder, createdAt: now);
+    final g = Goal(id: 'g${newTaskId()}', title: outcome.trim(), start: dayKey(now), end: dayKey(end),
+      cadence: cadenceFor(end.difference(now).inDays), habitIds: [h.id]);
+    // An interrupted second write can leave an empty goal, but never a new
+    // practice with no owner. A reported failure rolls back its ownership.
+    await _queueGoalWrite(() async {
+      final next = [...goals, g];
+      await storage.saveGoals(next);
+      try {
+        await storage.saveHabits([...habits, h]);
+      } catch (_) {
+        await storage.saveGoals(goals);
+        rethrow;
+      }
+      goals = next;
+      habits.add(h);
+      _goalsChanged();
+    });
+    await _reschedule();
+    return g;
+  }
+
+  Future<void> _goalWrite = Future.value();
+
+  Future<void> _queueGoalWrite(Future<void> Function() operation) {
+    final next = _goalWrite.then((_) => operation());
+    _goalWrite = next.catchError((Object _) {});
+    return next;
+  }
+
+  void _goalsChanged() {
+    projectGoalPauses(goals, tasks: tasks, habits: habits);
+    notifyListeners();
+  }
+
+  /// Persist the whole goal (including review status and its milestone) before
+  /// exposing it to another frame. Serialize independent writes to the same key.
+  Future<void> upsertGoal(Goal goal, {Goal? expected}) => _queueGoalWrite(() async {
+    if (expected != null && goalById(goal.id) != expected) throw StateError('The goal has changed.');
+    final next = [...goals];
+    final i = next.indexWhere((g) => g.id == goal.id);
+    i < 0 ? next.add(goal) : next[i] = goal;
+    await storage.saveGoals(next);
+    goals = next;
+    _goalsChanged();
+  });
+
+  Future<void> deleteGoal(String id) => _queueGoalWrite(() async {
+    final next = goals.where((g) => g.id != id).toList();
+    await storage.saveGoals(next);
+    goals = next;
+    _goalsChanged();
+  });
+
+  Future<void> saveGoals() => _queueGoalWrite(() async {
+    await storage.saveGoals(goals);
+    _goalsChanged();
+  });
+
+  /// Changes money data in place, then saves it.
+  Future<void> updateFinance(void Function(Finance f) change) async {
+    change(finance);
+    notifyListeners();
+    await storage.saveFinance(finance);
+    await _reschedule();
+  }
+
+  Future<MoneyEntry> addMoney(MoneyEntry e) async {
+    await updateFinance((f) => f.entries.add(e));
+    return e;
+  }
+
+  Future<void> removeMoney(String id) => updateFinance((f) => f.entries.removeWhere((e) => e.id == id));
+
+  Future<void> setBudget(String category, int? limit) =>
+      updateFinance((f) => limit == null || limit <= 0 ? f.budgets.remove(category) : f.budgets[category] = limit);
+
+  Future<void> upsertPot(SavingsPot p, {String? currency}) => updateFinance((book) {
+    final f = currency == null ? book : book.ledgers.firstWhere((l) => l.currency == currency);
+    final i = f.pots.indexWhere((x) => x.id == p.id);
+    i < 0 ? f.pots.add(p) : f.pots[i] = p;
+  });
+
+  Future<void> deletePot(String id, {String? currency}) => updateFinance((book) {
+    final f = currency == null ? book : book.ledgers.firstWhere((l) => l.currency == currency);
+    f.pots.removeWhere((p) => p.id == id);
+    for (final e in f.entries.where((e) => e.potId == id)) {
+      e.potId = null;
+    }
+  });
+
+  Future<void> upsertDebt(Debt d) => updateFinance((f) {
+    final i = f.debts.indexWhere((x) => x.id == d.id);
+    i < 0 ? f.debts.add(d) : f.debts[i] = d;
+  });
+
+  Future<void> deleteDebt(String id) => updateFinance((f) {
+    f.debts.removeWhere((d) => d.id == id);
+    for (final e in f.entries.where((e) => e.debtId == id)) {
+      e.debtId = null;
+    }
+  });
+
+  /// Replaces all settings at once (AI changes and their Undo).
+  Future<void> setSettings(Settings s) async {
+    settings = s;
+    notifyListeners();
+    await storage.saveSettings(settings);
+    await _reschedule();
+  }
+
   Future<void> updateSettings(void Function(Settings s) change) async {
+    final hiddenBefore = List.of(settings.todayHidden);
     change(settings);
+    for (final id in ['wake', 'prayers']) {
+      final wasTracked = !hiddenBefore.contains(id);
+      if (wasTracked == settings.tracks(id)) continue;
+      final history = settings.trackingHistory.putIfAbsent(id, () {
+        final first = logs.keys.toList()..sort();
+        return {if (wasTracked && first.isNotEmpty) first.first: true};
+      });
+      history[dayKey(DateTime.now())] = settings.tracks(id);
+    }
     notifyListeners();
     await storage.saveSettings(settings);
     await _reschedule();
@@ -279,24 +601,90 @@ class AppState extends ChangeNotifier implements TaskBackend {
     await storage.saveApiKey(apiKey);
   }
 
+  /// Saves the key for a cloud voice: [provider] is 'openai' or 'grok'.
+  Future<void> setVoiceKey(String provider, String key) async {
+    final k = key.trim();
+    provider == 'openai' ? openaiKey = k : xaiKey = k;
+    notifyListeners();
+    await storage.saveSecret(provider == 'openai' ? Storage.openaiKeyName : Storage.xaiKeyName, k);
+  }
+
   Future<void> importBackup(String raw) async {
-    await storage.importJson(raw);
+    var replacing = false;
+    try {
+      await storage.importJson(raw, beforeReplace: () {
+        replacing = true;
+        _invalidateDataViews();
+      }, beforeCommit: () async {
+        _readRestoredData();
+        await _reschedule();
+      });
+    } catch (_) {
+      if (replacing) {
+        _readRestoredData();
+        // The journal has restored disk. Reconcile any OS work that ran
+        // before the failure against the original data as well.
+        try {
+          await _reschedule();
+        } catch (e) {
+          debugPrint('Could not refresh reminders after rollback: $e');
+        }
+        notifyListeners();
+      }
+      rethrow;
+    }
+    notifyListeners();
+  }
+
+  void _readRestoredData() {
     settings = storage.loadSettings();
     logs = storage.loadLogs();
     tasks = storage.loadTasks();
     habits = storage.loadHabits();
-    notifyListeners();
-    await _reschedule();
+    goals = storage.loadGoals();
+    finance = storage.hasFinance ? storage.loadFinance()
+        : Finance(currency: currencyForLocale(ui.PlatformDispatcher.instance.locale.toString()));
   }
 
   Future<void> resetAll() async {
-    await storage.clearAll();
-    settings = Settings();
-    logs = {};
-    tasks = [];
-    habits = [];
-    apiKey = '';
-    notifyListeners();
-    await _reschedule();
+    _resetting = true;
+    _invalidateDataViews();
+    try {
+      await _reminderUpdates;
+      await notifications.clearAll();
+      await HomeWidgetService.clear();
+      await ChannelFocusGuard.clearDeviceData();
+      await storage.clearAll();
+      settings = Settings();
+      logs = {};
+      tasks = [];
+      habits = [];
+      goals = [];
+      finance = Finance(currency: currencyForLocale(ui.PlatformDispatcher.instance.locale.toString()));
+      apiKey = '';
+      openaiKey = '';
+      xaiKey = '';
+    } finally {
+      _resetting = false;
+      notifyListeners();
+    }
   }
+
+  void _invalidateDataViews() {
+    dataGeneration++;
+    requestedHabit.value = null;
+    requestedTab.value = null;
+    chatPrompt.value = null;
+  }
+}
+
+/// A message for the Chat tab sent from another screen; [display] is shown
+/// instead of [text] when the prompt is long.
+class ChatRequest {
+  final String text;
+  final String? display;
+
+  /// Opens (or starts) this goal's own conversation first.
+  final String? goalId;
+  const ChatRequest(this.text, {this.display, this.goalId});
 }

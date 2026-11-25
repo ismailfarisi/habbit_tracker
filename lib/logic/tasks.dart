@@ -27,6 +27,7 @@ extension TaskSchedule on Task {
 
   /// Whether the task is scheduled to happen on [day].
   bool isScheduledOn(DateTime day) {
+    if (pausedOn(day)) return false;
     final key = dayKey(day);
     if (!isRepeating) return date == key;
     if (date != null && key.compareTo(date!) < 0) return false;
@@ -62,6 +63,7 @@ List<Task> tasksForDay(List<Task> tasks, DateTime day, {DateTime? today}) {
   final key = dayKey(day);
   final isToday = key == todayKey;
   final out = tasks.where((t) {
+    if (t.pausedOn(day)) return false;
     if (t.isScheduledOn(day)) return true;
     if (!isToday || t.isRepeating) return false;
     if (t.doneDates.contains(key)) return true; // finished today
@@ -85,7 +87,7 @@ bool isOverdue(Task t, DateTime today) =>
 /// Future-dated one-off tasks, soonest first.
 List<Task> upcomingTasks(List<Task> tasks, DateTime today) {
   final key = dayKey(today);
-  return tasks.where((t) => !t.isRepeating && !t.isOneOffDone && t.date != null && t.date!.compareTo(key) > 0).toList()
+  return tasks.where((t) => !t.isRepeating && !t.isOneOffDone && t.date != null && t.date!.compareTo(key) > 0 && !t.pausedOn(DateTime.parse(t.date!))).toList()
     ..sort((a, b) => '${a.date} ${a.time ?? '99'}'.compareTo('${b.date} ${b.time ?? '99'}'));
 }
 

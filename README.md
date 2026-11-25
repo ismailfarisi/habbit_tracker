@@ -1,4 +1,6 @@
-# Daily Discipline: habit tracker
+# Daily Discipline: your personal Islamic growth companion
+
+*Build better habits. Strengthen your connection with Allah. Improve yourself, one day at a time.* The app encourages consistency, not perfection: a missed day is a day to begin again, and the coach suggests a lighter next step instead of guilt.
 
 A Flutter mobile app (Android and iOS) for waking early, the five prayers and any habit you want to build, plus tasks planned with AI. Everything is stored on the phone; the only network call is to OpenRouter, and only if you add your own key.
 
@@ -6,6 +8,7 @@ A Flutter mobile app (Android and iOS) for waking early, the five prayers and an
 - **🌙 Sleep.** A sleep goal gives you a bedtime (wake time minus sleep goal) and a wind-down reminder with a **Going to bed** button. The wake card shows how long you slept.
 - **🕌 Five daily prayers.** Times are calculated offline from your location, with a choice of calculation method and Hanafi/standard Asr, or entered by hand. Each prayer is marked **On time**, **Late** or **Qada** (tap picks it from the clock, long-press to choose). Today shows the Hijri date. On Fridays Dhuhr becomes **Jumu'ah** with its own time and early reminder. **Ramadan mode** (automatic by Hijri month, or a toggle) adds a suhoor alarm, Iftar and optional Taraweeh. Duha and Witr are optional and never count against the streak.
 - **🧩 Agent-built habits.** Tell the coach what you need (*"I mumble in meetings"*, *"drink 2L of water"*, *"read Quran after Fajr"*) and it creates a habit with its own logging or practice screen: counters, timers, read-aloud drills that measure pace and filler words, ratings and trend charts. The chat shows a preview before you add it. Without an AI key you can add the same kind of habit from templates (Articulation practice, Read Quran, Drink water, Exercise).
+- **🎯 Goals.** Describe something bigger in Chat (*"memorise Juz Amma in 6 months"*). The AI turns it into a goal with milestones across the timeline and the first weeks of tasks, links habits to it, and looks back with you weekly, monthly or quarterly depending on the goal's length, suggesting adjustments you can apply with a tap.
 - **📝 Tasks.** Add them by hand or ask the coach in plain language (*"Gym Monday, Wednesday and Friday at 6pm"*). Every change the coach makes has an **Undo** button. Repeating tasks count as habits in the stats.
 
 ## Screens

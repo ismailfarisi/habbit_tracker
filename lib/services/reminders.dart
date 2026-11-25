@@ -1,4 +1,7 @@
 import '../habits/habit.dart';
+import '../finance/finance.dart';
+import '../finance/finance_agenda.dart';
+import '../hadith/hadith.dart';
 import '../logic/sleep.dart';
 import '../logic/prayer_status.dart';
 import '../logic/stats.dart';
@@ -6,7 +9,7 @@ import '../logic/tasks.dart';
 import '../models.dart';
 import 'prayer_service.dart';
 
-enum ReminderKind { wake, prayer, habit, task, bedtime }
+enum ReminderKind { wake, prayer, habit, task, bedtime, personal }
 
 class PlannedReminder {
   final int id;
@@ -14,6 +17,8 @@ class PlannedReminder {
   final ReminderKind kind;
   final String title;
   final String body;
+  /// In-app only; never forwarded to the notification plugin.
+  final String? privateDetail;
 
   /// "wake|2026-11-08", "prayer:Fajr|2026-11-08", "habit:ID|2026-11-08",
   /// "task:ID|2026-11-08", "bed|2026-11-08" (the night of that day)
@@ -25,6 +30,7 @@ class PlannedReminder {
     required this.kind,
     required this.title,
     required this.body,
+    this.privateDetail,
     required this.payload,
   });
 }
@@ -69,41 +75,64 @@ List<PlannedReminder> planReminders(
   int days = scheduleDays,
   List<Task> tasks = const [],
   List<HabitDef> habits = const [],
+  Finance? finance,
 }) {
   final out = <PlannedReminder>[];
+  final usedPersonalIds = <int>{};
   for (var d = 0; d < days; d++) {
     final date = DateTime(now.year, now.month, now.day + d);
     final key = dayKey(date);
     final log = logs[key];
+    if (finance != null) {
+      for (final item in financeAgenda(finance, date, hijriOffsetDays: s.hijriOffsetDays)) {
+        var hash = 0;
+        for (final unit in item.id.codeUnits) {
+          hash = (hash * 31 + unit) & 0xfffffff;
+        }
+        var id = 1400000000 + hash;
+        while (!usedPersonalIds.add(id)) { id++; }
+        out.add(PlannedReminder(
+          id: id, when: DateTime(date.year, date.month, date.day, 9),
+          kind: ReminderKind.personal, title: item.privateTitle,
+          body: 'Open the app to review your plan.', payload: 'personal|$id',
+          privateDetail: item.detail,
+        ));
+      }
+    }
 
-    if (log?.wakeAt == null) {
+    if (s.tracks('wake') && log?.wakeAt == null) {
       out.add(PlannedReminder(
         id: reminderId(date, 0),
         when: DateTime(date.year, date.month, date.day, s.wakeTime.hour, s.wakeTime.minute),
         kind: ReminderKind.wake,
         title: '☀️ Time to wake up',
-        body: 'Rise and shine! Tap "I\'m up" to log it.',
+        body: s.wakeChallenge == WakeChallenge.off
+            ? 'Tap "I\'m up" to log your wake-up.'
+            : 'Open your wake challenge to check in.',
         payload: 'wake|$key',
       ));
     }
 
-    final times = prayerTimesFor(s, date).times;
-    for (var i = 0; i < prayerNames.length; i++) {
-      final name = prayerNames[i];
-      if (log?.prayers.contains(name) ?? false) continue;
-      final at = times[name]!;
-      final offset = s.prayerOffsetMin;
-      out.add(PlannedReminder(
-        id: reminderId(date, 1 + i),
-        when: at.subtract(Duration(minutes: offset)),
-        kind: ReminderKind.prayer,
-        title: prayerReminderTitle(s, name, date, offset),
-        body: 'Prayer time ${_hm(at)}. Tap "Prayed" once you\'re done.',
-        payload: 'prayer:$name|$key',
-      ));
-    }
+    if (s.tracks('prayers') && prayerTimesConfirmed(s)) {
+      final times = prayerTimesFor(s, date).times;
+      final hadith = s.prayerHadith ? weeklyPrayerHadith(date) : const <String, Hadith>{};
+      for (var i = 0; i < prayerNames.length; i++) {
+        final name = prayerNames[i];
+        if (log?.prayers.contains(name) ?? false) continue;
+        final at = times[name]!;
+        final offset = s.prayerOffsetMin;
+        out.add(PlannedReminder(
+          id: reminderId(date, 1 + i),
+          when: at.subtract(Duration(minutes: offset)),
+          kind: ReminderKind.prayer,
+          title: prayerReminderTitle(s, name, date, offset),
+          body: prayerReminderBody(at, hadith[name]),
+          payload: 'prayer:$name|$key',
+        ));
+      }
 
-    out.addAll(muslimReminders(s, date, log, times));
+      out.addAll(muslimReminders(s, date, log, times));
+    }
 
     for (final h in habits) {
       if (h.archived || h.reminder == null || !h.isScheduledOn(date)) continue;
@@ -123,7 +152,7 @@ List<PlannedReminder> planReminders(
       ));
     }
 
-    if (s.bedtimeReminder && log?.bedtimeAt == null) {
+    if (s.tracks('wake') && s.bedtimeReminder && log?.bedtimeAt == null) {
       final bed = bedtimeFor(s, date);
       out.add(PlannedReminder(
         id: reminderId(date, bedtimeSlot),
@@ -137,6 +166,7 @@ List<PlannedReminder> planReminders(
     }
 
     for (final t in tasks) {
+      if (t.pausedOn(date)) continue;
       final when = t.reminderOn(date);
       if (when == null) continue;
       final anytime = !t.isRepeating && t.date == null && !t.isOneOffDone;
@@ -204,6 +234,12 @@ bool applyDoneAction(String payload, Map<String, DayLog> logs, DateTime now) {
 
 String _hm(DateTime t) =>
     '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+/// "05:12 · The nearest a servant comes … — Sahih Muslim 482", or the
+/// plain prompt without a hadith.
+String prayerReminderBody(DateTime at, Hadith? h) => h == null
+    ? 'Prayer time ${_hm(at)}. Tap "Prayed" once you\'re done.'
+    : '${_hm(at)} · ${h.quote} — ${h.ref}';
 
 // ---------- Prayer: Jumu'ah and Ramadan ----------
 

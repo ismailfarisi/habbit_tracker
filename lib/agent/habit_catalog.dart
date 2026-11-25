@@ -3,7 +3,8 @@
 ///
 /// Components (implemented in habit_components.dart): `HabitCheck`, `Counter`,
 /// `PracticeTimer`, `ReadAloudDrill`, `PromptCard`, `RatingInput`,
-/// `MetricTrend`, `ChoiceChips`. They bind to the surface data model, which
+/// `MetricTrend`, `ChoiceChips`, and the money components `MoneyLog`,
+/// `BudgetBar`, `SavingsProgress`. They bind to the surface data model, which
 /// `HabitSurface` seeds from and saves to the day's `HabitEntry`:
 /// `/done`, `/value`, `/minutes`, `/metrics/<key>`, `/notes`, `/sessions`,
 /// and read-only `/habit/{title,target,unit}` and `/day`.
@@ -26,7 +27,9 @@ import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:a2ui_flutter/basic_catalog.dart';
 import 'package:json_schema_builder/json_schema_builder.dart';
 
+import '../finance/finance.dart' show spendCategories, incomeCategories;
 import 'habit_components.dart';
+import 'speaking_practice.dart';
 import 'habit_templates.dart';
 
 export 'habit_templates.dart' show habitCatalogId, basicCatalogId, surfaceMessage;
@@ -107,6 +110,20 @@ final CatalogImplementation _habitCatalog = CatalogImplementation(
       buildPracticeTimer,
     ),
     _c(
+      'SpeakingPractice',
+      'A guided warm-up, reading and recording session with a timer and saved progress.',
+      {
+        'warmupTitle': CommonSchemasV1.dynamicString,
+        'steps': _strings('Warm-up instructions.'),
+        'title': CommonSchemasV1.dynamicString,
+        'text': CommonSchemasV1.dynamicString,
+        'targetWords': _strings('Words to practise in the reading passage.'),
+        'listen': Schema.boolean(),
+      },
+      buildSpeakingPractice,
+      required: ['text'],
+    ),
+    _c(
       'ReadAloudDrill',
       'Shows a text (tongue twister, passage, word list) to read aloud, records the user with speech '
           'recognition and writes /metrics/wpm (words per minute), /metrics/fillers (filler-word count) and '
@@ -165,6 +182,34 @@ final CatalogImplementation _habitCatalog = CatalogImplementation(
       },
       buildChoiceChips,
       required: ['options'],
+    ),
+    _c(
+      'MoneyLog',
+      'An amount field with an Add button. Each Add records a spending (or, with income true, income) entry '
+          'in the app\'s Money section and adds the amount to "value" (and sets "done" if bound).',
+      {
+        'label': CommonSchemasV1.dynamicString,
+        'category': Schema.string(
+          description: 'Spending: ${spendCategories.join(', ')}. Income: ${incomeCategories.join(', ')}.',
+        ),
+        'income': Schema.boolean(),
+        'value': CommonSchemasV1.dynamicNumber,
+        'done': CommonSchemasV1.dynamicBoolean,
+        'onChanged': _action,
+      },
+      buildMoneyLog,
+    ),
+    _c(
+      'BudgetBar',
+      'This month\'s spending against the user\'s budget for one category (or all budgets when omitted).',
+      {'category': Schema.string(description: spendCategories.join(', ')), 'label': CommonSchemasV1.dynamicString},
+      buildBudgetBar,
+    ),
+    _c(
+      'SavingsProgress',
+      'Progress of a savings pot from the Money section ("pot" is its name or id; default the first pot).',
+      {'pot': Schema.string(), 'label': CommonSchemasV1.dynamicString},
+      buildSavingsProgress,
     ),
   ],
 );

@@ -96,8 +96,9 @@ void main() {
       await d.recordError(FormatException('bad'), null, source: 'platform');
       final r = d.report();
       expect(r, contains('Reminders scheduled: 7'));
-      expect(r, contains('[platform] FormatException: bad'));
-      expect(r, contains('Errors (1, newest first)'));
+      expect(r, isNot(contains('FormatException: bad')));
+      expect(r, contains('Recorded errors: 1'));
+      expect(d.report(includeErrorCount: false), isNot(contains('Recorded errors')));
     });
 
     test('installErrorHandlers records Flutter and platform errors and chains', () async {
@@ -130,9 +131,11 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(420, 1600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       String? shared;
-      await tester.pumpWidget(MaterialApp(
-        home: DiagnosticsScreen(diagnostics: d, onShare: (r) async => shared = r),
-      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DiagnosticsScreen(diagnostics: d, onShare: (r) async => shared = r),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.text('Diagnostics are off. Nothing is being recorded.'), findsOneWidget);
       expect(find.text('Share report'), findsNothing);
@@ -150,9 +153,11 @@ void main() {
 
       await d.count(Diagnostics.remindersScheduled, 4);
       await d.recordError('Something broke', null, source: 'platform');
-      await tester.pumpWidget(MaterialApp(
-        home: DiagnosticsScreen(key: UniqueKey(), diagnostics: d, onShare: (r) async => shared = r),
-      ));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DiagnosticsScreen(key: UniqueKey(), diagnostics: d, onShare: (r) async => shared = r),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.text('Reminders scheduled'), findsOneWidget);
       expect(find.text('4'), findsOneWidget);
@@ -162,17 +167,31 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Share report'));
       await tester.pumpAndSettle();
+      expect(shared, isNull);
+      expect(find.text('Review diagnostics'), findsOneWidget);
+      await tester.tap(find.text('Include error count'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Share this report'));
+      await tester.pumpAndSettle();
       expect(shared, contains('Reminders scheduled: 4'));
-      expect(shared, contains('Something broke'));
+      expect(shared, isNot(contains('Something broke')));
+      expect(shared, isNot(contains('Recorded errors')));
     });
 
     testWidgets('Settings has the diagnostics switch (off) and opens the screen', (tester) async {
       final state = await loadState();
       await tester.binding.setSurfaceSize(const Size(420, 4000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(MaterialApp(home: Scaffold(body: SettingsScreen(state: state))));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: SettingsScreen(state: state)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Diagnostics'));
+      await tester.pumpAndSettle();
       final tile = find.widgetWithText(SwitchListTile, 'Collect diagnostics on this phone');
-      await tester.ensureVisible(tile);
+      await tester.scrollUntilVisible(tile, 300, scrollable: find.byType(Scrollable).first);
       await tester.pumpAndSettle();
       expect(tester.widget<SwitchListTile>(tile).value, isFalse);
       expect(find.textContaining('Nothing is sent anywhere'), findsOneWidget);

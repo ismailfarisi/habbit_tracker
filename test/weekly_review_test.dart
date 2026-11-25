@@ -128,6 +128,21 @@ void main() {
     expect(p, contains('Suggested adjustment:'));
   });
 
+  test('partial sessions count once per planned day, including a return after missing practice', () {
+    final practice = HabitDef(id: 'read', title: 'Read', kind: HabitKind.duration, target: 10,
+      weekdays: [1, 3, 5], createdAt: ago(4));
+    final review = weeklyReview(settings: Settings(todayHidden: ['wake', 'prayers']), today: today,
+      habits: [practice], logs: {
+        dayKey(ago(4)): DayLog(habits: {'read': HabitEntry(minutes: 10)}),
+        dayKey(ago(1)): DayLog(habits: {'read': HabitEntry(minutes: 10)}), // Thursday is off-plan.
+        dayKey(today): DayLog(habits: {'read': HabitEntry(minutes: 2)}),
+      });
+    expect(review.practiceDays.toString(), '2/3');
+    expect(review.returnedOn, today);
+    expect(review.lastPractice, today);
+    expect(review.items.single.id, 'habit:read');
+  });
+
   test('firstLogDay', () {
     expect(firstLogDay({}), isNull);
     expect(firstLogDay(days(5)), ago(4));

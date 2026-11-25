@@ -7,6 +7,7 @@ import 'package:habit_tracker/logic/prayer_status.dart';
 import 'package:habit_tracker/logic/stats.dart';
 import 'package:habit_tracker/logic/tasks.dart';
 import 'package:habit_tracker/models.dart';
+import 'package:habit_tracker/services/reminders.dart';
 import 'package:habit_tracker/screens/reminders_screen.dart';
 import 'package:habit_tracker/screens/settings_screen.dart';
 import 'package:habit_tracker/screens/today_screen.dart';
@@ -65,6 +66,26 @@ void main() {
 
   Finder inRow(String key, Finder f) => find.descendant(of: find.byKey(ValueKey(key)), matching: f);
 
+  test('tracking choices survive backup and exclude paused dates without losing earlier days', () async {
+    final today = dateOnly(DateTime.now());
+    DateTime ago(int days) => DateTime(today.year, today.month, today.day - days);
+    await state.setWake(ago(5), ago(5));
+    await state.updateSettings((s) => s.todayHidden.add('wake'));
+    expect(state.settings.tracksOn('wake', ago(5)), isFalse);
+    await state.updateSettings((s) {
+      // Simulate the opt-out having happened three days ago.
+      final history = s.trackingHistory['wake']!;
+      history.remove(dayKey(today));
+      history[dayKey(ago(3))] = false;
+      s.todayHidden.remove('wake');
+    });
+    final restored = Settings.fromJson(state.settings.toJson());
+    expect(restored.tracksOn('wake', ago(5)), isTrue);
+    expect(restored.tracksOn('wake', ago(2)), isFalse);
+    expect(restored.tracksOn('wake', today), isTrue);
+    expect(restored.tracksOn('prayers', ago(5)), isTrue);
+  });
+
   group('todayItems ordering', () {
     test('wake comes back in the evening until bedtime is logged', () async {
       await state.setWake(now, DateTime(2026, 5, 5, 5));
@@ -89,6 +110,7 @@ void main() {
     });
 
     test('next due first, untimed after timed, done last', () async {
+      state.settings.useManualPrayer = true;
       final water = await add(waterTemplate);
       final quran = await add(quranTemplate, reminder: '07:00');
       final exercise = await add(exerciseTemplate, reminder: '20:00');
@@ -134,10 +156,14 @@ void main() {
 
   group('Today screen', () {
     testWidgets('cards follow the time of day, done ones collapse, no reminders card', (tester) async {
+      state.settings.useManualPrayer = true;
       final quran = await add(quranTemplate, reminder: '07:00');
       await add(waterTemplate);
       await pumpToday(tester, now);
 
+      expect(find.byKey(const ValueKey('today-prayers')), findsNothing);
+      await tester.tap(find.text('Later'));
+      await tester.pumpAndSettle();
       double top(String key) => tester.getTopLeft(find.byKey(ValueKey(key))).dy;
       expect(top('today-wake'), lessThan(top('today-prayers')));
       expect(top('today-prayers'), lessThan(top(quran.id)));
@@ -156,8 +182,60 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('today-wake')), findsOneWidget);
       expect(top('today-done'), lessThan(top('today-wake')));
-      expect(top('today-tasks'), lessThan(top('today-done')));
+      expect(find.byKey(const ValueKey('today-tasks')), findsNothing, reason: 'No tasks are scheduled');
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a featured prayer shows one action and Later contains only its siblings', (tester) async {
+      await state.updateSettings((s) => s.todayHidden = ['wake']);
+      await pumpToday(tester, now);
+      expect(find.text('Fajr'), findsOneWidget);
+      expect(find.text('Dhuhr'), findsNothing);
+      await tester.tap(find.text('Later'));
+      await tester.pumpAndSettle();
+      expect(find.text('Fajr'), findsOneWidget);
+      expect(find.text('Dhuhr'), findsOneWidget);
+    });
+
+    testWidgets('Customize hides, pins and restores cards with undo and persistent choices', (tester) async {
+      final habit = await add(quranTemplate);
+      await pumpToday(tester, now);
+      await tester.tap(find.text('Customize'));
+      await tester.pumpAndSettle();
+      Finder checkbox(String label) => find.descendant(of: find.widgetWithText(ListTile, label), matching: find.byType(Checkbox));
+      await tester.tap(checkbox('Wake & sleep'));
+      await tester.tap(checkbox('Prayer tracking'));
+      await tester.tap(find.byTooltip('Order Read Quran'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Pin first'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Restore defaults'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Pinned ·'), findsNothing);
+      await tester.tap(find.text('Undo'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(state.storage.loadSettings().todayPinned, [habit.id]);
+      expect(find.text('Set up'), findsNothing);
+      expect(find.text('Enable'), findsNothing);
+      expect(find.text('Read Quran'), findsOneWidget);
+      expect(dayScore(now, state.settings, {}, habits: state.habits).total, 1);
+      expect(planReminders(state.settings, {}, now), isEmpty);
+
+      await tester.tap(find.text('Customize'));
+      await tester.pumpAndSettle();
+      await tester.tap(checkbox('Prayer tracking'));
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Set up'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AppBar, 'Prayer times'), findsOneWidget);
+      await tester.tap(find.text('Choose a city'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Dubai'));
+      await tester.pumpAndSettle();
+      expect(state.settings.locationName, 'Dubai');
     });
 
     testWidgets('agent-built timed habits render their surface on Today', (tester) async {
@@ -165,6 +243,8 @@ void main() {
       await state.upsertHabit(HabitDef.fromJson({...h.toJson(), 'createdByAi': true}));
       await add(articulationTemplate);
       await pumpToday(tester, now);
+      await tester.tap(find.text('Later'));
+      await tester.pumpAndSettle();
       expect(find.text('How hard was it?'), findsOneWidget, reason: 'AI habit shows its own A2UI surface');
       expect(find.text('Practise'), findsOneWidget, reason: 'timed templates stay compact');
     });
@@ -182,6 +262,10 @@ void main() {
     testWidgets('asks about the missed prayer and fixes it in one tap', (tester) async {
       await seedHistory();
       await pumpToday(tester, now);
+      expect(find.text('Resume today'), findsOneWidget);
+      expect(find.byKey(const ValueKey('yesterday-prompt')), findsNothing);
+      await tester.tap(find.text('Edit yesterday’s log'));
+      await tester.pumpAndSettle();
       expect(find.text('Yesterday: did you pray Isha?'), findsOneWidget);
       await tester.tap(inRow('missed-prayer:Isha', find.text('Prayed')));
       await tester.pumpAndSettle();
@@ -195,6 +279,8 @@ void main() {
       final gym = await addRoutine('Gym');
       expect(missedYesterday(state, now).map((i) => i.id), ['prayer:Isha', 'habit:${quran.id}', 'task:${gym.id}']);
       await pumpToday(tester, now);
+      await tester.tap(find.text('Edit yesterday’s log'));
+      await tester.pumpAndSettle();
       expect(find.text('Yesterday: 3 things not logged'), findsOneWidget);
 
       await tester.tap(inRow('missed-habit:${quran.id}', find.text('Done')));
@@ -210,7 +296,7 @@ void main() {
       await tester.tapAt(const Offset(10, 10));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Dismiss'));
+      await tester.tap(find.descendant(of: find.byKey(const ValueKey('yesterday-prompt')), matching: find.text('Dismiss')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('yesterday-prompt')), findsNothing);
       expect(state.storage.prefs.getString('yesterdayPrompt.dismissed'), '2026-05-05');
@@ -298,24 +384,56 @@ void main() {
     });
   });
 
-  testWidgets('Reminders page lists planned reminders by day', (tester) async {
+  testWidgets('Upcoming does not claim planned items are queued when the device queue is unavailable', (tester) async {
     tallView(tester);
     await add(quranTemplate, reminder: '21:00');
     await tester.pumpWidget(MaterialApp(home: RemindersScreen(state: state, now: now)));
     await tester.pump();
-    expect(find.text('Today'), findsOneWidget);
-    expect(find.text('Tomorrow'), findsOneWidget);
-    expect(find.text('🕌 Time for Isha'), findsWidgets);
-    expect(find.text('📖 Read Quran'), findsWidgets);
+    expect(find.text('Could not read scheduled alerts on this device.'), findsOneWidget);
+    expect(find.text('📖 Read Quran'), findsNothing);
     await tester.tap(find.byType(Switch));
     await tester.pump();
     expect(state.settings.remindersEnabled, isFalse);
     expect(find.text('Reminders are turned off.'), findsOneWidget);
   });
 
+  testWidgets('Settings lists sections and opens each as its own page', (tester) async {
+    tallView(tester);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: SettingsScreen(state: state))));
+    await tester.pumpAndSettle();
+    for (final x in SettingsSection.values) {
+      expect(find.byKey(ValueKey('settings-${x.name}')), findsOneWidget);
+    }
+    expect(find.text('Target wake-up time'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('settings-backup')));
+    await tester.pumpAndSettle();
+    expect(find.text('Reset and keep a recovery copy'), findsOneWidget);
+    expect(find.text('Erase this device'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Wake-up & sleep'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'Wake-up & sleep'), findsOneWidget);
+    expect(find.text('Target wake-up time'), findsOneWidget);
+    expect(find.text('Sleep goal'), findsOneWidget);
+    expect(find.text('Calculation method'), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Appearance & streaks'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Dark'));
+    await tester.pumpAndSettle();
+    expect(state.settings.themeMode, 'dark');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Theme: Dark'), findsOneWidget);
+  });
+
   testWidgets('Settings opens the Reminders page', (tester) async {
     tallView(tester);
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: SettingsScreen(state: state))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reminders'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Upcoming reminders'));
     await tester.pumpAndSettle();

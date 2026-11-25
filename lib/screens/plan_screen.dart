@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
 
+import '../finance/money_screen.dart';
+
 import '../app_state.dart';
 import '../habits/habit.dart';
 import '../logic/stats.dart';
 import '../models.dart';
-import '../services/task_tools.dart';
 import '../widgets/add_habit_sheet.dart';
-import '../widgets/ai_key_empty_state.dart';
-import '../widgets/assistant_chat.dart';
 import '../widgets/task_editor.dart';
+import '../widgets/voice_input_button.dart';
 import 'habit_detail_screen.dart';
 import 'tasks_screen.dart';
+import '../widgets/adaptive.dart';
+import '../goals/goals_card.dart';
+import 'calendar_screen.dart';
+import 'home_screen.dart';
 
 /// The Plan tab: the coach entry, the habit list (add from template, edit,
 /// archive) and the task lists.
@@ -22,44 +26,63 @@ class PlanScreen extends StatefulWidget {
   State<PlanScreen> createState() => _PlanScreenState();
 }
 
-class _PlanScreenState extends State<PlanScreen> {
-  /// Kept here so the conversation survives closing the coach page.
-  late final _chat = AssistantChat(
-    widget.state,
-    systemPrompt: () => '$plannerSystemPrompt\n${plannerContext(widget.state.settings, DateTime.now())}',
-  );
+enum _CreateChoice { goal, practice, task, voiceTask }
 
+class _PlanScreenState extends State<PlanScreen> {
   AppState get state => widget.state;
 
-  @override
-  void dispose() {
-    _chat.dispose();
-    super.dispose();
-  }
+  void _openCoach() => state.requestedTab.value = HomeScreen.chatTab;
 
-  void _openCoach() => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => CoachScreen(state: state, chat: _chat),
-    ),
-  );
+  Future<void> _create() async {
+    final choice = await showModalBottomSheet<_CreateChoice>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(child: ListView(shrinkWrap: true, children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text('Create', style: Theme.of(c).textTheme.titleLarge),
+        ),
+        ListTile(leading: const Icon(Icons.flag_outlined), title: const Text('Goal'),
+          subtitle: const Text('An outcome to work towards, like memorising Al-Mulk.'),
+          onTap: () => Navigator.pop(c, _CreateChoice.goal)),
+        ListTile(leading: const Icon(Icons.repeat), title: const Text('Practice'),
+          subtitle: const Text('Something you repeat, like practising every morning.'),
+          onTap: () => Navigator.pop(c, _CreateChoice.practice)),
+        ListTile(leading: const Icon(Icons.check_box_outlined), title: const Text('Task'),
+          subtitle: const Text('One action, like calling the supplier on Friday.'),
+          trailing: IconButton(key: const Key('voice-task'), tooltip: 'Speak a task', icon: const Icon(Icons.mic),
+            onPressed: () => Navigator.pop(c, _CreateChoice.voiceTask)),
+          onTap: () => Navigator.pop(c, _CreateChoice.task)),
+      ])),
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case _CreateChoice.goal: startPlanGoal(context, state);
+      case _CreateChoice.practice: await showAddHabitSheet(context, state);
+      case _CreateChoice.task || _CreateChoice.voiceTask:
+        await showTaskEditor(context, state, dictate: choice == _CreateChoice.voiceTask);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       floatingActionButton: FloatingActionButton.extended(
-        tooltip: 'New task',
-        onPressed: () => showTaskEditor(context, state),
+        onPressed: _create,
         icon: const Icon(Icons.add),
-        label: const Text('Task'),
+        label: const Text('Create'),
       ),
       body: ListenableBuilder(
         listenable: state,
         builder: (context, _) => ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
           children: [
-            _CoachCard(state: state, onOpen: _openCoach),
-            _HabitsCard(state: state),
+            GoalsCard(state: state, showCreate: false),
+            CalendarEntryCard(state: state),
             TaskSections(state: state),
+            _HabitsCard(state: state),
+            MoneyEntryCard(state: state),
+            _CoachCard(state: state, onOpen: _openCoach),
           ],
         ),
       ),
@@ -87,7 +110,7 @@ class _CoachCard extends StatelessWidget {
         title: Text('Coach', style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
         subtitle: Text(
           on
-              ? 'Tell it what you need: it builds habits and plans tasks for you.'
+              ? 'Chat with your coach: it plans goals, builds habits and adds tasks for you.'
               : 'Add an AI key to let the coach build habits and plan for you.',
         ),
         trailing: const Icon(Icons.chevron_right),
@@ -104,7 +127,7 @@ class _HabitsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
-    final active = state.activeHabits;
+    final active = state.activeHabits.where((h) => state.goalFor(h.id) == null).toList();
     final archived = state.habits.where((h) => h.archived).toList();
     return Card(
       child: Padding(
@@ -112,25 +135,12 @@ class _HabitsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Habits${active.isEmpty ? '' : ' · ${active.length}'}',
-                    style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: () => showAddHabitSheet(context, state),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add habit'),
-                ),
-              ],
-            ),
+            Text('Habits${active.isEmpty ? '' : ' · ${active.length}'}',
+              style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
             if (active.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('No habits yet. Add one from the templates or ask the coach.'),
+                child: Text('No habits yet. Choose Create, then Practice.'),
               ),
             for (final h in active) _HabitTile(state: state, habit: h),
             if (archived.isNotEmpty)
@@ -152,18 +162,14 @@ class _HabitTile extends StatelessWidget {
   const _HabitTile({required this.state, required this.habit});
 
   Future<void> _delete(BuildContext context) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: Text('Delete "${habit.title}"?'),
-        content: const Text('The habit is removed. Days you already logged stay in your history.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Delete')),
-        ],
-      ),
+    final ok = await confirmDialog(
+      context,
+      title: 'Delete "${habit.title}"?',
+      message: 'The habit is removed. Days you already logged stay in your history.',
+      confirm: 'Delete',
+      destructive: true,
     );
-    if (ok == true) await state.deleteHabit(habit.id);
+    if (ok) await state.deleteHabit(habit.id);
   }
 
   @override
@@ -294,7 +300,11 @@ class _HabitEditorState extends State<_HabitEditor> {
               Expanded(
                 child: TextField(
                   controller: _title,
-                  decoration: const InputDecoration(labelText: 'Name', border: OutlineInputBorder()),
+                  decoration: InputDecoration(
+                    labelText: 'Name',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: VoiceInputButton(key: const Key('habit-name-voice'), controller: _title),
+                  ),
                 ),
               ),
             ],
@@ -359,7 +369,7 @@ class _HabitEditorState extends State<_HabitEditor> {
                     onPressed: () => setState(() => _h.reminder = null),
                   ),
           ),
-          SwitchListTile(
+          SwitchListTile.adaptive(
             contentPadding: EdgeInsets.zero,
             title: const Text('Forgiving streak'),
             subtitle: const Text('One missed day keeps the streak; two in a row break it'),
@@ -369,64 +379,6 @@ class _HabitEditorState extends State<_HabitEditor> {
           const SizedBox(height: 8),
           FilledButton(onPressed: _save, child: const Text('Save')),
         ],
-      ),
-    );
-  }
-}
-
-/// The assistant chat as a page, opened from the Plan tab. Without an AI key
-/// it shows [AiKeyEmptyState] instead.
-class CoachScreen extends StatelessWidget {
-  final AppState state;
-  final AssistantChat chat;
-  const CoachScreen({super.key, required this.state, required this.chat});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Coach'),
-        actions: [
-          ListenableBuilder(
-            listenable: chat,
-            builder: (_, _) => chat.isEmpty
-                ? const SizedBox.shrink()
-                : IconButton(
-                    tooltip: 'Clear chat',
-                    icon: const Icon(Icons.delete_sweep_outlined),
-                    onPressed: chat.clear,
-                  ),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: ListenableBuilder(
-          listenable: state,
-          builder: (context, _) => state.apiKey.isEmpty
-              ? Center(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(24),
-                    child: AiKeyEmptyState(state: state),
-                  ),
-                )
-              : LayoutBuilder(
-                  builder: (context, box) => Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: AssistantChatView(
-                      chat: chat,
-                      maxHeight: (box.maxHeight - 120).clamp(200, double.infinity),
-                      hint: 'e.g. I mumble in meetings',
-                      suggestions: const [
-                        'I mumble in meetings, build me a daily practice',
-                        'Read Quran for 20 minutes after Fajr every day',
-                        'Drink 2L of water a day',
-                        'Remind me to call my mother tomorrow at 8pm',
-                        'What do I have today?',
-                      ],
-                    ),
-                  ),
-                ),
-        ),
       ),
     );
   }

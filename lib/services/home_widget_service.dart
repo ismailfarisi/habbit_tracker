@@ -20,6 +20,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:home_widget/home_widget.dart';
 
 import '../habits/habit.dart';
+import '../goals/goal.dart';
 import '../logic/prayer_status.dart';
 import '../logic/stats.dart';
 import '../models.dart';
@@ -38,9 +39,10 @@ class WidgetSlot {
 
   /// The prayer has started and is not done yet, so "Done" is offered.
   final bool due;
+  final String? setup;
   final DayScore score;
 
-  const WidgetSlot({required this.from, required this.prayer, required this.at, required this.due, required this.score});
+  const WidgetSlot({required this.from, required this.prayer, required this.at, required this.due, required this.score, this.setup});
 
   bool get tomorrow => dateOnly(at).isAfter(dateOnly(from));
 
@@ -49,9 +51,9 @@ class WidgetSlot {
 
   Map<String, dynamic> toJson() => {
         'from': from.millisecondsSinceEpoch,
-        'label': due ? 'Pray now' : (tomorrow ? 'Next prayer, tomorrow' : 'Next prayer'),
-        'prayer': prayerLabel(prayer, at),
-        'time': '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}',
+        'label': setup == null ? (due ? 'Pray now' : (tomorrow ? 'Next prayer, tomorrow' : 'Next prayer')) : 'Daily Discipline',
+        'prayer': setup ?? prayerLabel(prayer, at),
+        'time': setup == null ? '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}' : '',
         'score': 'Today $score',
         if (payload != null) 'payload': payload,
       };
@@ -66,9 +68,14 @@ WidgetSlot widgetSlotAt(
   DateTime at, {
   List<HabitDef> habits = const [],
   List<Task> tasks = const [],
+  List<Goal> goals = const [],
 }) {
   final day = dateOnly(at);
-  final score = dayScore(day, s, logs, habits: habits, tasks: tasks);
+  final score = dayScore(day, s, logs, habits: habits, tasks: tasks, goals: goals);
+  if (!s.tracks('prayers') || !prayerTimesConfirmed(s)) {
+    return WidgetSlot(from: at, prayer: '', at: at, due: false, score: score,
+      setup: !s.tracks('prayers') ? 'Prayer tracking is off' : 'Set your prayer times');
+  }
   final done = logs[dayKey(day)]?.prayers ?? const <String>{};
   final times = prayerTimesFor(s, day).times.entries.toList();
   final started = times.where((e) => !e.value.isAfter(at)).toList();
@@ -93,16 +100,17 @@ List<WidgetSlot> widgetSlots(
   DateTime now, {
   List<HabitDef> habits = const [],
   List<Task> tasks = const [],
+  List<Goal> goals = const [],
 }) {
   final today = dateOnly(now), tomorrow = DateTime(now.year, now.month, now.day + 1);
   final starts = <DateTime>{
     now,
-    ...prayerTimesFor(s, today).times.values,
+    if (s.tracks('prayers') && prayerTimesConfirmed(s)) ...prayerTimesFor(s, today).times.values,
     tomorrow,
-    ...prayerTimesFor(s, tomorrow).times.values,
+    if (s.tracks('prayers') && prayerTimesConfirmed(s)) ...prayerTimesFor(s, tomorrow).times.values,
   }.where((t) => !t.isBefore(now)).toList()
     ..sort();
-  return [for (final t in starts) widgetSlotAt(s, logs, t, habits: habits, tasks: tasks)];
+  return [for (final t in starts) widgetSlotAt(s, logs, t, habits: habits, tasks: tasks, goals: goals)];
 }
 
 /// The JSON the native widget reads: the slots plus when they run out.
@@ -120,6 +128,16 @@ class HomeWidgetService {
 
   static bool get enabled => debugEnabled ?? (!kIsWeb && Platform.isAndroid);
 
+  static Future<void> clear() async {
+    if (!enabled) return;
+    final canceled = await HomeWidget.cancelScheduledWidgetUpdates(qualifiedAndroidName: homeWidgetProvider);
+    final removed = await HomeWidget.saveWidgetData<String>(homeWidgetDataKey, null, deleteFile: false);
+    final redrawn = await HomeWidget.updateWidget(qualifiedAndroidName: homeWidgetProvider);
+    if (canceled == false || removed == false || redrawn == false) {
+      throw StateError('Could not clear the home widget');
+    }
+  }
+
   static bool _registered = false;
 
   /// Writes the widget timeline and redraws the widget. Never throws.
@@ -128,11 +146,12 @@ class HomeWidgetService {
     Map<String, DayLog> logs, {
     List<HabitDef> habits = const [],
     List<Task> tasks = const [],
+    List<Goal> goals = const [],
     DateTime? now,
   }) async {
     if (!enabled) return;
     final at = now ?? DateTime.now();
-    final slots = widgetSlots(s, logs, at, habits: habits, tasks: tasks);
+    final slots = widgetSlots(s, logs, at, habits: habits, tasks: tasks, goals: goals);
     try {
       if (!_registered) {
         await HomeWidget.registerInteractivityCallback(homeWidgetCallback);
@@ -172,5 +191,6 @@ Future<void> homeWidgetCallback(Uri? uri) async {
     storage.loadLogs(),
     habits: storage.loadHabits(),
     tasks: storage.loadTasks(),
+    goals: storage.loadGoals(),
   );
 }

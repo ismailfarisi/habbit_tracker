@@ -28,6 +28,10 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+      # whisper_ggml needs NDK 29; Gradle can't auto-install it without an accepted licence.
+      - name: Install Android NDK 29
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;29.0.13113456" > /dev/null
+
       # Retry: the Gradle distribution download from GitHub occasionally times out.
       - name: Build APK
         run: |
@@ -48,7 +52,7 @@ jobs:
 
       # Publish a direct download link (Releases page) for pushes, not PRs.
       - name: Publish latest build
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/heads/devin/audit-')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-build

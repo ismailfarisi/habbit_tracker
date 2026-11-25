@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../services/diagnostics.dart';
+import '../widgets/adaptive.dart';
 
 /// Explains what opt-in diagnostics collect.
 const diagnosticsExplanation =
@@ -38,7 +39,32 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
   String _when(DateTime t) => DateFormat.yMMMd().add_jm().format(t);
 
   Future<void> _share() async {
-    final text = d.report();
+    bool count = true;
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, update) {
+        final preview = d.report(includeErrorCount: count);
+        return AlertDialog(
+          scrollable: true,
+          title: const Text('Review diagnostics'),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Only the text below will be shared. Error messages and stack traces stay on this phone.'),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Include error count'),
+              value: count,
+              onChanged: (v) => update(() => count = v == true),
+            ),
+            SelectableText(preview),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, preview), child: const Text('Share this report')),
+          ],
+        );
+      }),
+    );
+    if (text == null) return;
     if (widget.onShare != null) return widget.onShare!(text);
     await SharePlus.instance.share(ShareParams(text: text, subject: 'Daily Discipline diagnostics'));
   }
@@ -57,7 +83,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
       body: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
-          SwitchListTile(
+          SwitchListTile.adaptive(
             title: const Text('Collect diagnostics on this phone'),
             subtitle: const Text(diagnosticsExplanation),
             isThreeLine: true,
@@ -104,8 +130,8 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
               child: Wrap(spacing: 8, runSpacing: 8, children: [
-                FilledButton.icon(onPressed: _share, icon: const Icon(Icons.share_outlined), label: const Text('Share report')),
-                OutlinedButton(onPressed: _clear, child: const Text('Clear')),
+                FilledButton.icon(style: compactButton, onPressed: _share, icon: const Icon(Icons.share_outlined), label: const Text('Share report')),
+                OutlinedButton(style: compactButton, onPressed: _clear, child: const Text('Clear')),
               ]),
             ),
           ],

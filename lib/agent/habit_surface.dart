@@ -26,9 +26,11 @@ import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../habits/habit.dart';
 import '../logic/stats.dart';
-import '../widgets/coach_sheet.dart';
 import 'habit_catalog.dart';
 import 'habit_components.dart';
+import 'habit_screen_layout.dart';
+import '../services/coach_prompts.dart';
+import '../widgets/ask_chat.dart';
 
 typedef AskCoachHandler = void Function(HabitDef habit, Map<String, dynamic> request);
 
@@ -56,8 +58,9 @@ class HabitSurfaceState extends State<HabitSurface> {
   String _surfaceJson = '';
   bool _syncing = false;
 
-  /// True when the stored surface could not be used and [HabitFallback] is
-  /// shown.
+  Map<String, dynamic>? get _selectedSurface => widget.habit.usePlainTracker ? null : widget.habit.uiSurface;
+
+  /// True when the plain tracker is selected or the stored surface could not be used.
   bool get usingFallback => _surface == null;
 
   /// The entry currently shown.
@@ -80,7 +83,7 @@ class HabitSurfaceState extends State<HabitSurface> {
     }
     if (old.habit.id != widget.habit.id ||
         dayKey(old.day) != dayKey(widget.day) ||
-        jsonEncode(widget.habit.uiSurface) != _surfaceJson) {
+        jsonEncode(_selectedSurface) != _surfaceJson) {
       _close();
       _open();
     } else {
@@ -102,15 +105,15 @@ class HabitSurfaceState extends State<HabitSurface> {
       };
 
   void _open() {
-    _surfaceJson = jsonEncode(widget.habit.uiSurface);
-    final stored = widget.habit.uiSurface;
+    _surfaceJson = jsonEncode(_selectedSurface);
+    final stored = _selectedSurface;
     if (stored == null) return;
     final processor = MessageProcessor<ComponentImplementation>(
       catalogs: habitCatalogs(),
       defaultVersion: A2uiProtocolVersion.v1_0,
     );
     try {
-      final message = normalizeHabitSurface(stored);
+      final message = editableHabitSurface(widget.habit);
       final id = 'habit-${widget.habit.id}-${_nextId++}';
       (message['createSurface'] as Map)
         ..['surfaceId'] = id
@@ -151,7 +154,7 @@ class HabitSurfaceState extends State<HabitSurface> {
   void _onState() {
     if (!mounted) return;
     _pushToSurface();
-    if (_surface == null) setState(() {});
+    setState(() {});
   }
 
   /// Copies the stored entry (and habit facts) into the data model when it
@@ -201,11 +204,17 @@ class HabitSurfaceState extends State<HabitSurface> {
       case finishSessionAction:
         _save(applyFinishSession(entry, c, DateTime.now()));
       case askCoachAction:
+        if (!widget.persist && widget.onAskCoach == null) return;
         final request = {...c, 'habit': widget.habit.title, 'day': dayKey(widget.day)};
         if (widget.onAskCoach != null) {
           widget.onAskCoach!(widget.habit, request);
         } else if (mounted) {
-          showCoachSheet(context, widget.state, habit: widget.habit, request: request);
+          askChat(
+            widget.state,
+            sessionFeedbackPrompt(widget.habit.title, request),
+            display: '🎙️ Please review my practice',
+            context: context,
+          );
         }
     }
   }
@@ -213,15 +222,32 @@ class HabitSurfaceState extends State<HabitSurface> {
   @override
   Widget build(BuildContext context) {
     final surface = _surface;
+    final state = widget.state, day = widget.day, id = widget.habit.id;
+    final persist = widget.persist;
     return HabitScope(
-      habit: widget.habit,
+      readEntry: persist ? () => state.habitEntry(day, id) : () => _preview,
+      savePractice: (e, {required bool finished}) {
+        if (!persist) {
+          if (mounted) setState(() => _preview = e);
+        } else if (state.habitById(id) != null) {
+          unawaited(state.logHabit(day, id, e, reschedule: finished));
+        }
+      },
+      preview: !persist,      habit: widget.habit,
       day: widget.day,
       speechLocale: widget.state.settings.speechLocale,
+      finance: widget.state.finance,
+      addMoney: widget.persist ? widget.state.addMoney : null,
       history: (metric, days) =>
           metricHistory(widget.state.logs, widget.habit, metric, days: days, end: widget.day),
-      child: surface == null
-          ? HabitFallback(habit: widget.habit, entry: entry, onChanged: _save)
-          : A2uiSurface(key: ObjectKey(surface), surface: surface),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        if (surface == null)
+          HabitFallback(habit: widget.habit, entry: entry, onChanged: _save)
+        else
+          A2uiSurface(key: ObjectKey(surface), surface: surface),
+        for (final (i, step) in widget.habit.screenSteps.indexed)
+          Padding(padding: const EdgeInsets.only(top: 8), child: Text('${i + 1}. $step')),
+      ]),
     );
   }
 }
@@ -303,7 +329,22 @@ class HabitFallback extends StatelessWidget {
           ),
           IconButton.filled(tooltip: 'More', onPressed: () => bump(step), icon: const Icon(Icons.add)),
         ]),
-      CheckboxListTile(
+      if (timed)
+        OutlinedButton.icon(
+          icon: const Icon(Icons.timer_outlined),
+          label: const Text('Log session'),
+          onPressed: () async {
+            final minutes = await showDialog<int>(
+              context: context,
+              builder: (_) => _LogSessionDialog(target: habit.target),
+            );
+            if (minutes == null || !context.mounted) return;
+            // Use the current entry if another surface updated it while the dialog was open.
+            final current = context.findAncestorStateOfType<HabitSurfaceState>()?.entry ?? entry;
+            onChanged(applyFinishSession(current, {'durationSec': minutes * 60, 'addMinutes': minutes}, DateTime.now()));
+          },
+        ),
+      CheckboxListTile.adaptive(
         contentPadding: EdgeInsets.zero,
         controlAffinity: ListTileControlAffinity.leading,
         value: habitDone(entry, habit),
@@ -312,4 +353,36 @@ class HabitFallback extends StatelessWidget {
       ),
     ]);
   }
+}
+
+class _LogSessionDialog extends StatefulWidget {
+  final num target;
+  const _LogSessionDialog({required this.target});
+
+  @override
+  State<_LogSessionDialog> createState() => _LogSessionDialogState();
+}
+
+class _LogSessionDialogState extends State<_LogSessionDialog> {
+  late int? minutes = widget.target.round().clamp(1, 1440);
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Log session'),
+        content: TextFormField(
+          initialValue: minutes.toString(),
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Minutes', helperText: '1 to 1440'),
+          onChanged: (text) => setState(() => minutes = int.tryParse(text.trim())),
+        ),
+        actions: [
+          TextButton(onPressed: Navigator.of(context).pop, child: const Text('Cancel')),
+          FilledButton(
+            onPressed: minutes != null && minutes! > 0 && minutes! <= 1440
+                ? () => Navigator.pop(context, minutes)
+                : null,
+            child: const Text('Save session'),
+          ),
+        ],
+      );
 }

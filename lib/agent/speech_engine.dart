@@ -3,8 +3,12 @@
 /// challenge) can be driven by a fake in tests: set [speechEngineFactory].
 library;
 
-import 'package:flutter_tts/flutter_tts.dart';
-import 'package:speech_to_text/speech_to_text.dart';
+import 'dart:async';
+
+import '../services/tts.dart' as tts show stopSpeaking;
+import '../services/voice_input.dart';
+
+Future<void> stopSpeakingAloud() => tts.stopSpeaking();
 
 abstract class SpeechEngine {
   /// Prepares the recognizer. [onStopped] fires when listening ends on its
@@ -21,52 +25,81 @@ abstract class SpeechEngine {
 
 SpeechEngine Function() speechEngineFactory = PluginSpeechEngine.new;
 
+/// Listens through the user's chosen dictation engine (Whisper or the
+/// phone's recognizer, see [dictationFactory]) and speaks with the chosen
+/// voice engine (see [speakText]).
 class PluginSpeechEngine implements SpeechEngine {
-  final _speech = SpeechToText();
-  final _tts = FlutterTts();
+  Dictation? _dictation;
+  int _listenAttempt = 0;
+  bool _starting = false;
+  void Function()? _onStopped;
+  void Function(String message)? _onError;
 
   @override
-  Future<bool> init({required void Function() onStopped, required void Function(String message) onError}) =>
-      _speech.initialize(
-        onStatus: (s) {
-          if (s == 'done' || s == 'notListening') onStopped();
-        },
-        onError: (e) => onError(e.errorMsg),
-      );
+  Future<bool> init({required void Function() onStopped, required void Function(String message) onError}) async {
+    _onStopped = onStopped;
+    _onError = onError;
+    return true;
+  }
 
   @override
   Future<void> listen({required void Function(String words) onWords, String? localeId}) async {
-    await _tts.stop();
-    await _speech.listen(
-      onResult: (r) => onWords(r.recognizedWords),
-      listenOptions: SpeechListenOptions(
-        listenFor: const Duration(minutes: 3),
-        pauseFor: const Duration(seconds: 6),
-        partialResults: true,
-        listenMode: ListenMode.dictation,
-        localeId: localeId == null || localeId.isEmpty ? null : localeId,
-      ),
-    );
+    final attempt = ++_listenAttempt;
+    await stopSpeakingAloud();
+    if (attempt != _listenAttempt) return;
+    _dictation?.dispose();
+    try {
+      _dictation = null;
+      final d = await dictationFactory();
+      if (attempt != _listenAttempt) {
+        d.dispose();
+        return;
+      }
+      _dictation = d;
+      _starting = true;
+      try {
+        await d.start(
+          locale: localeId ?? '',
+          onText: onWords,
+          onDone: () => _onStopped?.call(),
+          onError: (m) => _onError?.call(m),
+        );
+      } finally {
+        if (_dictation == d) _starting = false;
+      }
+    } catch (e) {
+      if (attempt != _listenAttempt) return;
+      _onError?.call('$e');
+      _onStopped?.call();
+    }
   }
 
   @override
-  Future<void> stop() => _speech.stop();
+  Future<void> stop() async {
+    _listenAttempt++;
+    if (_starting) {
+      _dictation?.dispose();
+      _dictation = null;
+      _starting = false;
+    } else {
+      await _dictation?.stop();
+    }
+  }
 
   @override
   Future<void> speak(String text, {void Function()? onDone}) async {
-    _tts.setCompletionHandler(() => onDone?.call());
-    await _tts.setSpeechRate(0.42);
-    await _tts.speak(text.replaceAll(RegExp(r'[*#_`]'), ''));
+    unawaited(speakText(text, rate: 0.42).whenComplete(() => onDone?.call()));
   }
 
   @override
-  Future<void> stopSpeaking() async {
-    await _tts.stop();
-  }
+  Future<void> stopSpeaking() => stopSpeakingAloud();
 
   @override
   void dispose() {
-    _speech.cancel();
-    _tts.stop();
+    _listenAttempt++;
+    _dictation?.dispose();
+    _dictation = null;
+    _starting = false;
+    stopSpeakingAloud();
   }
 }

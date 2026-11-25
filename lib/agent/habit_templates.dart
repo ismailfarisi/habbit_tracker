@@ -25,7 +25,11 @@ class HabitTemplate {
   final List<MetricField> metricFields;
   final List<Map<String, dynamic>> components;
 
+  /// Days of the week (1 = Monday) it is due; empty for every day.
+  final List<int> weekdays;
+
   const HabitTemplate({
+    this.weekdays = const [],
     required this.id,
     required this.title,
     required this.emoji,
@@ -76,13 +80,13 @@ const _articulationComponents = <Map<String, dynamic>>[
   {
     'id': 'root',
     'component': 'Column',
-    'children': ['warmup', 'drill', 'timer', 'pace', 'fillers'],
+    'children': ['practice', 'pace', 'fillers'],
   },
   {
-    'id': 'warmup',
-    'component': 'PromptCard',
+    'id': 'practice',
+    'component': 'SpeakingPractice',
     'catalogId': habitCatalogId,
-    'title': 'Warm-up (2 min)',
+    'warmupTitle': 'Warm-up (2 min)',
     'steps': [
       'Lip trills: blow air through relaxed lips ("brrr") for 15 seconds, sliding pitch up and down.',
       'Tongue stretch: tongue out and down, then up toward your nose, then side to side. 5 reps each.',
@@ -90,11 +94,6 @@ const _articulationComponents = <Map<String, dynamic>>[
       'Over-articulate: "pa-ta-ka" 10 times slowly, then 10 times quickly but crisply.',
       'Breath: inhale 4 s into your belly, then exhale on a steady "sss" for as long as you can.',
     ],
-  },
-  {
-    'id': 'drill',
-    'component': 'ReadAloudDrill',
-    'catalogId': habitCatalogId,
     'title': 'Read aloud',
     'text': 'Red lorry, yellow lorry.\n'
         'She sells seashells by the seashore.\n'
@@ -102,14 +101,6 @@ const _articulationComponents = <Map<String, dynamic>>[
         'A proper copper coffee pot.',
     'targetWords': ['lorry', 'seashells', 'thieves', 'thousand', 'copper'],
     'listen': true,
-  },
-  {
-    'id': 'timer',
-    'component': 'PracticeTimer',
-    'catalogId': habitCatalogId,
-    'label': 'Practice time',
-    'minutes': {_path: '/minutes'},
-    'targetMinutes': {_path: '/habit/target'},
   },
   {
     'id': 'pace',
@@ -193,6 +184,96 @@ final exerciseTemplate = HabitTemplate(
 
 final habitTemplates = <HabitTemplate>[articulationTemplate, quranTemplate, waterTemplate, exerciseTemplate];
 
+final logSpendingTemplate = HabitTemplate(
+  id: 'log-spending',
+  title: "Log today's spending",
+  emoji: '🧾',
+  description: 'A minute each evening to write down what you spent.',
+  kind: HabitKind.check,
+  components: [
+    _column(['check', 'log', 'budget']),
+    _h('check', 'HabitCheck', {
+      'label': "I wrote down today's spending",
+      'done': {_path: '/done'},
+    }),
+    _h('log', 'MoneyLog', {
+      'label': 'Add something you spent',
+      'category': 'Other',
+      'value': {_path: '/value'},
+      'done': {_path: '/done'},
+    }),
+    _h('budget', 'BudgetBar', {}),
+  ],
+);
+
+final noSpendTemplate = HabitTemplate(
+  id: 'no-spend',
+  title: 'No-spend day',
+  emoji: '🌿',
+  description: 'Only essentials today. Gratitude for what you already have.',
+  kind: HabitKind.check,
+  components: [
+    _column(['check', 'tip', 'budget']),
+    _h('check', 'HabitCheck', {
+      'label': 'Nothing spent beyond essentials',
+      'done': {_path: '/done'},
+    }),
+    _h('tip', 'PromptCard', {
+      'title': 'Contentment',
+      'body': 'Before buying, wait a day and ask: do I need it, or only want it?',
+    }),
+    _h('budget', 'BudgetBar', {}),
+  ],
+);
+
+final weeklySadaqahTemplate = HabitTemplate(
+  id: 'weekly-sadaqah',
+  title: 'Weekly sadaqah',
+  emoji: '🤲',
+  description: 'Give something every Friday, however small.',
+  kind: HabitKind.check,
+  weekdays: const [5],
+  components: [
+    _column(['log', 'check']),
+    _h('log', 'MoneyLog', {
+      'label': 'How much did you give?',
+      'category': 'Sadaqah',
+      'value': {_path: '/value'},
+      'done': {_path: '/done'},
+    }),
+    _h('check', 'HabitCheck', {
+      'label': 'I gave sadaqah (time and kindness count too)',
+      'done': {_path: '/done'},
+    }),
+  ],
+);
+
+final saveFirstTemplate = HabitTemplate(
+  id: 'save-first',
+  title: 'Save before you spend',
+  emoji: '🏦',
+  description: 'On payday, move your savings first, then spend what is left.',
+  kind: HabitKind.check,
+  components: [
+    _column(['log', 'pot']),
+    _h('log', 'MoneyLog', {
+      'label': 'Amount set aside',
+      'category': 'Savings',
+      'value': {_path: '/value'},
+      'done': {_path: '/done'},
+    }),
+    _h('pot', 'SavingsProgress', {}),
+  ],
+);
+
+/// Money habits, offered in Add a habit and on the Money screen.
+final moneyHabitTemplates = <HabitTemplate>[
+  logSpendingTemplate,
+  noSpendTemplate,
+  weeklySadaqahTemplate,
+  saveFirstTemplate,
+];
+
 HabitDef habitFromTemplate(
   HabitTemplate t, {
   String? id,
@@ -213,6 +294,7 @@ HabitDef habitFromTemplate(
       createdAt: createdAt,
       uiSurface: surfaceMessage(t.components),
       metricFields: List.of(t.metricFields),
+      weekdays: List.of(t.weekdays),
       templateId: t.id,
     );
 

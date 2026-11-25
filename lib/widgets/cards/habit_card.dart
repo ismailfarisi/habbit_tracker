@@ -6,6 +6,7 @@ import '../../habits/habit.dart';
 import '../../logic/stats.dart';
 import '../../screens/habit_detail_screen.dart';
 import 'section_card.dart';
+import '../adaptive.dart';
 
 /// One habit on Today for [day]. Agent-built habits and check, count and
 /// metric habits show their A2UI surface inline; timed template habits
@@ -39,7 +40,7 @@ class HabitCard extends StatelessWidget {
       emoji: habit.emoji,
       title: habit.title,
       onTitleTap: () => _open(context),
-      trailing: Chip(label: Text(progressLabel(habit, entry)), visualDensity: VisualDensity.compact),
+      trailing: CountBadge(progressLabel(habit, entry)),
       children: [
         if (compact) ...[
           LinearProgressIndicator(
@@ -50,11 +51,13 @@ class HabitCard extends StatelessWidget {
           const SizedBox(height: 12),
           Wrap(spacing: 8, children: [
             FilledButton.icon(
+              style: compactButton,
               onPressed: () => _open(context),
               icon: const Icon(Icons.play_arrow),
               label: Text(habit.kind == HabitKind.practice ? 'Practise' : 'Start'),
             ),
             OutlinedButton(
+              style: compactButton,
               onPressed: () => state.logHabit(
                 day,
                 habit.id,

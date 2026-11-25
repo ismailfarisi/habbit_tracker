@@ -40,6 +40,15 @@ class OpenRouterException implements Exception {
   String toString() => message;
 }
 
+String? openRouterKeyProblem(String value) {
+  final key = value.trim();
+  if (key.isEmpty) return 'Add your OpenRouter API key in Settings first.';
+  if (!RegExp(r'^sk-or-[A-Za-z0-9_-]{16,}$').hasMatch(key)) {
+    return 'Invalid API key format. Paste the complete OpenRouter key from openrouter.ai/keys.';
+  }
+  return null;
+}
+
 /// Executes one tool call and returns the result (usually JSON) for the model.
 typedef ToolExecutor = Future<String> Function(ToolCall call);
 
@@ -63,9 +72,8 @@ class OpenRouterClient {
     void Function(String delta)? onText,
     double temperature = 0.7,
   }) async {
-    if (apiKey.trim().isEmpty) {
-      throw OpenRouterException('Add your OpenRouter API key in Settings first.');
-    }
+    final keyProblem = openRouterKeyProblem(apiKey);
+    if (keyProblem != null) throw OpenRouterException(keyProblem);
     final req = http.Request('POST', _endpoint)
       ..headers.addAll({
         'Authorization': 'Bearer ${apiKey.trim()}',
@@ -147,13 +155,19 @@ class OpenRouterClient {
     required List<Map<String, dynamic>> tools,
     required ToolExecutor execute,
     void Function(String delta)? onText,
+    Future<void> Function(List<ToolCall>)? beforeCalls,
+    void Function()? checkActive,
     int maxSteps = 8,
   }) async {
     for (var step = 0; step < maxSteps; step++) {
+      checkActive?.call();
       final msg = await turn([ChatMessage('system', system), ...history], tools: tools, onText: onText);
+      checkActive?.call();
       history.add(msg);
       if (msg.toolCalls.isEmpty) return msg.content;
+      await beforeCalls?.call(msg.toolCalls);
       for (final call in msg.toolCalls) {
+        checkActive?.call();
         String result;
         try {
           result = await execute(call);
@@ -163,7 +177,7 @@ class OpenRouterClient {
         history.add(ChatMessage('tool', result, toolCallId: call.id));
       }
     }
-    return '';
+    throw OpenRouterException('The coach reached the tool limit. Review the completed changes.');
   }
 
   /// Streams plain text (no tools).

@@ -7,8 +7,9 @@ import '../habits/habit.dart';
 import '../logic/stats.dart';
 import '../models.dart';
 import '../widgets/charts.dart';
-import '../widgets/coach_sheet.dart';
+import 'habit_screen_editor.dart';
 import 'progress_screen.dart' show ruleLabel;
+import '../widgets/ask_chat.dart';
 
 /// A habit's own screen: its A2UI surface for [day] (today by default),
 /// streak and consistency, charts of its metrics over time (per practice
@@ -47,15 +48,27 @@ class HabitDetailScreen extends StatelessWidget {
               IconButton(
                 tooltip: 'Ask coach',
                 icon: const Icon(Icons.auto_awesome),
-                onPressed: () => showCoachSheet(context, state, habit: habit),
+                onPressed: () => askChat(
+                  state,
+                  'Coach me on my "${habit.title}" habit (id ${habit.id}): how am I doing and what should I adjust?',
+                  display: 'Coach me on ${habit.title}',
+                  context: context,
+                ),
               ),
               PopupMenuButton<String>(
                 onSelected: (v) async {
                   final nav = Navigator.of(context);
+                  if (v == 'edit') {
+                    await nav.push(MaterialPageRoute<void>(
+                      builder: (_) => HabitScreenEditor(state: state, habit: habit, day: d),
+                    ));
+                    return;
+                  }
                   await state.archiveHabit(habit.id, archived: !habit.archived);
                   if (v == 'archive') nav.pop();
                 },
                 itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'edit', child: Text('Edit habit screen')),
                   PopupMenuItem(
                     value: habit.archived ? 'restore' : 'archive',
                     child: Text(habit.archived ? 'Restore habit' : 'Archive habit'),
@@ -91,7 +104,8 @@ class HabitDetailScreen extends StatelessWidget {
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                        DailyBarChart(values: metricHistory(state.logs, habit, daily.$2), target: habit.target),
+                        DailyBarChart(values: metricHistory(state.logs, habit, daily.$2, end: d), target: habit.target,
+                            end: d, unit: daily.$2 == 'minutes' ? 'minutes' : habit.unit),
                         const SizedBox(height: 4),
                         Text('Last 30 days · dashed line is the target of ${formatChartValue(habit.target)}',
                             style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
@@ -200,7 +214,7 @@ class MetricChartCard extends StatelessWidget {
           if (points.isEmpty)
             Text('No data yet', style: muted)
           else
-            LineChart(points: points),
+            LineChart(points: points, unit: field.unit),
         ]),
       ),
     );

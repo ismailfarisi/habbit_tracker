@@ -257,7 +257,7 @@ void main() {
       final tools = TaskTools(backend, clock: () => now);
       final history = [const ChatMessage('user', 'Read Quran after Fajr daily')];
       final text = StringBuffer();
-      final reply = await OpenRouterClient(apiKey: 'k', model: 'm', client: client).runAgent(
+      final reply = await OpenRouterClient(apiKey: 'sk-or-v1-synthetic-test-key-0001', model: 'm', client: client).runAgent(
         history,
         system: 'sys',
         tools: taskToolDefinitions,

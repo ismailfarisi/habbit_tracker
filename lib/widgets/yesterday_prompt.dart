@@ -6,6 +6,7 @@ import '../logic/tasks.dart';
 import '../models.dart';
 import 'cards/section_card.dart';
 import 'day_editor.dart';
+import 'adaptive.dart';
 
 const promptUntilHour = 12;
 const _dismissedKey = 'yesterdayPrompt.dismissed';
@@ -14,10 +15,11 @@ const _dismissedKey = 'yesterdayPrompt.dismissed';
 class MissedItem {
   final String id;
   final String emoji;
+  final IconData? icon;
   final String label;
   final String fixLabel;
   final Future<void> Function(BuildContext context) fix;
-  const MissedItem({required this.id, required this.emoji, required this.label, required this.fixLabel, required this.fix});
+  const MissedItem({required this.id, this.emoji = '', this.icon, required this.label, required this.fixLabel, required this.fix});
 }
 
 /// What was scheduled the day before [now] and not done: wake (not logged),
@@ -28,10 +30,10 @@ List<MissedItem> missedYesterday(AppState state, DateTime now) {
   final log = state.logFor(day);
   final usedBefore = state.logs.keys.any((k) => k.compareTo(dayKey(now)) < 0);
   return [
-    if (usedBefore && log.wakeAt == null)
+    if (usedBefore && state.settings.tracksOn('wake', day) && log.wakeAt == null)
       MissedItem(
         id: 'wake',
-        emoji: '☀️',
+        icon: Icons.wb_sunny_outlined,
         label: 'Wake-up time',
         fixLabel: 'Set time',
         fix: (context) async {
@@ -39,18 +41,18 @@ List<MissedItem> missedYesterday(AppState state, DateTime now) {
           if (picked != null) await state.setWake(day, DateTime(day.year, day.month, day.day, picked.hour, picked.minute));
         },
       ),
-    if (usedBefore)
+    if (usedBefore && state.settings.tracksOn('prayers', day))
       for (final p in prayerNames)
         if (!log.prayers.contains(p))
           MissedItem(
             id: 'prayer:$p',
-            emoji: '🕌',
+            icon: Icons.mosque_outlined,
             label: p,
             fixLabel: 'Prayed',
             fix: (_) => state.setPrayerStatus(day, p, prayerOnTime),
           ),
     for (final h in state.activeHabits)
-      if (h.isScheduledOn(day) && !habitDone(log.habits[h.id], h))
+      if (state.tracksItem(h.id) && h.isScheduledOn(day) && !habitDone(log.habits[h.id], h))
         MissedItem(
           id: 'habit:${h.id}',
           emoji: h.emoji,
@@ -59,10 +61,10 @@ List<MissedItem> missedYesterday(AppState state, DateTime now) {
           fix: (_) => state.logHabit(day, h.id, state.habitEntry(day, h.id).copy()..done = true),
         ),
     for (final t in state.tasks)
-      if (taskCountsOn(t, day) && !t.isDoneOn(day))
+      if (state.tracksItem(t.id, task: true) && taskCountsOn(t, day) && !t.isDoneOn(day))
         MissedItem(
           id: 'task:${t.id}',
-          emoji: '📝',
+          icon: Icons.task_alt,
           label: t.title,
           fixLabel: 'Done',
           fix: (_) => state.setTaskDone(t, day, true),
@@ -114,7 +116,7 @@ class _YesterdayPromptState extends State<YesterdayPrompt> {
     final shown = _all ? items : items.take(_shown).toList();
     return SectionCard(
       key: const ValueKey('yesterday-prompt'),
-      emoji: '🌙',
+      icon: Icons.nights_stay_outlined,
       title: yesterdayQuestion(items),
       children: [
         for (final i in shown)
@@ -122,20 +124,23 @@ class _YesterdayPromptState extends State<YesterdayPrompt> {
             key: ValueKey('missed-${i.id}'),
             contentPadding: EdgeInsets.zero,
             dense: true,
-            leading: Text(i.emoji, style: const TextStyle(fontSize: 20)),
+            minLeadingWidth: 24,
+            leading: i.icon != null
+                ? Icon(i.icon, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant)
+                : Text(i.emoji, style: const TextStyle(fontSize: 18)),
             title: Text(i.label),
-            trailing: FilledButton.tonal(onPressed: () => i.fix(context), child: Text(i.fixLabel)),
+            trailing: FilledButton.tonal(style: compactButton, onPressed: () => i.fix(context), child: Text(i.fixLabel)),
           ),
         if (!_all && items.length > _shown)
           TextButton(onPressed: () => setState(() => _all = true), child: Text('Show ${items.length - _shown} more')),
         const SizedBox(height: 4),
-        Wrap(spacing: 8, children: [
-          OutlinedButton.icon(
+        Wrap(spacing: 4, alignment: WrapAlignment.end, children: [
+          TextButton(onPressed: _dismiss, child: const Text('Dismiss')),
+          TextButton.icon(
             onPressed: () => showDayEditor(context, state, yesterday),
-            icon: const Icon(Icons.edit_calendar_outlined),
+            icon: const Icon(Icons.edit_calendar_outlined, size: 18),
             label: const Text('Review yesterday'),
           ),
-          TextButton(onPressed: _dismiss, child: const Text('Dismiss')),
         ]),
       ],
     );

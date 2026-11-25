@@ -7,6 +7,7 @@ import '../../logic/stats.dart';
 import '../../models.dart';
 import '../../screens/wake_challenge_screen.dart';
 import 'section_card.dart';
+import '../adaptive.dart';
 
 /// Today's wake-up card: goal, status, last night's sleep, the "I'm up"
 /// button (through the wake challenge when it is on) and, in the evening,
@@ -41,14 +42,7 @@ class _WakeCardState extends State<WakeCard> {
   }
 
   void _onRequest() {
-    final req = state.notifications.wakeChallengeRequest;
-    final day = req.value;
-    if (day == null || !mounted) return;
-    req.value = null;
-    final today = _now;
-    if (day != dayKey(today) || state.settings.wakeChallenge == WakeChallenge.off) return;
-    if (state.logFor(today).wakeAt != null) return;
-    openWakeChallenge(context, state);
+    if (mounted) openRequestedWake(context, state, _now);
   }
 
   String _jm(DateTime t) => DateFormat.jm().format(t);
@@ -78,9 +72,9 @@ class _WakeCardState extends State<WakeCard> {
     final evening = isBedtimeWindow(s, now);
 
     return SectionCard(
-      emoji: '☀️',
+      icon: Icons.wb_sunny_outlined,
       title: 'Wake up early',
-      trailing: Chip(label: Text(target), visualDensity: VisualDensity.compact),
+      trailing: CountBadge(target),
       children: [
         Text(status),
         if (sleepLine != null) ...[
@@ -107,6 +101,7 @@ class _WakeCardState extends State<WakeCard> {
           Text('🌙 Bedtime ${_jm(bedtimeFor(s, night))} for ${fmtSleepHours(s.sleepHours)} of sleep.'),
           const SizedBox(height: 8),
           OutlinedButton.icon(
+            style: compactButton,
             onPressed: () => state.setBedtime(night, DateTime.now()),
             icon: const Icon(Icons.bedtime_outlined),
             label: const Text('Going to bed'),
@@ -115,4 +110,17 @@ class _WakeCardState extends State<WakeCard> {
       ],
     );
   }
+}
+
+/// The notification must also work when the Wake card is collapsed on Today.
+void openRequestedWake(BuildContext context, AppState state, DateTime today) {
+  final req = state.notifications.wakeChallengeRequest;
+  final day = req.value;
+  if (day == null) return;
+  req.value = null;
+  if (!state.settings.tracks('wake') || day != dayKey(today) ||
+      state.settings.wakeChallenge == WakeChallenge.off || state.logFor(today).wakeAt != null) {
+    return;
+  }
+  openWakeChallenge(context, state);
 }

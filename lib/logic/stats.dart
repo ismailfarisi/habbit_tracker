@@ -15,7 +15,9 @@
 /// Everything here is pure: pass `today` in tests.
 library;
 
+import '../goals/goal.dart';
 import '../habits/habit.dart';
+import 'tracking.dart';
 import '../models.dart';
 import 'tasks.dart';
 
@@ -23,6 +25,8 @@ String dayKey(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
 DateTime dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+bool isForecastDay(DateTime day, {DateTime? today}) => dateOnly(day).isAfter(dateOnly(today ?? DateTime.now()));
 
 DateTime _prevDay(DateTime d) => DateTime(d.year, d.month, d.day - 1);
 DateTime _nextDay(DateTime d) => DateTime(d.year, d.month, d.day + 1);
@@ -69,6 +73,11 @@ double habitProgress(HabitEntry? entry, HabitDef def) {
   };
   return (have / target).clamp(0, 1).toDouble();
 }
+
+/// A logged practice counts as showing up even below the day's target.
+bool practisedHabit(HabitEntry? entry, HabitDef def) => entry != null &&
+    (habitDone(entry, def) || habitProgress(entry, def) > 0 ||
+      entry.sessions.isNotEmpty || entry.metrics.isNotEmpty);
 
 bool habitDoneOn(Map<String, DayLog> logs, HabitDef def, DateTime day) =>
     habitDone(logs[dayKey(day)]?.habits[def.id], def);
@@ -272,17 +281,21 @@ DayScore dayScore(
   Map<String, DayLog> logs, {
   List<HabitDef> habits = const [],
   List<Task> tasks = const [],
+  List<Goal> goals = const [],
 }) {
   final log = logs[dayKey(day)];
-  var done = (wakeDone(log, s) ? 1 : 0) + prayerNames.where((p) => log?.prayers.contains(p) ?? false).length;
-  var total = 1 + prayerNames.length;
+  final wake = s.tracksOn('wake', day);
+  final prayers = s.tracksOn('prayers', day);
+  var done = wake && wakeDone(log, s) ? 1 : 0;
+  if (prayers) done += prayerNames.where((p) => log?.prayers.contains(p) ?? false).length;
+  var total = (wake ? 1 : 0) + (prayers ? prayerNames.length : 0);
   for (final h in habits) {
-    if (h.archived || !h.isScheduledOn(day)) continue;
+    if (h.archived || !tracksItem(s, goals, h.id) || !h.isScheduledOn(day)) continue;
     total++;
     if (habitDone(log?.habits[h.id], h)) done++;
   }
   for (final t in tasks) {
-    if (!taskCountsOn(t, day)) continue;
+    if (!tracksItem(s, goals, t.id, task: true) || !taskCountsOn(t, day)) continue;
     total++;
     if (t.isDoneOn(day)) done++;
   }
@@ -296,11 +309,13 @@ StreakInfo perfectDayStreak(
   Map<String, DayLog> logs, {
   List<HabitDef> habits = const [],
   List<Task> tasks = const [],
+  List<Goal> goals = const [],
   DateTime? today,
 }) {
   final end = dateOnly(today ?? DateTime.now());
   return streakInfo(
-    done: (d) => dayScore(d, s, logs, habits: habits, tasks: tasks).perfect,
+    done: (d) => dayScore(d, s, logs, habits: habits, tasks: tasks, goals: goals).perfect,
+    scheduled: (d) => dayScore(d, s, logs, habits: habits, tasks: tasks, goals: goals).total > 0,
     start: _firstLogDay(logs, end),
     today: end,
     freezesPerMonth: s.freezesPerMonth,

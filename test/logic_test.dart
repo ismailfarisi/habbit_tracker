@@ -159,14 +159,14 @@ void main() {
         ];
         return http.StreamedResponse(Stream.fromIterable(chunks.map(utf8.encode)), 200);
       });
-      final or = OpenRouterClient(apiKey: 'k', model: 'm', client: client);
+      final or = OpenRouterClient(apiKey: 'sk-or-v1-synthetic-test-key-0001', model: 'm', client: client);
       expect(await or.complete([const ChatMessage('user', 'hi')]), 'Hello');
-      expect(seen.headers['Authorization'], 'Bearer k');
+      expect(seen.headers['Authorization'], 'Bearer sk-or-v1-synthetic-test-key-0001');
     });
 
     test('reports HTTP errors helpfully', () async {
       final client = MockClient((_) async => http.Response('{"error":{"message":"No auth"}}', 401));
-      final or = OpenRouterClient(apiKey: 'bad', model: 'm', client: client);
+      final or = OpenRouterClient(apiKey: 'sk-or-v1-simulated-revoked-key', model: 'm', client: client);
       expect(
         () => or.complete([const ChatMessage('user', 'hi')]),
         throwsA(predicate((e) => e.toString().contains('Invalid API key'))),
@@ -176,6 +176,13 @@ void main() {
     test('requires a key', () {
       final or = OpenRouterClient(apiKey: '', model: 'm');
       expect(() => or.complete([]), throwsA(isA<OpenRouterException>()));
+    });
+    test('rejects malformed keys without invoking the provider', () async {
+      var calls = 0;
+      final client = MockClient((_) async { calls++; return http.Response('', 500); });
+      final or = OpenRouterClient(apiKey: 'not-an-openrouter-key', model: 'm', client: client);
+      await expectLater(or.complete([]), throwsA(isA<OpenRouterException>()));
+      expect(calls, 0);
     });
   });
 }

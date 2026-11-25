@@ -74,10 +74,10 @@ class _DayEditorState extends State<DayEditor> {
       builder: (context, _) {
         final day = _day;
         final log = state.logFor(day);
-        final habits = state.activeHabits.where((h) => h.isScheduledOn(day)).toList();
-        final tasks = state.tasks.where((t) => taskCountsOn(t, day)).toList();
+        final habits = state.trackedHabits.where((h) => h.isScheduledOn(day)).toList();
+        final tasks = state.trackedTasks.where((t) => taskCountsOn(t, day)).toList();
         final times = prayerTimesFor(state.settings, day).times;
-        final score = dayScore(day, state.settings, state.logs, habits: state.habits, tasks: state.tasks);
+        final score = dayScore(day, state.settings, state.logs, habits: state.habits, tasks: state.tasks, goals: state.goals);
         final wake = wakeResult(log, state.settings);
         return ConstrainedBox(
           constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.85),
@@ -114,50 +114,54 @@ class _DayEditorState extends State<DayEditor> {
                   ),
                 ],
               ),
-              _Heading('Wake up'),
-              ListTile(
-                key: const ValueKey('day-wake'),
-                contentPadding: EdgeInsets.zero,
-                leading: const Text('☀️', style: TextStyle(fontSize: 22)),
-                title: Text(log.wakeAt == null ? 'Not logged' : 'Up at ${DateFormat.jm().format(log.wakeAt!)}'),
-                subtitle: Text(switch (wake) {
-                  WakeResult.none => 'Goal ${state.settings.wakeTime.format(context)}',
-                  WakeResult.onTime => 'On time',
-                  WakeResult.late => 'Later than the goal',
-                }),
-                onTap: () => _pickWake(log),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (log.wakeAt != null)
+              if (state.settings.tracksOn('wake', day)) ...[
+                _Heading('Wake up'),
+                ListTile(
+                  key: const ValueKey('day-wake'),
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Text('☀️', style: TextStyle(fontSize: 22)),
+                  title: Text(log.wakeAt == null ? 'Not logged' : 'Up at ${DateFormat.jm().format(log.wakeAt!)}'),
+                  subtitle: Text(switch (wake) {
+                    WakeResult.none => 'Goal ${state.settings.wakeTime.format(context)}',
+                    WakeResult.onTime => 'On time',
+                    WakeResult.late => 'Later than the goal',
+                  }),
+                  onTap: () => _pickWake(log),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (log.wakeAt != null)
+                        IconButton(
+                          tooltip: 'Clear wake time',
+                          icon: const Icon(Icons.clear),
+                          onPressed: () => state.setWake(day, null),
+                        ),
                       IconButton(
-                        tooltip: 'Clear wake time',
-                        icon: const Icon(Icons.clear),
-                        onPressed: () => state.setWake(day, null),
+                        tooltip: 'Set wake time',
+                        icon: const Icon(Icons.schedule),
+                        onPressed: () => _pickWake(log),
                       ),
-                    IconButton(
-                      tooltip: 'Set wake time',
-                      icon: const Icon(Icons.schedule),
-                      onPressed: () => _pickWake(log),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              _Heading('Prayers'),
-              for (final p in prayerNames)
-                _PrayerRow(
-                  key: ValueKey('prayer-$p'),
-                  name: p,
-                  time: times[p],
-                  status: _statusOf(log, p),
-                  onChanged: (s) => state.setPrayerStatus(day, p, s),
-                ),
+              ],
+              if (state.settings.tracksOn('prayers', day)) ...[
+                _Heading('Prayers'),
+                for (final p in prayerNames)
+                  _PrayerRow(
+                    key: ValueKey('prayer-$p'),
+                    name: p,
+                    time: times[p],
+                    status: _statusOf(log, p),
+                    onChanged: (s) => state.setPrayerStatus(day, p, s),
+                  ),
+              ],
               if (habits.isNotEmpty) _Heading('Habits'),
               for (final h in habits)
                 _HabitEditor(key: ValueKey('day-habit-${h.id}-${dayKey(day)}'), state: state, habit: h, day: day),
               if (tasks.isNotEmpty) _Heading('Routines'),
               for (final task in tasks)
-                CheckboxListTile(
+                CheckboxListTile.adaptive(
                   key: ValueKey('day-task-${task.id}'),
                   contentPadding: EdgeInsets.zero,
                   dense: true,

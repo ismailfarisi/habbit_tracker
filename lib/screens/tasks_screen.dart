@@ -17,7 +17,7 @@ class TaskSections extends StatelessWidget {
       listenable: state,
       builder: (context, _) {
         final now = DateTime.now();
-        final tasks = state.tasks;
+        final tasks = state.tasks.where((t) => state.goalFor(t.id) == null).toList();
         final today = tasksForDay(tasks, now);
         final upcoming = upcomingTasks(tasks, now);
         final repeating = tasks.where((x) => x.isRepeating).toList()
