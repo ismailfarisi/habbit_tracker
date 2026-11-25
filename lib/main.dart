@@ -57,6 +57,7 @@ class DailyDisciplineApp extends StatelessWidget {
     return ListenableBuilder(
       listenable: state,
       builder: (context, _) => MaterialApp(
+        key: ValueKey(state.dataGeneration),
         title: 'Daily Discipline',
         debugShowCheckedModeBanner: false,
         theme: appTheme(Brightness.light),

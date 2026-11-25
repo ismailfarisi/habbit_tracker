@@ -32,6 +32,10 @@ class MainActivity : FlutterActivity() {
                     val apps = launchableApps()
                     runOnUiThread { result.success(apps) }
                 }.start()
+                "clearDeviceData" -> {
+                    if (FocusGuardService.clearDeviceData(this)) result.success(null)
+                    else result.error("focus_clear", "Could not clear focus data", null)
+                }
                 "configure" -> {
                     store.setConfig(call.arguments as String)
                     result.success(null)

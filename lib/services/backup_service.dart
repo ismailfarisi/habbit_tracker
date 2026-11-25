@@ -10,8 +10,8 @@ import 'package:share_plus/share_plus.dart';
 import '../app_state.dart';
 import 'storage.dart';
 
-/// Backups of everything [Storage.exportJson] holds (settings, logs, tasks,
-/// habits; never the API key).
+/// Local snapshots and portable backups of everything [Storage.exportJson] holds (settings, logs, tasks,
+/// habits, goals and Money; optionally Chat, never API keys).
 ///
 /// * Export: a JSON file handed to the share sheet ([shareExport]).
 /// * Import: a JSON file picked by the user ([pickBackupFile]) or pasted text,
@@ -23,18 +23,33 @@ import 'storage.dart';
 class BackupService {
   static const keepDaily = 7;
   static const keepSafety = 3;
+  static const resetReason = 'before-reset';
   static const dailyReason = 'daily';
   static const safetyReason = 'before-restore';
 
   final Storage storage;
   final Future<Directory> Function() _documents;
+  final Future<Directory> Function() _temporary;
+  final bool _sandboxedPaths;
   final DateTime Function() _clock;
 
-  BackupService(this.storage, {Future<Directory> Function()? documents, DateTime Function()? clock})
+  BackupService(this.storage, {Future<Directory> Function()? documents, Future<Directory> Function()? temporary, DateTime Function()? clock})
       : _documents = documents ?? getApplicationDocumentsDirectory,
+        _sandboxedPaths = (Platform.isAndroid || Platform.isIOS) || (documents != null && temporary != null),
+        _temporary = temporary ?? getTemporaryDirectory,
         _clock = clock ?? DateTime.now;
 
   static AppLifecycleListener? _listener;
+
+  // A resumed app may start an automatic copy while a Settings operation is
+  // underway. Finish it before an erase, or take it from the new state after.
+  static Future<void> _pending = Future.value();
+
+  Future<T> _exclusive<T>(Future<T> Function() operation) {
+    final result = _pending.then((_) => operation());
+    _pending = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return result;
+  }
 
   /// Writes today's automatic backup now and whenever the app comes back to
   /// the foreground on a new day.
@@ -74,49 +89,83 @@ class BackupService {
   /// Writes today's backup unless there already is one, there is no data, or
   /// nothing changed since the last backup (so old copies are not pushed
   /// out by identical ones). Returns the new backup, if one was written.
-  Future<AutoBackup?> runDailyIfDue() async {
+  Future<AutoBackup?> runDailyIfDue() => _exclusive(() async {
     final now = _clock();
     final all = await automaticBackups();
     final daily = all.where((b) => b.reason == dailyReason).toList();
     if (daily.any((b) => _sameDay(b.at, now))) return null;
     if (storage.hasNoData) return null;
-    final raw = storage.exportJson(at: now);
+    final raw = storage.exportJson(at: now, includeChat: true);
     if (daily.isNotEmpty && _sameData(await daily.first.read(), raw)) return null;
     return _write(raw, now, dailyReason);
-  }
+  });
 
   /// Saves the current data as a backup now (skipped when there is none).
-  Future<AutoBackup?> snapshot({String reason = safetyReason}) async {
+  Future<AutoBackup?> snapshot({String reason = safetyReason}) => _exclusive(() => _snapshot(reason));
+
+  Future<AutoBackup?> _snapshot(String reason) async {
     if (storage.hasNoData) return null;
     final now = _clock();
-    return _write(storage.exportJson(at: now), now, reason);
+    return _write(storage.exportJson(at: now, includeChat: true), now, reason);
   }
 
   /// Replaces all data with the backup [raw], keeping a copy of the current
   /// data first. Throws [FormatException] for something that is not a backup;
   /// nothing changes in that case.
-  Future<void> restore(AppState state, String raw) async {
+  Future<void> restore(AppState state, String raw) => _exclusive(() async {
     Storage.describeBackup(raw);
-    await snapshot();
+    await _snapshot(safetyReason);
     await state.importBackup(raw);
-  }
+  });
 
   Future<AutoBackup> _write(String raw, DateTime at, String reason) async {
-    final f = File('${(await _dir()).path}/${AutoBackup.fileName(at, reason)}');
-    await f.writeAsString(raw, flush: true);
+    final dir = await _dir();
+    var f = File('${dir.path}/${AutoBackup.fileName(at, reason)}');
+    while (await f.exists()) {
+      at = at.add(const Duration(seconds: 1));
+      f = File('${dir.path}/${AutoBackup.fileName(at, reason)}');
+    }
+    final part = File('${f.path}.part');
+    await part.writeAsString(raw, flush: true);
+    await part.rename(f.path);
     await _prune();
     return AutoBackup(f, at, reason);
   }
 
   Future<void> _prune() async {
     final all = await automaticBackups();
-    for (final reason in [dailyReason, safetyReason]) {
+    for (final reason in [dailyReason, safetyReason, resetReason]) {
       final keep = reason == dailyReason ? keepDaily : keepSafety;
       for (final b in all.where((b) => b.reason == reason).skip(keep)) {
         await b.file.delete();
       }
     }
   }
+
+  /// Reset retains the local recovery folder. Erase removes it as well.
+  /// User-selected destinations outside the app and non-personal voice models
+  /// in the support directory are outside both operations.
+  Future<void> resetDevice(AppState state, {required bool keepRecovery}) => _exclusive(() async {
+    if (!_sandboxedPaths) throw UnsupportedError('Device erasure requires a mobile app sandbox');
+    if (keepRecovery) await _snapshot(resetReason);
+    final docs = await _documents();
+    if (await docs.exists()) {
+      await for (final entry in docs.list(followLinks: false)) {
+        if (keepRecovery && entry is Directory && entry.uri.pathSegments.where((s) => s.isNotEmpty).last == 'backups') {
+          continue;
+        }
+        await entry.delete(recursive: true);
+      }
+    }
+    final cache = await _temporary();
+    if (await cache.exists()) {
+      await for (final entry in cache.list(followLinks: false)) {
+        await entry.delete(recursive: true);
+      }
+    }
+    if (Platform.isIOS) await FilePicker.clearTemporaryFiles();
+    await state.resetAll();
+  });
 
   /// Writes an export file (to [dir], by default the temporary directory).
   Future<File> writeExportFile({Directory? dir}) async {

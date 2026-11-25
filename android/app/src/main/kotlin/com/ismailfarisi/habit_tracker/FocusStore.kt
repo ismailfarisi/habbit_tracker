@@ -14,6 +14,8 @@ import java.util.Locale
 class FocusStore(context: Context) {
     private val p = context.getSharedPreferences("focus_guard", Context.MODE_PRIVATE)
 
+    fun clear(): Boolean = p.edit().clear().commit()
+
     fun config(): FocusConfig = parse(p.getString("config", null))
 
     fun setConfig(json: String) {

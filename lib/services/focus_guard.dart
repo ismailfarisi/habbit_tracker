@@ -84,6 +84,10 @@ class ChannelFocusGuard implements FocusGuard {
   static const _ch = MethodChannel('daily_discipline/focus');
   List<InstalledApp>? _apps;
 
+  static Future<void> clearDeviceData() async {
+    if (!kIsWeb && Platform.isAndroid) await _ch.invokeMethod('clearDeviceData');
+  }
+
   @override
   bool get supported => !kIsWeb && Platform.isAndroid;
 

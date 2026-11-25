@@ -60,6 +60,7 @@ class FocusGuardService : AccessibilityService() {
     }
 
     override fun onServiceConnected() {
+        active = this
         store = FocusStore(this)
         registerReceiver(screen, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
@@ -68,6 +69,7 @@ class FocusGuardService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        active = null
         leave()
         runCatching { unregisterReceiver(screen) }
         super.onDestroy()
@@ -145,6 +147,19 @@ class FocusGuardService : AccessibilityService() {
             ?.let { ComponentName.unflattenFromString(it)?.packageName }
 
     companion object {
+        private var active: FocusGuardService? = null
+
+        fun clearDeviceData(context: Context): Boolean {
+            active?.apply {
+                handler.removeCallbacks(tick)
+                current = null
+                lastPkg = null
+                pausedPkg = null
+                leftPkg = null
+            }
+            return FocusStore(context).clear()
+        }
+
         const val TICK_MS = 10_000L
         const val REOPEN_MS = 3_000L
         private val IGNORED = setOf("com.android.systemui")

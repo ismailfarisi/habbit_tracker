@@ -120,6 +120,13 @@ class HomeWidgetService {
 
   static bool get enabled => debugEnabled ?? (!kIsWeb && Platform.isAndroid);
 
+  static Future<void> clear() async {
+    if (!enabled) return;
+    await HomeWidget.cancelScheduledWidgetUpdates(qualifiedAndroidName: homeWidgetProvider);
+    await HomeWidget.saveWidgetData<String>(homeWidgetDataKey, null, deleteFile: false);
+    await HomeWidget.updateWidget(qualifiedAndroidName: homeWidgetProvider);
+  }
+
   static bool _registered = false;
 
   /// Writes the widget timeline and redraws the widget. Never throws.
