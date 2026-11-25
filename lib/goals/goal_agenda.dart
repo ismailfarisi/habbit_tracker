@@ -22,7 +22,7 @@ class GoalAgenda extends StatelessWidget {
     final today = dateOnly(from);
     final rows = <Widget>[];
     for (var i = 0; i < days; i++) {
-      final d = today.add(Duration(days: i));
+      final d = DateTime(today.year, today.month, today.day + i);
       final items = goalPlanFor(state, goal, d, today: today);
       if (items.isEmpty) continue;
       rows.add(
@@ -49,7 +49,7 @@ class GoalAgenda extends StatelessWidget {
             trailing: open ? const Icon(Icons.chevron_right, size: 18) : null,
             onTap: open
                 ? () => Navigator.of(context).push(
-                    TaskGuideScreen.route(state, habitId: it.habit?.id, taskId: it.habit == null ? it.task?.id : null, day: d),
+                    TaskGuideScreen.route(state, habitId: it.habit?.id, taskId: it.habit == null ? it.task?.id : null, day: d, today: today),
                   )
                 : null,
           ),

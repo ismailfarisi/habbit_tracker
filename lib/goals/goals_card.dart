@@ -77,9 +77,9 @@ String _modeLabel(String mode) => switch (mode) {
 };
 
 /// One line for a goal habit: e.g. "Memorise Al-Mulk 3–4 · 15 min · Every day at 05:30".
-String goalHabitSubtitle(AppState state, HabitDef h, DateTime day) {
-  final q = state.quranFor(h, day);
-  final s = state.sessionForHabit(h, day);
+String goalHabitSubtitle(AppState state, HabitDef h, DateTime day, {DateTime? today}) {
+  final q = state.quranFor(h, day, today: today);
+  final s = state.sessionForHabit(h, day, today: today);
   return [
     if (s != null) 'Session ${s.$1}/${s.$2}: ${s.$3}',
     if (q != null) '${_modeLabel(q.mode)} ${passageLabel(q.surah, q.from, q.to)}',

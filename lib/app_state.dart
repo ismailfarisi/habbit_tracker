@@ -318,10 +318,10 @@ class AppState extends ChangeNotifier implements TaskBackend {
   /// one portion per day it was done; a repeating memorise/read task without
   /// a per-day size uses its first passage's length as the daily portion and
   /// continues to the end of the surah.
-  QuranRef? quranForTask(Task t, DateTime day) {
+  QuranRef? quranForTask(Task t, DateTime day, {DateTime? today}) {
     final ref = quranPlanForTask(t);
     if (ref == null || !t.isRepeating) return ref;
-    return ref.portion(taskSessionsBefore(t, day));
+    return ref.portion(taskSessionsBefore(t, day, today: today));
   }
 
   /// The whole passage a task works through, with its daily portion size.
@@ -334,15 +334,15 @@ class AppState extends ChangeNotifier implements TaskBackend {
 
   /// Sessions of a repeating task done before [day], plus those planned
   /// between today and a future [day].
-  int taskSessionsBefore(Task t, DateTime day) {
+  int taskSessionsBefore(Task t, DateTime day, {DateTime? today}) {
     final before = dayKey(day);
-    final planned = _plannedDays(day, (d) => t.isScheduledOn(d) && !t.doneDates.contains(dayKey(d)));
+    final planned = _plannedDays(day, (d) => t.isScheduledOn(d) && !t.doneDates.contains(dayKey(d)), today);
     return t.doneDates.where((d) => d.compareTo(before) < 0).length + planned;
   }
 
   /// Sessions of [h] done before [day], plus those planned until [day].
-  int habitSessionsBefore(HabitDef h, DateTime day) =>
-      habitDaysDoneBefore(h, day) + _plannedDays(day, (d) => h.isScheduledOn(d) && !habitDone(habitEntry(d, h.id), h));
+  int habitSessionsBefore(HabitDef h, DateTime day, {DateTime? today}) =>
+      habitDaysDoneBefore(h, day) + _plannedDays(day, (d) => h.isScheduledOn(d) && !habitDone(habitEntry(d, h.id), h), today);
 
   /// The planned session ([index], [count], [text]) for [day], if any.
   (int, int, String)? _session(List<String> s, int done) => s.isEmpty
@@ -351,16 +351,16 @@ class AppState extends ChangeNotifier implements TaskBackend {
       ? (done + 1, s.length, s[done])
       : null;
 
-  (int, int, String)? sessionForHabit(HabitDef h, DateTime day) =>
-      _session(h.guide?.sessions ?? const [], habitSessionsBefore(h, day));
+  (int, int, String)? sessionForHabit(HabitDef h, DateTime day, {DateTime? today}) =>
+      _session(h.guide?.sessions ?? const [], habitSessionsBefore(h, day, today: today));
 
-  (int, int, String)? sessionForTask(Task t, DateTime day) =>
-      t.isRepeating ? _session(t.guide?.sessions ?? const [], taskSessionsBefore(t, day)) : null;
+  (int, int, String)? sessionForTask(Task t, DateTime day, {DateTime? today}) =>
+      t.isRepeating ? _session(t.guide?.sessions ?? const [], taskSessionsBefore(t, day, today: today)) : null;
 
   /// Days from today up to (not including) a future [day] that [pending]
   /// says are still to do: their portions are assumed done by then.
-  int _plannedDays(DateTime day, bool Function(DateTime d) pending) {
-    var d = dateOnly(DateTime.now());
+  int _plannedDays(DateTime day, bool Function(DateTime d) pending, DateTime? today) {
+    var d = dateOnly(today ?? DateTime.now());
     final end = dateOnly(day);
     var n = 0;
     while (d.isBefore(end)) {
@@ -371,7 +371,8 @@ class AppState extends ChangeNotifier implements TaskBackend {
   }
 
   /// The Quran passage [h] asks for on [day] (its next daily portion).
-  QuranRef? quranFor(HabitDef h, DateTime day) => h.guide?.quran?.portion(habitSessionsBefore(h, day));
+  QuranRef? quranFor(HabitDef h, DateTime day, {DateTime? today}) =>
+      h.guide?.quran?.portion(habitSessionsBefore(h, day, today: today));
 
   Goal? goalById(String id) {
     for (final g in goals) {

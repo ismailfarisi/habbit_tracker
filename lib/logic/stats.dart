@@ -24,6 +24,8 @@ String dayKey(DateTime d) =>
 
 DateTime dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
+bool isForecastDay(DateTime day, {DateTime? today}) => dateOnly(day).isAfter(dateOnly(today ?? DateTime.now()));
+
 DateTime _prevDay(DateTime d) => DateTime(d.year, d.month, d.day - 1);
 DateTime _nextDay(DateTime d) => DateTime(d.year, d.month, d.day + 1);
 
