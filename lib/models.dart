@@ -109,15 +109,22 @@ class Settings {
   /// Optional setup prompts dismissed on Today.
   List<String> dismissedTodaySetup;
 
-  /// First date to score a built-in after the user opts into it.
-  Map<String, String> trackingSince;
+  /// Civil date of each built-in tracking change. Existing installs without
+  /// recorded choices keep the original scoring policy.
+  Map<String, Map<String, bool>> trackingHistory;
 
   bool tracks(String id) => !todayHidden.contains(id);
 
   bool tracksOn(String id, DateTime day) {
     if (!tracks(id)) return false;
-    final start = DateTime.tryParse(trackingSince[id] ?? '');
-    return start == null || !DateTime(day.year, day.month, day.day).isBefore(start);
+    final history = trackingHistory[id];
+    if (history == null) return true;
+    final key = day.toIso8601String().split('T').first;
+    String? latest;
+    for (final date in history.keys) {
+      if (date.compareTo(key) <= 0 && (latest == null || latest.compareTo(date) < 0)) latest = date;
+    }
+    return history[latest] ?? false;
   }
 
   /// Legacy (v1): only read when migrating the old articulation trainer
@@ -198,7 +205,7 @@ class Settings {
     List<String>? todayPinned,
     this.showMoneyShortcut = false,
     List<String>? dismissedTodaySetup,
-    Map<String, String>? trackingSince,
+    Map<String, Map<String, bool>>? trackingHistory,
     this.trainingTime = const TimeOfDay(hour: 7, minute: 0),
     this.trainingGoalMin = 15,
     this.model = 'openai/gpt-4o-mini',
@@ -226,7 +233,7 @@ class Settings {
   }) : todayHidden = todayHidden ?? [],
        todayPinned = todayPinned ?? [],
        dismissedTodaySetup = dismissedTodaySetup ?? [],
-       trackingSince = trackingSince ?? {},
+       trackingHistory = trackingHistory ?? {},
        manualTimes = manualTimes ?? Map.of(defaultManualTimes),
        focusApps = focusApps ?? [];
 
@@ -260,7 +267,7 @@ class Settings {
     'todayPinned': todayPinned,
     'showMoneyShortcut': showMoneyShortcut,
     'dismissedTodaySetup': dismissedTodaySetup,
-    'trackingSince': trackingSince,
+    if (trackingHistory.isNotEmpty) 'trackingHistory': trackingHistory,
     'trainingTime': fmtHm(trainingTime),
     'trainingGoalMin': trainingGoalMin,
     'model': model,
@@ -322,7 +329,11 @@ class Settings {
       todayPinned: [for (final v in (j['todayPinned'] as List? ?? const [])) '$v'],
       showMoneyShortcut: j['showMoneyShortcut'] == true,
       dismissedTodaySetup: [for (final v in (j['dismissedTodaySetup'] as List? ?? const [])) '$v'],
-      trackingSince: {for (final e in (j['trackingSince'] as Map? ?? const {}).entries) '${e.key}': '${e.value}'},
+      trackingHistory: {
+        for (final e in (j['trackingHistory'] as Map? ?? const {}).entries)
+          if (e.value is Map)
+            '${e.key}': {for (final d in (e.value as Map).entries) if (d.value is bool) '${d.key}': d.value as bool},
+      },
       trainingTime: parseHm(j['trainingTime'] as String? ?? '', fallback: d.trainingTime),
       trainingGoalMin: (j['trainingGoalMin'] as num?)?.toInt() ?? d.trainingGoalMin,
       model: (j['model'] as String?)?.trim().isNotEmpty == true ? j['model'] as String : d.model,

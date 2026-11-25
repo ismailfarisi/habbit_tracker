@@ -166,6 +166,10 @@ class HabitDef {
   /// 1 = Monday .. 7 = Sunday. Empty means every day.
   List<int> weekdays;
 
+  /// Individually planned rest dates (yyyy-MM-dd). The recurring pattern
+  /// and every other occurrence keep their original schedule.
+  Set<String> restDates;
+
   /// HH:mm, enables a reminder.
   String? reminder;
   StreakRule streakRule;
@@ -194,6 +198,7 @@ class HabitDef {
     this.target = 1,
     this.unit = '',
     List<int>? weekdays,
+    Set<String>? restDates,
     this.reminder,
     this.streakRule = StreakRule.neverMissTwice,
     this.createdByAi = false,
@@ -204,6 +209,7 @@ class HabitDef {
     this.templateId,
     this.guide,
   })  : weekdays = weekdays ?? [],
+        restDates = restDates ?? {},
         metricFields = metricFields ?? [],
         createdAt = createdAt ?? DateTime.now();
 
@@ -214,7 +220,8 @@ class HabitDef {
   bool isScheduledOn(DateTime day) {
     final d = DateTime(day.year, day.month, day.day);
     if (d.isBefore(DateTime(createdAt.year, createdAt.month, createdAt.day))) return false;
-    return weekdays.isEmpty || weekdays.contains(day.weekday);
+    return (weekdays.isEmpty || weekdays.contains(day.weekday)) &&
+        (restDates.isEmpty || !restDates.contains(d.toIso8601String().split('T').first));
   }
 
   String describeSchedule() {
@@ -233,6 +240,7 @@ class HabitDef {
         'target': target,
         'unit': unit,
         'weekdays': weekdays,
+        if (restDates.isNotEmpty) 'restDates': restDates.toList(),
         'reminder': reminder,
         'streakRule': streakRule.name,
         'createdByAi': createdByAi,
@@ -257,6 +265,7 @@ class HabitDef {
             for (final d in j['weekdays'] as List)
               if (d is num && d >= 1 && d <= 7) d.toInt(),
         ],
+        restDates: {if (j['restDates'] is List) ...(j['restDates'] as List).whereType<String>()},
         reminder: j['reminder'] as String?,
         streakRule: _enum(StreakRule.values, j['streakRule'], StreakRule.neverMissTwice),
         createdByAi: j['createdByAi'] == true,

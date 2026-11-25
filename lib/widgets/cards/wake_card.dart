@@ -119,6 +119,8 @@ void openRequestedWake(BuildContext context, AppState state, DateTime today) {
   if (day == null) return;
   req.value = null;
   if (!state.settings.tracks('wake') || day != dayKey(today) ||
-      state.settings.wakeChallenge == WakeChallenge.off || state.logFor(today).wakeAt != null) return;
+      state.settings.wakeChallenge == WakeChallenge.off || state.logFor(today).wakeAt != null) {
+    return;
+  }
   openWakeChallenge(context, state);
 }

@@ -13,10 +13,9 @@ import 'habit_detail_screen.dart';
 import '../widgets/adaptive.dart';
 import '../widgets/ask_chat.dart';
 import '../widgets/focus_settings.dart';
+import '../widgets/review_practice.dart';
 
-/// The Progress tab: streak tiles (current streak, rule, "N of last 30",
-/// freezes left), the weekly review and a 30-day grid of every tracked item
-/// whose cells open the day editor.
+/// Weekly practice and return history, with optional streak and grid views.
 class ProgressScreen extends StatelessWidget {
   final AppState state;
   const ProgressScreen({super.key, required this.state});
@@ -30,23 +29,17 @@ class ProgressScreen extends StatelessWidget {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            CalendarEntryCard(state: state),
-            const SizedBox(height: 12),
-            _StreakGrid(state: state, today: today),
-            const SizedBox(height: 12),
-            ScreenTimeCard(state: state),
             WeeklyReviewCard(
               state: state,
-              review: weeklyReview(
-                settings: state.settings,
-                logs: state.logs,
-                habits: state.habits,
-                tasks: state.tasks,
-                today: today,
-              ),
+              review: weeklyReview(settings: state.settings, logs: state.logs, habits: state.habits,
+                tasks: state.tasks, goals: state.goals, today: today),
             ),
+            _WeeklyList(state: state, today: today),
+            ExpansionTile(title: const Text('Streak details'), children: [_StreakGrid(state: state, today: today)]),
+            ExpansionTile(title: const Text('30-day overview'), children: [ProgressGrid(state: state, today: today)]),
             const SizedBox(height: 12),
-            ProgressGrid(state: state, today: today),
+            CalendarEntryCard(state: state),
+            ScreenTimeCard(state: state),
           ],
         );
       },
@@ -81,24 +74,24 @@ class _StreakGrid extends StatelessWidget {
     final first = firstLogDay(logs);
     bool builtIn(DateTime d) => first != null && !d.isBefore(first);
     bool wake(DayLog? l) => wakeDone(l, s);
-    final perfect = perfectDayStreak(s, logs, habits: state.habits, tasks: state.tasks, today: today);
+    final perfect = perfectDayStreak(s, logs, habits: state.habits, tasks: state.tasks, goals: state.goals, today: today);
     final tiles = [
-      StreakTileData('Early rising', logStreak(logs, wake, today: today), ruleLabel(StreakRule.strict),
-          consistency(logs, wake, today: today, scheduled: builtIn)),
-      StreakTileData('All 5 prayers', logStreak(logs, prayersDone, today: today), ruleLabel(StreakRule.strict),
-          consistency(logs, prayersDone, today: today, scheduled: builtIn)),
+      if (s.tracks('wake')) StreakTileData('Early rising', logStreak(logs, wake, today: today), ruleLabel(StreakRule.strict),
+          consistency(logs, wake, today: today, scheduled: (d) => builtIn(d) && s.tracksOn('wake', d))),
+      if (s.tracks('prayers')) StreakTileData('All 5 prayers', logStreak(logs, prayersDone, today: today), ruleLabel(StreakRule.strict),
+          consistency(logs, prayersDone, today: today, scheduled: (d) => builtIn(d) && s.tracksOn('prayers', d))),
       StreakTileData(
         'Perfect days',
         perfect,
         'Freezes',
         consistencyBy(
-          done: (d) => dayScore(d, s, logs, habits: state.habits, tasks: state.tasks).perfect,
-          scheduled: builtIn,
+          done: (d) => dayScore(d, s, logs, habits: state.habits, tasks: state.tasks, goals: state.goals).perfect,
+          scheduled: (d) => builtIn(d) && dayScore(d, s, logs, habits: state.habits, tasks: state.tasks, goals: state.goals).total > 0,
           today: today,
         ),
         freezesLeft: (s.freezesPerMonth - perfect.freezesUsedThisMonth).clamp(0, s.freezesPerMonth),
       ),
-      for (final h in state.activeHabits)
+      for (final h in state.trackedHabits)
         StreakTileData(
           '${h.emoji} ${h.title}',
           habitStreak(logs, h, today: today),
@@ -107,7 +100,7 @@ class _StreakGrid extends StatelessWidget {
           onTap: () => Navigator.of(context)
               .push(MaterialPageRoute<void>(builder: (_) => HabitDetailScreen(state: state, habitId: h.id))),
         ),
-      for (final r in state.tasks.where((x) => x.isRepeating))
+      for (final r in state.trackedTasks.where((x) => x.isRepeating))
         StreakTileData('📝 ${r.title}', taskStreak(r, today: today), ruleLabel(StreakRule.neverMissTwice),
             taskConsistency(r, today: today)),
     ];
@@ -173,41 +166,36 @@ class WeeklyReviewCard extends StatelessWidget {
     final t = Theme.of(context);
     final r = review;
     final f = DateFormat('d MMM');
-    final pct = (r.week.fraction * 100).round();
-    Widget line(IconData icon, String text) => Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Padding(
-              padding: const EdgeInsets.only(right: 10, top: 1),
-              child: Icon(icon, size: 18, color: t.colorScheme.onSurfaceVariant),
-            ),
-            Expanded(child: Text(text)),
-          ]),
-        );
+    final habits = state.trackedHabits;
+    final days = r.practiceDays;
+    final date = DateFormat('EEEE');
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Expanded(
-              child: Text('Weekly review', style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-            ),
-            Text('${f.format(r.start)} – ${f.format(r.end)}', style: t.textTheme.bodySmall),
-          ]),
-          if (r.isEmpty)
-            line(Icons.event_note_outlined, 'Log a few days to see your weekly review.')
-          else ...[
-            line(
-              Icons.bar_chart_rounded,
-              '${r.week.done} of ${r.week.total} done ($pct%)'
-                  '${r.previousWeek.total == 0 ? '' : ' · last week ${(r.previousWeek.fraction * 100).round()}%'}',
-            ),
-            if (r.best != null) line(Icons.emoji_events_outlined, 'Best: ${r.best!.label} ${r.best!.done}/${r.best!.total}'),
-            if (r.worst != null) line(Icons.trending_down_rounded, 'Needs work: ${r.worst!.label} ${r.worst!.done}/${r.worst!.total}'),
-            if (r.pattern != null) line(Icons.calendar_month_outlined, r.pattern!.describe()),
-            if (r.suggestion != null) line(Icons.lightbulb_outline, r.suggestion!),
-          ],
+          Text('Weekly review', style: t.textTheme.titleMedium),
+          Text('${f.format(r.start)} – ${f.format(r.end)}', style: t.textTheme.bodySmall),
           const SizedBox(height: 12),
+          Text(days.total == 0
+            ? 'Your week starts with your next practice.'
+            : 'You practised on ${days.done} of your ${days.total} planned ${days.total == 1 ? 'day' : 'days'}.',
+            style: t.textTheme.headlineSmall),
+          const SizedBox(height: 6),
+          Text(r.returnedOn != null ? 'You returned on ${date.format(r.returnedOn!)} after a break.'
+            : r.lastPractice != null ? 'Your most recent practice was on ${date.format(r.lastPractice!)}.'
+            : 'A short session counts as practice.'),
+          const SizedBox(height: 12),
+          if (habits.isNotEmpty)
+            OutlinedButton.icon(icon: const Icon(Icons.tune), label: const Text('Review a practice'),
+              onPressed: () async {
+                final habit = habits.length == 1 ? habits.single : await showModalBottomSheet<HabitDef>(
+                  context: context, showDragHandle: true,
+                  builder: (c) => SafeArea(child: ListView(shrinkWrap: true, children: [
+                    for (final h in habits) ListTile(title: Text(h.title), onTap: () => Navigator.pop(c, h)),
+                  ])),
+                );
+                if (context.mounted && habit != null) await reviewPractice(context, state, habit, r.end);
+              }),
           if (state.apiKey.isNotEmpty)
             FilledButton.tonalIcon(
               style: compactButton,
@@ -221,15 +209,51 @@ class WeeklyReviewCard extends StatelessWidget {
                     ),
               icon: const Icon(Icons.auto_awesome),
               label: const Text('Ask coach'),
-            )
-          else
-            Text(
-              'Add an OpenRouter API key in Settings to discuss your week with the coach.',
-              style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant),
             ),
         ]),
       ),
     );
+  }
+}
+
+/// The default history is a list with wrapping labels and day-sized edit
+/// targets. The compact chart is available separately as an overview.
+class _WeeklyList extends StatelessWidget {
+  final AppState state;
+  final DateTime today;
+  const _WeeklyList({required this.state, required this.today});
+
+  @override
+  Widget build(BuildContext context) {
+    final dates = [for (var i = 6; i >= 0; i--) DateTime(today.year, today.month, today.day - i)];
+    final rows = progressGridRows(state, dates);
+    if (rows.isEmpty) return const SizedBox.shrink();
+    return Card(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+        child: Text('This week by practice', style: Theme.of(context).textTheme.titleMedium)),
+      for (final row in rows)
+        Builder(builder: (context) {
+          final planned = row.cells.where((cell) => cell != GridCell.off).length -
+              (row.cells.last == GridCell.missed ? 1 : 0);
+          final practised = row.cells.where((cell) => cell != GridCell.off && cell != GridCell.missed).length;
+          return ExpansionTile(
+            key: PageStorageKey('weekly-${row.id}'),
+            title: Text(row.label),
+            subtitle: Text(planned == 0 ? (row.cells.last == GridCell.missed ? 'Planned today' : 'No practice planned this week') : '$practised of $planned planned days'),
+            children: [
+              for (var i = 0; i < dates.length; i++)
+                if (row.cells[i] != GridCell.off)
+                  ListTile(title: Text(DateFormat('EEEE, d MMM').format(dates[i])),
+                    subtitle: Text(switch (row.cells[i]) {
+                      GridCell.done => 'Done', GridCell.partial => 'Practised', GridCell.late => 'Logged late',
+                      GridCell.qada => 'Made up', _ => dates[i] == today ? 'Planned today' : 'No entry',
+                    }),
+                    trailing: const Icon(Icons.edit_outlined),
+                    onTap: () => showDayEditor(context, state, dates[i])),
+            ],
+          );
+        }),
+    ]));
   }
 }
 
@@ -249,19 +273,22 @@ class GridRow {
 List<GridRow> progressGridRows(AppState state, List<DateTime> days) {
   final s = state.settings;
   final logs = state.logs;
+  final start = firstLogDay(logs);
+  bool expected(String id, DateTime d) => s.tracksOn(id, d) && (start == null
+      ? !d.isBefore(dateOnly(DateTime.now())) : !d.isBefore(start));
   return [
-    GridRow('wake', 'Wake', [
+    if (s.tracks('wake')) GridRow('wake', 'Wake', [
       for (final d in days)
-        switch (wakeResult(logs[dayKey(d)], s)) {
+        if (!expected('wake', d)) GridCell.off else switch (wakeResult(logs[dayKey(d)], s)) {
           WakeResult.onTime => GridCell.done,
           WakeResult.late => GridCell.late,
           WakeResult.none => GridCell.missed,
         },
     ]),
-    for (final p in prayerNames)
+    if (s.tracks('prayers')) for (final p in prayerNames)
       GridRow('prayer:$p', p, [
         for (final d in days)
-          switch (logs[dayKey(d)]) {
+          if (!expected('prayers', d)) GridCell.off else switch (logs[dayKey(d)]) {
             final l? when l.prayers.contains(p) => switch (l.prayerStatus[p]) {
                 prayerLate => GridCell.late,
                 prayerQada => GridCell.qada,
@@ -270,7 +297,7 @@ List<GridRow> progressGridRows(AppState state, List<DateTime> days) {
             _ => GridCell.missed,
           },
       ]),
-    for (final h in state.activeHabits)
+    for (final h in state.trackedHabits)
       GridRow('habit:${h.id}', h.title, [
         for (final d in days)
           if (!h.isScheduledOn(d))
@@ -278,11 +305,11 @@ List<GridRow> progressGridRows(AppState state, List<DateTime> days) {
           else
             switch (logs[dayKey(d)]?.habits[h.id]) {
               final e when habitDone(e, h) => GridCell.done,
-              final e when habitProgress(e, h) > 0 => GridCell.partial,
+              final e when practisedHabit(e, h) => GridCell.partial,
               _ => GridCell.missed,
             },
       ]),
-    for (final r in state.tasks.where((t) => t.isRepeating))
+    for (final r in state.trackedTasks.where((t) => t.isRepeating))
       GridRow('task:${r.id}', r.title, [
         for (final d in days) !taskCountsOn(r, d) ? GridCell.off : (r.isDoneOn(d) ? GridCell.done : GridCell.missed),
       ]),
@@ -312,12 +339,10 @@ class ProgressGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context);
-    final s = state.settings;
     final dates = [for (var i = days - 1; i >= 0; i--) DateTime(today.year, today.month, today.day - i)];
     final rows = progressGridRows(state, dates);
-    final scores = dates.map((d) => dayScore(d, s, state.logs, habits: state.habits, tasks: state.tasks)).toList();
-    final total = scores.fold(0, (a, b) => a + b.total);
-    final pct = total == 0 ? 0 : scores.fold(0, (a, b) => a + b.done) / total;
+    final planned = rows.expand((r) => r.cells).where((c) => c != GridCell.off);
+    final practised = planned.where((c) => c != GridCell.missed).length;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -326,10 +351,10 @@ class ProgressGrid extends StatelessWidget {
             Expanded(
               child: Text('Last $days days', style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
             ),
-            Text('${(pct * 100).round()}% complete'),
+
           ]),
           const SizedBox(height: 4),
-          Text('Tap a day to edit it.', style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+          Text('Practice logged for $practised of ${planned.length} planned items. Tap a day to edit it.', style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
           const SizedBox(height: 8),
           for (final r in rows) _row(context, r, dates),
           const SizedBox(height: 8),

@@ -120,8 +120,9 @@ class BatteryTips extends StatelessWidget {
   const BatteryTips({super.key});
   @override
   Widget build(BuildContext context) {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android)
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
       return const SizedBox.shrink();
+    }
     return ExpansionTile(
       title: const Text('If reminders are silent'),
       children: [

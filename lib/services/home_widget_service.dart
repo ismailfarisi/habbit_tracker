@@ -138,7 +138,7 @@ class HomeWidgetService {
     Map<String, DayLog> logs, {
     List<HabitDef> habits = const [],
     List<Task> tasks = const [],
-  List<Goal> goals = const [],
+    List<Goal> goals = const [],
     DateTime? now,
   }) async {
     if (!enabled) return;

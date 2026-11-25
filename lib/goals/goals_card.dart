@@ -20,11 +20,14 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 String reviewPrompt(Goal g) => 'Let\'s review my goal "${g.title}" (id ${g.id}). What went well, and what should I adjust?';
 
+void startPlanGoal(BuildContext context, AppState state) => askChat(state, 'Help me set a new goal');
+
 /// Plan's Goals section: each goal's timeline and progress, and a nudge when
 /// a look-back is due.
 class GoalsCard extends StatelessWidget {
   final AppState state;
-  const GoalsCard({super.key, required this.state});
+  final bool showCreate;
+  const GoalsCard({super.key, required this.state, this.showCreate = true});
 
   @override
   Widget build(BuildContext context) {
@@ -45,9 +48,9 @@ class GoalsCard extends StatelessWidget {
                     style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                   ),
                 ),
-                TextButton.icon(
+                if (showCreate) TextButton.icon(
                   key: const Key('new-goal'),
-                  onPressed: () => askChat(state, 'Help me set a new goal'),
+                  onPressed: () => startPlanGoal(context, state),
                   icon: const Icon(Icons.flag_outlined),
                   label: const Text('New goal'),
                 ),
@@ -57,8 +60,7 @@ class GoalsCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Text(
-                  'Plan something bigger, a week or a few years long. The AI breaks it into milestones and tasks, '
-                  'and looks back with you along the way.',
+                  'Plan an outcome a week or a few years away. Add milestones and practices as you go.',
                   style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
                 ),
               ),
