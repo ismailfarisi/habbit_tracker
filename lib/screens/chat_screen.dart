@@ -11,7 +11,8 @@ import '../agent/habit_agent.dart';
 import '../agent/habit_surface.dart';
 import '../app_state.dart';
 import '../goals/goal.dart';
-import '../goals/goal_okf.dart';
+import '../agent/coach_access.dart';
+import 'settings_screen.dart';
 import '../services/openrouter.dart';
 import '../services/task_tools.dart';
 import '../services/voice_input.dart';
@@ -54,6 +55,7 @@ class ChatItem {
   String args = '';
   String? result;
   bool running = false;
+  bool actionable = true;
   List<ToolActivity> activities = const [];
   List<HabitProposal> proposals = const [];
   final Set<ToolActivity> undone = {};
@@ -69,13 +71,23 @@ class ChatThread {
 
   /// Set for a goal's own conversation.
   final String? goalId;
-  ChatThread(this.id, this.title, this.updatedAt, this.messages, {this.goalId});
+  final String draft;
+  final String? failure;
+  final bool replyOnly;
+  // Missing on old backups: keep the entire old transcript local.
+  final int? providerStart;
+  ChatThread(this.id, this.title, this.updatedAt, this.messages,
+      {this.goalId, this.draft = '', this.failure, this.replyOnly = false, this.providerStart});
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'title': title,
     'updatedAt': updatedAt.toIso8601String(),
     'messages': messages,
+    if (draft.isNotEmpty) 'draft': draft,
+    if (failure != null) 'failure': failure,
+    if (replyOnly) 'replyOnly': true,
+    'providerStart': providerStart,
     if (goalId != null) 'goalId': goalId,
   };
 
@@ -85,6 +97,10 @@ class ChatThread {
     DateTime.tryParse(j['updatedAt'] as String? ?? '') ?? DateTime.now(),
     ((j['messages'] as List?) ?? const []).cast<Map>().map((m) => m.cast<String, dynamic>()).toList(),
     goalId: j['goalId'] as String?,
+    draft: j['draft'] as String? ?? '',
+    failure: j['failure'] as String?,
+    replyOnly: j['replyOnly'] == true,
+    providerStart: j['providerStart'] as int?,
   );
 }
 
@@ -105,23 +121,72 @@ class AgUiChat extends ChangeNotifier {
   final history = <ChatMessage>[];
   final items = <ChatItem>[];
   bool busy = false;
-  String threadId = 'thread-${DateTime.now().millisecondsSinceEpoch}';
+  static int _serial = 0;
+  static String _id() => 'thread-${DateTime.now().microsecondsSinceEpoch}-${_serial++}';
+  String threadId = _id();
+  String draft = '';
+  String? failure;
+  bool _replyOnly = false;
+  int _providerStart = 0;
+  bool _disposed = false;
+  late CoachAccess access;
+  final int _generation;
+
+  bool get _active => !_disposed && _generation == state.dataGeneration;
+  String get scopeTitle => goal?.title ?? (goalId == null ? 'General chat' : 'Archived goal chat');
+  String get sharedLabel => [
+    'This chat',
+    ...access.goals.map((g) => g.title),
+    if (access.planner) 'planner',
+    if (access.money == CoachMoney.totals) 'Money totals',
+    if (access.money == CoachMoney.details) 'Money details and names',
+  ].join(' · ');
 
   /// The goal this conversation is about, if any; its context file is loaded.
   String? goalId;
   Goal? get goal => goalId == null ? null : state.goalById(goalId!);
   late final agent = LocalAgUiAgent(state, client: client);
 
-  AgUiChat(this.state, {this.client}) {
+  AgUiChat(this.state, {this.client}) : _generation = state.dataGeneration {
+    access = CoachAccess(state);
     _load();
   }
 
   String get systemPrompt {
     final now = DateTime.now();
     return '$plannerSystemPrompt\n$goalsPrompt\n$financePrompt\nWhen the user asks for feedback on speech practice:\n$coachSystemPrompt\n'
-        '${plannerContext(state.settings, now)}\n${goalsContext(state, now)}'
-        '${state.finance.isEmpty ? '' : '\n${state.finance.summary(now)}'}'
-        '${goal == null ? '' : '\n\n$goalChatPrompt\n${goalOkf(state, goal!, now)}'}';
+        'Current local time: ${DateFormat('EEEE yyyy-MM-dd HH:mm').format(now)}.\n'
+        '${access.planner ? plannerContext(state.settings, now) : ''}\n'
+        '${goal == null ? '' : goalChatPrompt}\n${access.context(now)}';
+  }
+
+  void share({required CoachMoney money, required bool planner, required Set<String> otherGoals}) {
+    if (!_active || busy) return;
+    final ids = {...otherGoals, ?goalId};
+    if (money == access.money && planner == access.planner &&
+        ids.length == access.goalIds.length && ids.containsAll(access.goalIds)) {
+      return;
+    }
+    _providerStart = history.length;
+    access = CoachAccess(state, money: money, planner: planner, goals: ids);
+    for (final it in items) {
+      it.actionable = false;
+    }
+    _save();
+    notifyListeners();
+  }
+
+  void setDraft(String text) {
+    if (!_active || busy || text == draft) return;
+    draft = text;
+    _save();
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 
   void _reset(String id, {String? goalId}) {
@@ -129,60 +194,124 @@ class AgUiChat extends ChangeNotifier {
     items.clear();
     threadId = id;
     this.goalId = goalId;
+    access = CoachAccess(state, goals: [ ?goalId ]);
+    _providerStart = 0;
+    draft = '';
+    failure = null;
+    _replyOnly = false;
     state.storage.prefs.setString(_currentKey, id);
   }
 
   void newChat() {
+    if (!_active || busy) return;
     _save();
-    _reset('thread-${DateTime.now().millisecondsSinceEpoch}');
+    _reset(_id());
     notifyListeners();
   }
 
   /// Reopens a saved conversation.
   void open(String id) {
-    if (busy || id == threadId) return;
+    if (!_active || busy || id == threadId) return;
     final th = threads.where((t) => t.id == id).firstOrNull;
     if (th == null) return;
     _save();
     _reset(id, goalId: th.goalId);
-    _restore(th.messages);
+    _restoreThread(th);
     notifyListeners();
   }
 
   /// Opens [id]'s own conversation, starting one if it has none yet.
   void openGoal(String id) {
-    if (busy || goalId == id) return;
+    if (!_active || busy || goalId == id) return;
     final th = threads.where((t) => t.goalId == id).firstOrNull;
     if (th != null) return open(th.id);
     _save();
-    _reset('thread-${DateTime.now().millisecondsSinceEpoch}', goalId: id);
+    _reset(_id(), goalId: id);
     notifyListeners();
   }
 
   void deleteThread(String id) {
+    if (!_active || busy) return;
     threads.removeWhere((t) => t.id == id);
-    if (id == threadId) _reset('thread-${DateTime.now().millisecondsSinceEpoch}');
+    if (id == threadId) _reset(_id());
     _persist();
     notifyListeners();
   }
 
   void _persist() => state.storage.prefs.setString(_threadsKey, jsonEncode([for (final t in threads) t.toJson()]));
 
-  Future<void> send(String text, {String? display}) async {
-    if (busy || text.trim().isEmpty) return;
-    items.add(ChatItem('user', 'u${items.length}', (display ?? text).trim()));
-    if (state.apiKey.isEmpty) {
-      items.add(ChatItem('error', 'e${items.length}', 'Add your OpenRouter API key in Settings to use the chat.'));
+  /// Cross-screen actions always stage the whole outbound text for review.
+  void stage(ChatRequest request) {
+    if (!_active || busy) return;
+    if (request.goalId == null) {
+      newChat();
+    } else {
+      openGoal(request.goalId!);
+    }
+    if (request.text.isEmpty) return;
+    if (draft.isNotEmpty && draft != request.text) {
+      _save();
+      _reset(_id(), goalId: request.goalId);
+    }
+    setDraft(request.text);
+  }
+
+  Future<void> send(String text, {String? display, ReviewChanges? review}) async {
+    if (!_active || busy || text.trim().isEmpty) return;
+    final key = state.apiKey;
+    draft = text;
+    if (key.trim().isEmpty) {
+      failure = 'Add your OpenRouter API key in Settings to send this draft.';
+      _save();
       notifyListeners();
       return;
     }
-    final mark = history.length;
-    history.add(ChatMessage('user', text.trim()));
+    final continuing = _replyOnly && failure != null;
+    final runHistory = history.sublist(_providerStart);
+    int copied = runHistory.length;
+    void copyNewMessages() {
+      history.addAll(runHistory.skip(copied));
+      copied = runHistory.length;
+    }
+    // After any recorded tool work, Retry can only request a text reply.
+    // The model cannot recreate a task even if it repeats a tool call.
+    final lastUser = runHistory.where((m) => m.role == 'user').lastOrNull;
+    if (!continuing || lastUser?.content != text.trim()) {
+      final user = ChatMessage('user', text.trim());
+      runHistory.add(user);
+      items.add(ChatItem('user', 'u${items.length}', user.content));
+    }
     busy = true;
-    notifyListeners();
+    failure = null;
+    final scope = access;
+    void checkActive() {
+      if (!_active || state.apiKey != key || !identical(scope, access)) {
+        throw StateError('Chat access changed. Review the draft before sending again.');
+      }
+    }
     final spoken = StringBuffer();
-    var failed = false;
-    await for (final e in agent.run(threadId: threadId, history: history, system: systemPrompt)) {
+    String? error;
+    _save();
+    notifyListeners();
+    await for (final e in agent.run(
+      threadId: threadId,
+      history: runHistory,
+      system: systemPrompt,
+      access: scope,
+      review: (calls) async {
+        checkActive();
+        final approved = await review?.call(calls) ?? false;
+        checkActive();
+        if (approved) {
+          _replyOnly = true;
+          _save();
+        }
+        return approved;
+      },
+      replyOnly: continuing,
+      checkActive: checkActive,
+    )) {
+      if (!_active) return;
       if (e is agui.TextMessageStartEvent) {
         items.add(ChatItem('assistant', e.messageId, ''));
       } else if (e is agui.TextMessageContentEvent) {
@@ -204,21 +333,34 @@ class AgUiChat extends ChangeNotifier {
             ..proposals = agent.proposals[e.toolCallId] ?? const [];
         }
       } else if (e is agui.RunErrorEvent) {
-        failed = true;
-        history.removeRange(mark, history.length);
-        items.add(ChatItem('error', 'e${items.length}', e.message));
+        error = e.message.replaceAll(key, '[key]');
+      }
+      if (e is agui.ToolCallResultEvent) {
+        copyNewMessages();
+        _save();
       }
       notifyListeners();
     }
+    if (!_active) return;
+    copyNewMessages();
     busy = false;
     for (final it in items) {
       it.running = false;
     }
-    notifyListeners();
-    if (!failed) {
-      _save();
+    if (error == null) {
+      draft = '';
+      _replyOnly = false;
       if (state.settings.readCoachReplies && spoken.isNotEmpty) unawaited(speakAloud(spoken.toString()));
+    } else {
+      failure = error;
+      // A failed request with no tool work remains an editable draft.
+      if (!_replyOnly && history.isNotEmpty && history.last.role == 'user') {
+        history.removeLast();
+        if (items.isNotEmpty && items.last.kind == 'user') items.removeLast();
+      }
     }
+    _save();
+    notifyListeners();
   }
 
   ChatItem? _item(String id) {
@@ -229,27 +371,55 @@ class AgUiChat extends ChangeNotifier {
   }
 
   Future<void> undo(ChatItem it, ToolActivity a) async {
-    if (a.undo == null || it.undone.contains(a)) return;
-    await a.undo!();
-    it.undone.add(a);
+    if (!_active || busy || !items.contains(it) || !it.actionable || a.undo == null ||
+        !access.allows(ToolCall(it.id, it.toolName ?? '', it.args)) ||
+        !it.activities.contains(a) || !it.undone.add(a)) {
+      return;
+    }
+    try {
+      await a.undo!();
+    } catch (_) {
+      it.undone.remove(a);
+      rethrow;
+    }
+    if (!_active) return;
+    _save();
     notifyListeners();
   }
 
   Future<void> accept(HabitProposal p) async {
-    if (p.accepted) return;
-    await state.upsertHabit(p.habit);
+    if (!_active || busy || p.accepted || !items.any((it) => it.actionable && it.proposals.contains(p))) return;
     p.accepted = true;
+    try {
+      await state.upsertHabit(p.habit);
+    } catch (_) {
+      p.accepted = false;
+      rethrow;
+    }
+    if (!_active) return;
+    _save();
     notifyListeners();
   }
 
   void _save() {
-    if (history.isEmpty) return;
+    if (!_active) return;
+    if (history.isEmpty && draft.isEmpty && failure == null) {
+      threads.removeWhere((t) => t.id == threadId);
+      _persist();
+      return;
+    }
     var start = 0;
     if (history.length > _maxMessages) {
       start = history.length - _maxMessages;
       while (start < history.length && history[start].role != 'user') {
         start++;
       }
+    }
+    final toolItems = items.where((it) => it.kind == 'tool').toList();
+    final saved = <ChatMessage, ChatItem>{};
+    var index = 0;
+    for (final m in history.where((m) => m.role == 'tool')) {
+      if (index < toolItems.length) saved[m] = toolItems[index++];
     }
     final messages = [
       for (final m in history.sublist(start))
@@ -261,15 +431,39 @@ class AgUiChat extends ChangeNotifier {
               for (final c in m.toolCalls) {'id': c.id, 'name': c.name, 'args': c.arguments},
             ],
           if (m.toolCallId != null) 'callId': m.toolCallId,
+          if (saved[m] case final item?) 'outcomes': [
+            for (final a in item.activities) {'label': a.label, 'undone': item.undone.contains(a)},
+            for (final p in item.proposals) {'label': '${p.accepted ? 'Added' : 'Proposed'} habit “${p.habit.title}”'},
+          ],
         },
     ];
-    final first = history.firstWhere((m) => m.role == 'user', orElse: () => history.first).content.trim();
+    final first = history.where((m) => m.role == 'user').firstOrNull?.content.trim() ?? draft.trim();
     final title = first.length > 60 ? '${first.substring(0, 57)}…' : first;
     threads.removeWhere((t) => t.id == threadId);
-    threads.insert(0, ChatThread(threadId, title.isEmpty ? 'Chat' : title, DateTime.now(), messages, goalId: goalId));
+    threads.insert(0, ChatThread(threadId, title.isEmpty ? 'Chat' : title, DateTime.now(), messages,
+      goalId: goalId, draft: draft,
+      failure: failure ?? (busy ? 'The reply was interrupted. Review the saved changes before retrying.' : null),
+      replyOnly: _replyOnly,
+      // Extra permissions expire on leaving/reopening a thread.
+      providerStart: access.money != CoachMoney.none || access.planner || access.goalIds.any((id) => id != goalId)
+          ? messages.length : (_providerStart - start).clamp(0, messages.length)));
     if (threads.length > _maxThreads) threads.removeRange(_maxThreads, threads.length);
     _persist();
     state.storage.prefs.setString(_currentKey, threadId);
+  }
+
+  void _restoreThread(ChatThread th) {
+    draft = th.draft;
+    failure = th.failure;
+    _replyOnly = th.replyOnly;
+    access = CoachAccess(state, goals: [ ?goalId ]);
+    _restore(th.messages);
+    _providerStart = (th.providerStart ?? history.length).clamp(0, history.length);
+    // A process can stop between a tool call and its result. Keep incomplete
+    // protocol messages on the device; a retry remains text-only.
+    if (_replyOnly && history.isNotEmpty && history.last.role != 'tool') {
+      _providerStart = history.length;
+    }
   }
 
   void _restore(List<Map<String, dynamic>> messages) {
@@ -293,7 +487,19 @@ class AgUiChat extends ChangeNotifier {
             ..toolName = c.name
             ..args = c.arguments);
         }
-        if (m.role == 'tool') _item(m.toolCallId ?? '')?.result = m.content;
+        if (m.role == 'tool') {
+          final item = _item(m.toolCallId ?? '');
+          if (item != null) {
+            item.result = m.content;
+            item.activities = [
+              for (final outcome in (j['outcomes'] as List? ?? const []).whereType<Map>())
+                ToolActivity('${outcome['label']}'),
+            ];
+            for (final (n, outcome) in (j['outcomes'] as List? ?? const []).whereType<Map>().indexed) {
+              if (outcome['undone'] == true) item.undone.add(item.activities[n]);
+            }
+          }
+        }
       }
     } catch (_) {
       history.clear();
@@ -323,7 +529,7 @@ class AgUiChat extends ChangeNotifier {
     if (current != null) {
       threadId = current.id;
       goalId = current.goalId;
-      _restore(current.messages);
+      _restoreThread(current);
     }
   }
 }
@@ -409,27 +615,41 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    _chat.addListener(_toBottom);
+    _input.text = _chat.draft;
+    _input.addListener(_draftChanged);
+    _chat.addListener(_onChat);
     widget.state.chatPrompt.addListener(_onPrompt);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _onPrompt());
+    WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _onPrompt(); });
   }
 
   void _onPrompt() {
     final p = widget.state.chatPrompt.value;
     if (p == null || _chat.busy) return;
     widget.state.chatPrompt.value = null;
-    if (p.goalId != null) _chat.openGoal(p.goalId!);
-    if (p.text.isNotEmpty && widget.state.apiKey.isNotEmpty) _chat.send(p.text, display: p.display);
+    _chat.stage(p);
   }
 
   @override
   void dispose() {
-    _chat.removeListener(_toBottom);
+    _chat.removeListener(_onChat);
+    _input.removeListener(_draftChanged);
     widget.state.chatPrompt.removeListener(_onPrompt);
     if (widget.chat == null) _chat.dispose();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  void _draftChanged() => _chat.setDraft(_input.text);
+
+  void _onChat() {
+    if (_input.text != _chat.draft) {
+      _input.value = TextEditingValue(text: _chat.draft, selection: TextSelection.collapsed(offset: _chat.draft.length));
+    }
+    if (!_chat.busy && widget.state.chatPrompt.value != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _onPrompt(); });
+    }
+    if (_chat.busy) _toBottom();
   }
 
   void _toBottom() => WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -440,11 +660,98 @@ class _ChatScreenState extends State<ChatScreen> {
     MaterialPageRoute<void>(builder: (_) => ChatHistoryScreen(chat: _chat)),
   );
 
-  void _send([String? text]) {
-    final t = text ?? _input.text;
-    if (t.trim().isEmpty) return;
-    _input.clear();
-    _chat.send(t);
+  void _send() {
+    if (_chat.busy || _input.text.trim().isEmpty) return;
+    FocusScope.of(context).unfocus();
+    _chat.send(_input.text, review: _review);
+  }
+
+  Future<bool> _review(List<ToolCall> calls) async {
+    if (!mounted || ModalRoute.of(context)?.isCurrent != true) return false;
+    return await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog.adaptive(
+        title: Text(calls.length == 1 ? 'Review change' : 'Review ${calls.length} changes'),
+        content: SingleChildScrollView(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            for (final call in calls) ...[
+              Text(call.name.replaceAll('_', ' '), style: Theme.of(context).textTheme.titleSmall),
+              SelectableText(_describeChange(jsonDecode(call.arguments.isEmpty ? '{}' : call.arguments))),
+              const SizedBox(height: 12),
+            ],
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Apply changes')),
+        ],
+      ),
+    ) ?? false;
+  }
+
+  String _describeChange(Object? value, [String indent = '']) {
+    if (value is Map) {
+      return value.entries.map((e) {
+        final field = '${e.key}'.replaceAll('_', ' ');
+        final v = e.value;
+        if (v is Map || v is List) return '$indent$field\n${_describeChange(v, '$indent  ')}';
+        if (field == 'id' && v is String) {
+          return '$indent$field: ${widget.state.taskById(v)?.title ?? widget.state.habitById(v)?.title ?? widget.state.goalById(v)?.title ?? v}';
+        }
+        return '$indent$field: $v';
+      }).join('\n');
+    }
+    if (value is List) return value.map((v) => _describeChange(v, indent)).join('\n');
+    return '$indent$value';
+  }
+
+  Future<void> _context() async {
+    final chat = _chat;
+    final state = widget.state;
+    var money = chat.access.money;
+    var planner = chat.access.planner;
+    final ids = {...chat.access.goalIds};
+    await showModalBottomSheet<void>(
+      context: context, isScrollControlled: true, useSafeArea: true,
+      builder: (context) => StatefulBuilder(builder: (context, change) {
+        final preview = CoachAccess(state, goals: ids, money: money, planner: planner);
+        final changed = money != chat.access.money || planner != chat.access.planner ||
+            ids.length != chat.access.goalIds.length || !ids.containsAll(chat.access.goalIds);
+        final sharedHistory = chat.history.skip(changed ? chat.history.length : chat._providerStart).toList();
+        return SafeArea(child: ListView(shrinkWrap: true, padding: const EdgeInsets.all(16), children: [
+          Text('Shared with OpenRouter', style: Theme.of(context).textTheme.titleLarge),
+          const Text('Send shares your draft and the selected context. Changes to records need your approval.'),
+          if (sharedHistory.isNotEmpty)
+            ExpansionTile(title: Text('Conversation (${sharedHistory.length} messages)'), children: [
+              for (final m in sharedHistory) ListTile(title: Text(m.role), subtitle: Text(
+                [m.content, for (final c in m.toolCalls) '${c.name} ${c.arguments}'].where((s) => s.isNotEmpty).join('\n'))),
+            ]),
+          CheckboxListTile(value: planner, title: const Text('Planner and progress'),
+            subtitle: const Text('Unlinked tasks and habits, notes, history, wake and prayer schedule, and check-in totals.'),
+            onChanged: (v) => change(() => planner = v == true)),
+          CheckboxListTile(value: money != CoachMoney.none, title: const Text('Redacted Money summary'),
+            subtitle: const Text('Monthly income, spending, savings and sadaqah totals.'),
+            onChanged: (v) => change(() => money = v == true ? CoachMoney.totals : CoachMoney.none)),
+          if (money != CoachMoney.none)
+            CheckboxListTile(value: money == CoachMoney.details, title: const Text('Include private Money details'),
+              subtitle: const Text('Names of people, debts, savings pots, transaction notes and zakat inputs. Enables Money changes.'),
+              onChanged: (v) => change(() => money = v == true ? CoachMoney.details : CoachMoney.totals)),
+          for (final g in state.goals.where((g) => !g.archived || g.id == chat.goalId))
+            CheckboxListTile(value: ids.contains(g.id), title: Text(g.title),
+              subtitle: Text(g.id == chat.goalId ? 'Selected goal · plan, notes and progress' : 'Share plan, notes and progress'),
+              onChanged: g.id == chat.goalId ? null : (v) => change(() { v == true ? ids.add(g.id) : ids.remove(g.id); })),
+          if (planner || ids.isNotEmpty || money != CoachMoney.none)
+            ExpansionTile(title: const Text('Preview selected context'), children: [
+              if (planner) SelectableText(plannerContext(state.settings, DateTime.now())),
+              if (ids.isNotEmpty || money != CoachMoney.none) SelectableText(preview.context(DateTime.now())),
+            ]),
+          FilledButton(onPressed: () {
+            chat.share(money: money, planner: planner, otherGoals: ids);
+            Navigator.pop(context);
+          }, child: const Text('Done')),
+        ]));
+      }),
+    );
   }
 
   @override
@@ -453,101 +760,48 @@ class _ChatScreenState extends State<ChatScreen> {
     return ListenableBuilder(
       listenable: Listenable.merge([state, _chat]),
       builder: (context, _) {
-        if (state.apiKey.isEmpty) {
-          return Center(
-            child: SingleChildScrollView(padding: const EdgeInsets.all(24), child: AiKeyEmptyState(state: state)),
-          );
-        }
         final t = Theme.of(context);
+        final offline = state.apiKey.trim().isEmpty;
         return Column(
           children: [
-            if (_chat.busy) const LinearProgressIndicator(minHeight: 2) else const SizedBox(height: 2),
-            Expanded(
-              child: _chat.items.isEmpty
-                  ? ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: [
-                        if (_chat.threads.isNotEmpty)
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton.icon(
-                              key: const Key('chat-history-empty'),
-                              onPressed: _openHistory,
-                              icon: const Icon(Icons.history, size: 18),
-                              label: const Text('Past chats'),
-                            ),
-                          ),
-                        Text(
-                          _chat.goal == null ? 'What should we set up?' : '${_chat.goal!.emoji} ${_chat.goal!.title}',
-                          key: const Key('chat-title'),
-                          style: t.textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _chat.goal == null
-                              ? 'Ask for a task, a habit with its own practice screen, a reminder, or a look at your progress.'
-                              : "This chat has the goal's plan, progress and notes loaded. Ask what to do today, change the plan, or tell it something to remember.",
-                          style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
-                        ),
-                        if (_chat.goal != null)
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton.icon(
-                              key: const Key('leave-goal-chat'),
-                              onPressed: _chat.newChat,
-                              icon: const Icon(Icons.chat_bubble_outline, size: 18),
-                              label: const Text('General chat instead'),
-                            ),
-                          ),
-                        const SizedBox(height: 16),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final s in _chat.goal == null ? _suggestions : _goalSuggestions)
-                              ActionChip(label: Text(s), onPressed: () => _send(s)),
-                          ],
-                        ),
-                      ],
-                    )
-                  : ListView.builder(
-                      key: const Key('chat-list'),
-                      controller: _scroll,
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                      itemCount: _chat.items.length + 1,
-                      itemBuilder: (context, i) {
-                        if (i == 0) {
-                          return Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              if (_chat.goal case final g?)
-                                Expanded(
-                                  child: Text(
-                                    '${g.emoji} ${g.title}',
-                                    key: const Key('chat-goal'),
-                                    overflow: TextOverflow.ellipsis,
-                                    style: t.textTheme.labelLarge?.copyWith(color: t.colorScheme.primary),
-                                  ),
-                                ),
-                              TextButton.icon(
-                                key: const Key('chat-history'),
-                                onPressed: _openHistory,
-                                icon: const Icon(Icons.history, size: 18),
-                                label: const Text('History'),
-                              ),
-                              TextButton.icon(
-                                key: const Key('new-chat'),
-                                onPressed: _chat.busy ? null : _chat.newChat,
-                                icon: const Icon(Icons.add_comment_outlined, size: 18),
-                                label: const Text('New chat'),
-                              ),
-                            ],
-                          );
-                        }
-                        return _ItemView(chat: _chat, item: _chat.items[i - 1]);
-                      },
-                    ),
-            ),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Row(children: [
+              Expanded(child: Text(_chat.scopeTitle, key: const Key('chat-title'), maxLines: 2,
+                overflow: TextOverflow.ellipsis, style: t.textTheme.titleMedium)),
+              IconButton(key: const Key('chat-history'), tooltip: 'History', icon: const Icon(Icons.history),
+                onPressed: _chat.busy ? null : _openHistory),
+              IconButton(key: const Key('new-chat'), tooltip: 'New chat', icon: const Icon(Icons.add_comment_outlined),
+                onPressed: _chat.busy ? null : _chat.newChat),
+            ])),
+            Align(alignment: Alignment.centerLeft, child: TextButton.icon(
+              key: const Key('chat-context'), onPressed: _chat.busy ? null : _context,
+              icon: const Icon(Icons.tune, size: 18),
+              label: Text('OpenRouter · ${_chat.sharedLabel}', maxLines: 2, overflow: TextOverflow.ellipsis),
+            )),
+            if (_chat.busy) const LinearProgressIndicator(minHeight: 2),
+            Expanded(child: ListView(
+              key: const Key('chat-list'), controller: _scroll,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              children: [
+                if (_chat.items.isEmpty && offline) AiKeyEmptyState(state: state),
+                if (_chat.items.isEmpty && !offline) ...[
+                  Text(_chat.goal == null ? 'What should we set up?' : 'Ask about your plan', style: t.textTheme.titleLarge),
+                  const SizedBox(height: 12),
+                  Wrap(spacing: 8, runSpacing: 4, children: [
+                    for (final s in _chat.goal == null ? _suggestions : _goalSuggestions)
+                      ActionChip(label: Text(s), onPressed: () => _chat.setDraft(s)),
+                  ]),
+                ],
+                for (final it in _chat.items) _ItemView(chat: _chat, item: it),
+                if (_chat.failure case final error?)
+                  ListTile(contentPadding: EdgeInsets.zero, title: Text(error), subtitle: Wrap(spacing: 8, children: [
+                    TextButton(onPressed: offline || _chat.busy ? null : _send,
+                      child: Text(_chat._replyOnly ? 'Retry reply' : 'Retry')),
+                    TextButton(onPressed: () => openSettings(context, state, aiKeyOnly: true), child: const Text('Settings')),
+                  ])),
+                if (offline && _chat.items.isNotEmpty && _chat.failure == null)
+                  TextButton(onPressed: () => openSettings(context, state, aiKeyOnly: true), child: const Text('Add AI key')),
+              ],
+            )),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
               child: Row(
@@ -556,6 +810,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     child: TextField(
                       key: const Key('chat-input'),
                       controller: _input,
+                      readOnly: _chat.busy,
                       minLines: 1,
                       maxLines: 4,
                       textInputAction: TextInputAction.send,
@@ -563,7 +818,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       decoration: InputDecoration(
                         hintText: 'Message your coach',
                         border: const OutlineInputBorder(),
-                        suffixIcon: VoiceInputButton(key: const Key('chat-tab-voice'), controller: _input),
+                        suffixIcon: _chat.busy ? null : VoiceInputButton(key: const Key('chat-tab-voice'), controller: _input),
                       ),
                     ),
                   ),
@@ -571,7 +826,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   IconButton.filled(
                     key: const Key('chat-send'),
                     tooltip: 'Send',
-                    onPressed: _chat.busy ? null : _send,
+                    onPressed: _chat.busy || offline || _input.text.trim().isEmpty ? null : _send,
                     icon: const Icon(Icons.send),
                   ),
                 ],
@@ -673,10 +928,10 @@ class _ItemView extends StatelessWidget {
                     style: bold.copyWith(decoration: item.undone.contains(a) ? TextDecoration.lineThrough : null),
                   ),
                 ),
-                if (a.undo != null)
+                if (a.undo != null && item.actionable)
                   TextButton(
                     style: compactButton,
-                    onPressed: item.undone.contains(a) ? null : () => chat.undo(item, a),
+                    onPressed: chat.busy || item.undone.contains(a) ? null : () => chat.undo(item, a),
                     child: Text(item.undone.contains(a) ? 'Undone' : 'Undo'),
                   ),
               ],
@@ -709,7 +964,7 @@ class _ItemView extends StatelessWidget {
                           )
                         : FilledButton.icon(
                             style: compactButton,
-                            onPressed: () => chat.accept(p),
+                            onPressed: chat.busy || !item.actionable ? null : () => chat.accept(p),
                             icon: const Icon(Icons.add),
                             label: const Text('Add habit'),
                           ),

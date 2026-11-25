@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:habit_tracker/agent/habit_agent.dart';
+import 'package:habit_tracker/agent/coach_access.dart';
 import 'package:habit_tracker/agent/habit_catalog.dart';
 import 'package:habit_tracker/agent/habit_surface.dart';
 import 'package:habit_tracker/agent/habit_templates.dart';
@@ -68,6 +69,7 @@ void main() {
         state,
         client: () => OpenRouterClient(apiKey: 'sk-or-v1-synthetic-test-key-0001', model: 'm', client: fakeModel(turns, requests)),
         clock: () => now,
+        access: CoachAccess(state, planner: true),
         onProposal: proposals?.add,
         onActivity: activity?.add,
       );
@@ -85,7 +87,7 @@ void main() {
           {'content': 'I built a practice habit for you.'},
         ],
       ], requests: requests)
-          .run(history, system: 'sys');
+          .run(history, system: 'sys', review: (_) async => true);
 
       expect(reply, 'I built a practice habit for you.');
       final h = state.habits.single;
@@ -126,7 +128,7 @@ void main() {
         [
           {'content': 'Done.'},
         ],
-      ]).run(history, system: 'sys');
+      ]).run(history, system: 'sys', review: (_) async => true);
 
       final first = toolResult(history, 0);
       expect(first['ok'], isFalse);
@@ -144,7 +146,7 @@ void main() {
         [
           {'content': 'Sorry.'},
         ],
-      ]).run(history, system: 'sys');
+      ]).run(history, system: 'sys', review: (_) async => true);
       expect(state.habits, isEmpty);
     });
 
@@ -159,7 +161,7 @@ void main() {
           {'content': 'Tap Add habit.'},
         ],
       ], proposals: proposals);
-      await a.run(history, system: 'sys');
+      await a.run(history, system: 'sys', review: (_) async => true);
       expect(state.habits, isEmpty);
       expect(toolResult(history)['status'], 'proposed');
       final p = proposals.single;
@@ -178,7 +180,7 @@ void main() {
         [
           {'content': 'Ok'},
         ],
-      ]).run(history, system: 'sys');
+      ]).run(history, system: 'sys', review: (_) async => true);
       expect(state.tasks.single.title, 'Call mum');
       expect(state.habits, isEmpty);
     });
@@ -286,7 +288,7 @@ void main() {
     tester.view.physicalSize = const Size(420, 2400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await state.setApiKey('k');
+    await state.setApiKey('sk-or-v1-synthetic-test-key-0001');
     final chat = AssistantChat(
       state,
       systemPrompt: () => 'sys',

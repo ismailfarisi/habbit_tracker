@@ -351,9 +351,16 @@ class FinanceTools {
         } catch (e) {
           return _err('wrong value type: $e');
         }
+        final applied = next.toJson();
         await state.setSettings(next);
         onActivity?.call(
-          ToolActivity('Changed ${changes.keys.join(', ')}', undo: () => state.setSettings(Settings.fromJson(before))),
+          ToolActivity('Changed ${changes.keys.join(', ')}', undo: () {
+            final current = state.settings.toJson();
+            for (final key in changes.keys.cast<String>()) {
+              if (current[key] == applied[key]) current[key] = before[key];
+            }
+            return state.setSettings(Settings.fromJson(current));
+          }),
         );
         return jsonEncode({
           'ok': true,

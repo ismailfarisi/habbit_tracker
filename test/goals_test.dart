@@ -86,7 +86,10 @@ void main() {
     expect(s.storage.loadGoals().single.id, g.id);
     expect(goalsContext(s, now), contains('Memorise Juz Amma'));
 
-    await acts.single.undo!();
+    expect(acts.where((a) => a.label.contains('Learn 3 ayat')), hasLength(1));
+    for (final a in acts.reversed) {
+      await a.undo!();
+    }
     expect(s.goals, isEmpty);
     expect(s.tasks, isEmpty);
   });
@@ -106,6 +109,7 @@ void main() {
     );
     final g = s.goals.single;
     expect(g.cadence, ReviewCadence.weekly);
+    acts.clear();
     await tools.execute(
       call('update_goal', {
         'id': g.id,
@@ -120,7 +124,9 @@ void main() {
     expect(g.progress(s.tasks), 1.0);
     expect(g.taskIds, hasLength(1));
 
-    await acts.last.undo!();
+    for (final a in acts.reversed) {
+      await a.undo!();
+    }
     final restored = s.goalById(g.id)!;
     expect(restored.end, '2026-11-26');
     expect(restored.milestones.single.done, isFalse);
@@ -226,7 +232,7 @@ void main() {
     });
     final agent = LocalAgUiAgent(s, client: () => OpenRouterClient(apiKey: 'sk-or-v1-synthetic-test-key-0001', model: 'm', client: client));
     final events = await agent
-        .run(threadId: 't', history: [const ChatMessage('user', 'Lose 5 kg by Ramadan')], system: 'sys')
+        .run(review: (_) async => true, threadId: 't', history: [const ChatMessage('user', 'Lose 5 kg by Ramadan')], system: 'sys')
         .toList();
     final start = events.whereType<agui.ToolCallStartEvent>().single;
     expect(start.toolCallName, 'create_goal');

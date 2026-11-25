@@ -47,7 +47,7 @@ void main() {
 
   Future<AppState> state() async {
     final s = await loadState({'settings.v1': jsonEncode({'onboarded': true})});
-    s.apiKey = 'k';
+    s.apiKey = 'sk-or-v1-synthetic-test-key-0001';
     return s;
   }
 
@@ -55,7 +55,7 @@ void main() {
     final s = await state();
     final agent = LocalAgUiAgent(s, client: fakeModel());
     final events = await agent
-        .run(threadId: 't', history: [const ChatMessage('user', 'Remind me to call mum tomorrow at 8pm')], system: 'sys')
+        .run(review: (_) async => true, threadId: 't', history: [const ChatMessage('user', 'Remind me to call mum tomorrow at 8pm')], system: 'sys')
         .toList();
     expect(events.map((e) => e.runtimeType), [
       agui.RunStartedEvent,
@@ -80,12 +80,15 @@ void main() {
     final chat = AgUiChat(s, client: fakeModel());
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: ChatScreen(state: s, chat: chat))));
     await tester.enterText(find.byKey(const Key('chat-input')), 'Remind me to call mum tomorrow at 8pm');
-    await tester.runAsync(() async {
-      await tester.tap(find.byKey(const Key('chat-send')));
-      while (chat.busy || chat.items.length < 2) {
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-      }
-    });
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('chat-send')));
+    for (var i = 0; i < 20 && find.text('Review change').evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Review change'), findsOneWidget);
+    expect(s.tasks, isEmpty);
+    await tester.tap(find.text('Apply changes'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('tool-call1')), findsOneWidget);
     expect(find.textContaining('Added it.'), findsOneWidget);

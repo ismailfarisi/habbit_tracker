@@ -87,7 +87,9 @@ class TaskTools {
   /// Called for each change so the UI can show it (with undo).
   final void Function(ToolActivity activity)? onActivity;
 
-  TaskTools(this.backend, {this.onActivity, DateTime Function()? clock}) : clock = clock ?? DateTime.now;
+  final bool Function(String id)? visible;
+
+  TaskTools(this.backend, {this.onActivity, this.visible, DateTime Function()? clock}) : clock = clock ?? DateTime.now;
 
   Future<String> execute(ToolCall call) async {
     Map<String, dynamic> args;
@@ -202,14 +204,14 @@ class TaskTools {
   Task? _find(Map<String, dynamic> a) {
     final id = a['id']?.toString();
     for (final t in backend.tasks) {
-      if (t.id == id) return t;
+      if (t.id == id && (visible?.call(t.id) ?? true)) return t;
     }
     return null;
   }
 
   Future<String> _list(Map<String, dynamic> a) async {
     final includeDone = a['include_completed'] == true;
-    final list = backend.tasks.where((t) => includeDone || !t.isOneOffDone).take(100).map(_summary).toList();
+    final list = backend.tasks.where((t) => (visible?.call(t.id) ?? true) && (includeDone || !t.isOneOffDone)).take(100).map(_summary).toList();
     return jsonEncode({'ok': true, 'count': list.length, 'tasks': list});
   }
 
@@ -230,14 +232,15 @@ class TaskTools {
       if (f.containsKey('weekdays')) t.weekdays = f['weekdays'] as List<int>;
       if (t.repeat == Repeat.weekly && t.weekdays.isEmpty) t.weekdays = [clock().weekday];
     });
+    final applied = t.copy();
     onActivity?.call(ToolActivity('Updated “${t.title}” · ${t.describeSchedule()}', undo: () async {
       await backend.updateTask(t, (x) {
-        x.title = before.title;
-        x.notes = before.notes;
-        x.date = before.date;
-        x.time = before.time;
-        x.repeat = before.repeat;
-        x.weekdays = before.weekdays;
+        if (x.title == applied.title) x.title = before.title;
+        if (x.notes == applied.notes) x.notes = before.notes;
+        if (x.date == applied.date) x.date = before.date;
+        if (x.time == applied.time) x.time = before.time;
+        if (x.repeat == applied.repeat) x.repeat = before.repeat;
+        if (jsonEncode(x.weekdays) == jsonEncode(applied.weekdays)) x.weekdays = before.weekdays;
       });
     }));
     return jsonEncode({'ok': true, 'task': _summary(t)});
@@ -249,8 +252,11 @@ class TaskTools {
     final d = (a['date'] as String?)?.trim();
     if (d != null && d.isNotEmpty && !isValidDate(d)) return _err('date must be YYYY-MM-DD');
     final day = (d == null || d.isEmpty) ? clock() : DateTime.parse(d);
+    final alreadyDone = t.isDoneOn(day);
     await backend.setTaskDone(t, day, true);
-    onActivity?.call(ToolActivity('Completed “${t.title}”', undo: () => backend.setTaskDone(t, day, false)));
+    onActivity?.call(ToolActivity('Completed “${t.title}”', undo: alreadyDone ? null : () async {
+      await backend.updateTask(t, (current) => current.doneDates.remove(dayKey(day)));
+    }));
     return jsonEncode({'ok': true, 'task': _summary(t)});
   }
 

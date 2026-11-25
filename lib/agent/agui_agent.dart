@@ -7,6 +7,7 @@ import '../app_state.dart';
 import '../services/openrouter.dart';
 import '../services/task_tools.dart';
 import 'habit_agent.dart';
+import 'coach_access.dart';
 
 /// The on-device agent exposed as an AG-UI event stream. The chat screen
 /// only consumes standard AG-UI events (run, text message and tool call
@@ -26,6 +27,10 @@ class LocalAgUiAgent {
     required String threadId,
     required List<ChatMessage> history,
     required String system,
+    CoachAccess? access,
+    ReviewChanges? review,
+    bool replyOnly = false,
+    void Function()? checkActive,
   }) {
     final out = StreamController<agui.BaseEvent>();
     final runId = 'run-${DateTime.now().microsecondsSinceEpoch}';
@@ -37,9 +42,12 @@ class LocalAgUiAgent {
       open = null;
     }
 
+    activities.clear();
+    proposals.clear();
     final agent = HabitAgent(
       state,
       client: client,
+      access: access ?? CoachAccess(state),
       onActivity: (a) => call == null ? null : (activities[call!] ??= []).add(a),
       onProposal: (p) => call == null ? null : (proposals[call!] ??= []).add(p),
     );
@@ -49,6 +57,9 @@ class LocalAgUiAgent {
         await agent.run(
           history,
           system: system,
+          review: review,
+          replyOnly: replyOnly,
+          checkActive: checkActive,
           onText: (delta) {
             if (delta.isEmpty) return;
             if (open == null) {
@@ -60,6 +71,8 @@ class LocalAgUiAgent {
           onToolStart: (c) {
             closeText();
             call = c.id;
+            activities.remove(c.id);
+            proposals.remove(c.id);
             out
               ..add(agui.ToolCallStartEvent(toolCallId: c.id, toolCallName: c.name))
               ..add(agui.ToolCallArgsEvent(toolCallId: c.id, delta: c.arguments.isEmpty ? '{}' : c.arguments))
