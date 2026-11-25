@@ -18,6 +18,7 @@ import '../widgets/cards/wake_card.dart';
 import '../widgets/yesterday_prompt.dart';
 import 'habit_detail_screen.dart';
 import 'home_screen.dart';
+import 'settings_screen.dart';
 import '../widgets/adaptive.dart';
 import '../goals/goal.dart';
 import '../finance/money_screen.dart';
@@ -232,7 +233,7 @@ class _TodayScreenState extends State<TodayScreen> {
                 icon: Icons.location_off_outlined,
                 text: 'Set your location for accurate prayer times. Using default times for now.',
                 action: 'Set up',
-                onTap: () => widget.onNavigate(HomeScreen.settingsTab),
+                onTap: () => openSettings(context, widget.state, section: SettingsSection.prayers),
               ),
             YesterdayPrompt(state: widget.state, now: now),
             for (final i in pending) _card(i, now),

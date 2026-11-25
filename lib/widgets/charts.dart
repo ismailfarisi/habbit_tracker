@@ -20,11 +20,36 @@ class ChartPoint {
 
 String formatChartValue(num v) => v == v.roundToDouble() ? v.round().toString() : v.toStringAsFixed(1);
 
+class ChartValues extends StatelessWidget {
+  final List<String> rows;
+  const ChartValues({super.key, required this.rows});
+
+  factory ChartValues.days(List<num?> values, DateTime end, String unit) {
+    final date = DateFormat.yMMMEd();
+    return ChartValues(rows: [
+      for (var i = 0; i < values.length; i++)
+        '${date.format(DateTime(end.year, end.month, end.day + i + 1 - values.length))}: '
+        '${values[i] == null ? 'Not logged' : '${formatChartValue(values[i]!)} $unit'.trimRight()}',
+    ]);
+  }
+
+  @override
+  Widget build(BuildContext context) => ExpansionTile(
+    tilePadding: EdgeInsets.zero,
+    title: const Text('Chart values'),
+    children: [for (final row in rows) Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: Text(row)),
+    )],
+  );
+}
+
 class LineChart extends StatelessWidget {
   final List<ChartPoint> points;
   final double height;
   final Color? color;
-  const LineChart({super.key, required this.points, this.height = 120, this.color});
+  final String unit;
+  const LineChart({super.key, required this.points, this.height = 120, this.color, this.unit = ''});
 
   @override
   Widget build(BuildContext context) {
@@ -52,6 +77,9 @@ class LineChart extends StatelessWidget {
             if (sorted.length > 1) Text(f.format(sorted.last.at), style: style),
           ]),
         ),
+      if (sorted.isNotEmpty) ChartValues(rows: [
+        for (final p in sorted) '${DateFormat.yMMMEd().add_jm().format(p.at)}: ${formatChartValue(p.value)} $unit'.trimRight(),
+      ]),
     ]);
   }
 }
@@ -118,15 +146,17 @@ class DailyBarChart extends StatelessWidget {
   final List<num?> values;
   final num? target;
   final double height;
-  const DailyBarChart({super.key, required this.values, this.target, this.height = 80});
+  final DateTime? end;
+  final String unit;
+  const DailyBarChart({super.key, required this.values, this.target, this.height = 80, this.end, this.unit = ''});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return SizedBox(
+    return Column(children: [SizedBox(
       height: height,
       child: CustomPaint(painter: _BarPainter(values, target, cs.primary, cs.outline), size: Size.infinite),
-    );
+    ), if (values.isNotEmpty) ChartValues.days(values, end ?? DateTime.now(), unit)]);
   }
 }
 

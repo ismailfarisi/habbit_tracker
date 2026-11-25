@@ -114,6 +114,7 @@ class Settings {
 
   /// 'whisper' (on-device, falls back to the phone) | 'system'.
   String voiceEngine;
+  bool privateVoice;
 
   /// Whisper model id: 'tiny' | 'base'.
   String whisperModel;
@@ -184,6 +185,7 @@ class Settings {
     this.model = 'openai/gpt-4o-mini',
     this.speechLocale = '',
     this.voiceEngine = 'whisper',
+    this.privateVoice = false,
     this.whisperModel = 'base',
     this.speakConfirmations = true,
     this.readCoachReplies = false,
@@ -240,6 +242,7 @@ class Settings {
     'model': model,
     'speechLocale': speechLocale,
     'voiceEngine': voiceEngine,
+    'privateVoice': privateVoice,
     'whisperModel': whisperModel,
     'speakConfirmations': speakConfirmations,
     'readCoachReplies': readCoachReplies,
@@ -298,6 +301,7 @@ class Settings {
       model: (j['model'] as String?)?.trim().isNotEmpty == true ? j['model'] as String : d.model,
       speechLocale: j['speechLocale'] as String? ?? '',
       voiceEngine: const ['whisper', 'system'].contains(j['voiceEngine']) ? j['voiceEngine'] as String : d.voiceEngine,
+      privateVoice: j['privateVoice'] == true,
       whisperModel: const ['tiny', 'base'].contains(j['whisperModel']) ? j['whisperModel'] as String : d.whisperModel,
       speakConfirmations: j['speakConfirmations'] as bool? ?? d.speakConfirmations,
       readCoachReplies: j['readCoachReplies'] as bool? ?? d.readCoachReplies,

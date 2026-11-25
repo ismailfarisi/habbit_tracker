@@ -55,6 +55,8 @@ TtsKeys Function() ttsKeys = () => const TtsKeys();
 
 /// Last cloud/Kokoro failure (shown in Settings); null after a success.
 final lastTtsError = ValueNotifier<String?>(null);
+final speakingEngine = ValueNotifier<String?>(null);
+final voiceNotice = ValueNotifier<String?>(null);
 
 class TtsException implements Exception {
   final String message;
@@ -407,6 +409,7 @@ class KokoroSpeaker extends ClipSpeaker {
 class FallbackSpeaker implements Speaker {
   final Speaker primary;
   final Speaker fallback;
+  bool _stopped = false;
   FallbackSpeaker(this.primary, this.fallback);
 
   @override
@@ -418,15 +421,20 @@ class FallbackSpeaker implements Speaker {
       await primary.speak(text, locale: locale, rate: rate);
       lastTtsError.value = null;
     } on UnsupportedTtsText {
+      if (_stopped || voiceSettings().privateVoice) return;
+      speakingEngine.value = fallback.name;
       await fallback.speak(text, locale: locale, rate: rate);
     } catch (e) {
+      if (_stopped || voiceSettings().privateVoice) return;
       lastTtsError.value = '$e';
+      speakingEngine.value = fallback.name;
       await fallback.speak(text, locale: locale, rate: rate);
     }
   }
 
   @override
   Future<void> stop() async {
+    _stopped = true;
     await primary.stop();
     await fallback.stop();
   }
@@ -436,6 +444,12 @@ class FallbackSpeaker implements Speaker {
 /// yet (no key, Kokoro not downloaded).
 Future<Speaker> defaultSpeaker() async {
   final s = voiceSettings();
+  if (s.privateVoice) {
+    final model = KokoroModel.instance;
+    await model.refresh();
+    if (!model.ready) throw TtsException('Private voice needs the Kokoro download in Settings → Voice.');
+    return KokoroSpeaker(await model.modelDir(), s.kokoroVoice);
+  }
   final keys = ttsKeys();
   final system = SystemSpeaker();
   switch (s.ttsEngine) {
@@ -454,17 +468,41 @@ Future<Speaker> defaultSpeaker() async {
 Future<Speaker> Function() speakerFactory = defaultSpeaker;
 
 Speaker? _current;
+int _request = 0;
 
 /// Reads [text] with the chosen engine and completes when it has finished.
 Future<void> speakText(String text, {double rate = 0.5}) async {
-  await stopSpeaking();
-  final clean = text.replaceAll(RegExp(r'[*#_`]'), '').trim();
-  if (clean.isEmpty) return;
-  final sp = _current = await speakerFactory();
+  final request = ++_request;
+  final previous = _current;
+  _current = null;
   try {
+    await previous?.stop();
+  } catch (_) {}
+  if (request != _request) return;
+  final clean = text.replaceAll(RegExp(r'[*#_`]'), '').trim();
+  try {
+    if (clean.isEmpty) return;
+    voiceNotice.value = null;
+    speakingEngine.value = 'Preparing voice';
+    final sp = await speakerFactory();
+    if (request != _request) return;
+    _current = sp;
+    speakingEngine.value = sp.name;
     await sp.speak(clean, locale: voiceSettings().speechLocale, rate: rate);
+  } on UnsupportedTtsText {
+    voiceNotice.value = lastTtsError.value = 'The downloaded voice reads English only. Private mode did not use a fallback.';
   } catch (e) {
-    lastTtsError.value = '$e';
+    if (request == _request) {
+      lastTtsError.value = '$e';
+      voiceNotice.value = voiceSettings().privateVoice
+          ? 'Private playback is unavailable. Check the Kokoro download in Voice settings.'
+          : 'Playback failed. Check your spoken voice in Settings or try again.';
+    }
+  } finally {
+    if (request == _request) {
+      _current = null;
+      speakingEngine.value = null;
+    }
   }
 }
 
@@ -472,6 +510,8 @@ Future<void> speakText(String text, {double rate = 0.5}) async {
 Future<void> Function(String text) speakAloud = speakText;
 
 Future<void> stopSpeaking() async {
+  ++_request;
+  speakingEngine.value = null;
   final sp = _current;
   _current = null;
   try {
@@ -493,6 +533,11 @@ class KokoroModel extends ChangeNotifier {
 
   bool ready = false;
   bool unpacking = false;
+  Completer<void>? _abort;
+  void cancel() {
+    final signal = _abort;
+    if (signal != null && !signal.isCompleted && !unpacking) signal.complete();
+  }
 
   /// 0..1 while downloading, null otherwise.
   double? progress;
@@ -521,16 +566,18 @@ class KokoroModel extends ChangeNotifier {
 
   Future<void> download({http.Client? client}) async {
     if (busy || ready) return;
-    final base = await baseDir();
-    final archive = File('$base/$id.tar.bz2');
-    final part = File('${archive.path}.part');
+    File? archive, part;
     final c = client ?? http.Client();
     error = null;
     progress = 0;
+    final signal = _abort = Completer<void>();
     notifyListeners();
     IOSink? sink;
     try {
-      final res = await c.send(http.Request('GET', url));
+      final base = await baseDir();
+      archive = File('$base/$id.tar.bz2');
+      part = File('${archive.path}.part');
+      final res = await c.send(http.AbortableRequest('GET', url, abortTrigger: signal.future));
       if (res.statusCode != 200) throw HttpException('HTTP ${res.statusCode}');
       final total = res.contentLength ?? sizeMb * 1000 * 1000;
       await part.parent.create(recursive: true);
@@ -548,6 +595,8 @@ class KokoroModel extends ChangeNotifier {
       }
       await sink.close();
       sink = null;
+      if (signal.isCompleted) throw const FileSystemException('Cancelled');
+      if (res.contentLength != null && got != res.contentLength) throw const FileSystemException('Incomplete download');
       await part.rename(archive.path);
       progress = null;
       unpacking = true;
@@ -556,15 +605,16 @@ class KokoroModel extends ChangeNotifier {
       await refresh();
       if (!ready) throw const FileSystemException('model files missing after unpacking');
     } catch (e) {
-      error = 'Download failed: $e';
+      error = signal.isCompleted ? 'Download cancelled. You can retry any time.' : 'Download failed: $e';
       await sink?.close();
     } finally {
-      for (final f in [part, archive]) {
+      for (final f in [part, archive].whereType<File>()) {
         try {
           if (await f.exists()) await f.delete();
         } catch (_) {}
       }
       progress = null;
+      _abort = null;
       unpacking = false;
       if (client == null) c.close();
       notifyListeners();

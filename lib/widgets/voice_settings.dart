@@ -54,6 +54,17 @@ class _VoiceSettingsSectionState extends State<VoiceSettingsSection> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            SwitchListTile.adaptive(
+              title: const Text('Private voice only'),
+              subtitle: const Text('Use downloaded Whisper and Kokoro models only. No phone or cloud fallback.'),
+              value: s.privateVoice,
+              onChanged: (v) async {
+                await stopSpeaking();
+                await finishDictation();
+                await state.updateSettings((x) => x.privateVoice = v);
+              },
+            ),
+            if (!s.privateVoice)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: SegmentedButton<String>(
@@ -67,7 +78,12 @@ class _VoiceSettingsSectionState extends State<VoiceSettingsSection> {
                 onSelectionChanged: (v) => state.updateSettings((x) => x.voiceEngine = v.first),
               ),
             ),
-            if (s.voiceEngine == 'whisper') ...[
+            if (!s.privateVoice && s.voiceEngine == 'system')
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Text('Phone recognition may send audio to your system speech provider.'),
+              ),
+            if (s.privateVoice || s.voiceEngine == 'whisper') ...[
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: SegmentedButton<String>(
@@ -95,17 +111,17 @@ class _VoiceSettingsSectionState extends State<VoiceSettingsSection> {
                       : 'Download Whisper model',
                 ),
                 subtitle: progress != null
-                    ? Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: LinearProgressIndicator(value: progress),
-                      )
+                      ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        LinearProgressIndicator(value: progress),
+                        TextButton(onPressed: () => _models.cancel(model), child: const Text('Cancel download')),
+                      ])
                     : Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             ready
                                 ? 'Dictation runs fully on this phone and works offline.'
-                                : "${WhisperModels.sizesMb[model]} MB, downloaded once. Until then the phone's voice input is used.",
+                                : '${WhisperModels.sizesMb[model]} MB. ${s.privateVoice ? 'Type until the download finishes.' : 'If unavailable, you can choose phone recognition.'}',
                           ),
                           const SizedBox(height: 6),
                           ready
@@ -220,14 +236,14 @@ class _SpokenVoiceSectionState extends State<SpokenVoiceSection> {
         final s = state.settings;
         final t = Theme.of(context);
         final muted = t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant);
-        final engine = s.ttsEngine;
+        final engine = s.privateVoice ? 'kokoro' : s.ttsEngine;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ListTile(
               leading: const Icon(Icons.graphic_eq),
               title: const Text('Spoken voice'),
-              subtitle: _dropdown(const Key('tts-engine'), engine, ttsEngines, _pick),
+              subtitle: s.privateVoice ? const Text('Kokoro · on this phone') : _dropdown(const Key('tts-engine'), engine, ttsEngines, _pick),
             ),
             if (engine == 'kokoro') ...[
               ListTile(
@@ -246,15 +262,17 @@ class _SpokenVoiceSectionState extends State<SpokenVoiceSection> {
                       : 'Download Kokoro voice',
                 ),
                 subtitle: _kokoro.busy
-                    ? Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: LinearProgressIndicator(value: _kokoro.unpacking ? null : _kokoro.progress),
-                      )
+                    ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        LinearProgressIndicator(value: _kokoro.unpacking ? null : _kokoro.progress),
+                        if (!_kokoro.unpacking) TextButton(onPressed: _kokoro.cancel, child: const Text('Cancel download')),
+                      ])
                     : Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _kokoro.ready
+                            s.privateVoice
+                                ? 'English only. ${_kokoro.ready ? 'Ready offline.' : '${KokoroModel.sizeMb} MB download.'} Unsupported text stays silent.'
+                                : _kokoro.ready
                                 ? 'Runs on this phone, offline. English only; Arabic uses the phone\'s voice.'
                                 : "${KokoroModel.sizeMb} MB, downloaded once. Until then the phone's voice is used.",
                           ),
@@ -316,9 +334,9 @@ class _SpokenVoiceSectionState extends State<SpokenVoiceSection> {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Text(
                   engine == 'openai'
-                      ? 'Uses $openAiTtsModel, billed to your OpenAI account per reply read aloud. '
+                      ? 'Text read aloud is sent to OpenAI. Uses $openAiTtsModel, billed to your account. '
                             "Without a key or internet the phone's voice is used."
-                      : "Billed to your xAI account. Speaks Arabic too. Without a key or internet the phone's voice is used.",
+                      : "Text read aloud is sent to xAI and billed to your account. Without a key or internet the phone's voice is used.",
                   style: muted,
                 ),
               ),
@@ -327,7 +345,7 @@ class _SpokenVoiceSectionState extends State<SpokenVoiceSection> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                 child: Text(
-                  "${lastTtsError.value}. The phone's voice was used instead.",
+                  '${lastTtsError.value}',
                   key: const Key('tts-error'),
                   style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.error),
                 ),

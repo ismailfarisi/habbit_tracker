@@ -39,7 +39,32 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
   String _when(DateTime t) => DateFormat.yMMMd().add_jm().format(t);
 
   Future<void> _share() async {
-    final text = d.report();
+    bool count = true;
+    final text = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, update) {
+        final preview = d.report(includeErrorCount: count);
+        return AlertDialog(
+          scrollable: true,
+          title: const Text('Review diagnostics'),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Only the text below will be shared. Error messages and stack traces stay on this phone.'),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Include error count'),
+              value: count,
+              onChanged: (v) => update(() => count = v == true),
+            ),
+            SelectableText(preview),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, preview), child: const Text('Share this report')),
+          ],
+        );
+      }),
+    );
+    if (text == null) return;
     if (widget.onShare != null) return widget.onShare!(text);
     await SharePlus.instance.share(ShareParams(text: text, subject: 'Daily Discipline diagnostics'));
   }

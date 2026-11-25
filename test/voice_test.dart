@@ -244,6 +244,27 @@ void main() {
       expect(dir.listSync(), isEmpty);
     });
 
+    test('cancelled download never installs a partial model', () async {
+      final m = WhisperModels();
+      final client = MockClient.streaming((req, _) async {
+        m.cancel('tiny');
+        return http.StreamedResponse(Stream.value([1, 2]), 200, contentLength: 2);
+      });
+      await m.download('tiny', client: client);
+      expect(m.error, contains('cancelled'));
+      expect(m.isReady('tiny'), isFalse);
+      expect(dir.listSync(), isEmpty);
+    });
+
+    test('private voice fails closed even if system recognition was selected', () async {
+      final settings = Settings(privateVoice: true, voiceEngine: 'system');
+      voiceSettings = () => Settings.fromJson(settings.toJson());
+      addTearDown(() => voiceSettings = Settings.new);
+      await expectLater(defaultDictation(), throwsA(isA<DictationUnavailable>()));
+      File('${dir.path}/ggml-base.bin').writeAsBytesSync([1]);
+      expect(await defaultDictation(), isA<WhisperDictation>());
+    });
+
     test('default engine: phone until the model exists, then Whisper', () async {
       voiceSettings = () => Settings(voiceEngine: 'whisper', whisperModel: 'tiny');
       expect(await defaultDictation(), isA<SystemDictation>());

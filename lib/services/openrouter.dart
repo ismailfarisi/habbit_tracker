@@ -40,6 +40,15 @@ class OpenRouterException implements Exception {
   String toString() => message;
 }
 
+String? openRouterKeyProblem(String value) {
+  final key = value.trim();
+  if (key.isEmpty) return 'Add your OpenRouter API key in Settings first.';
+  if (!RegExp(r'^sk-or-[A-Za-z0-9_-]{16,}$').hasMatch(key)) {
+    return 'Invalid API key format. Paste the complete OpenRouter key from openrouter.ai/keys.';
+  }
+  return null;
+}
+
 /// Executes one tool call and returns the result (usually JSON) for the model.
 typedef ToolExecutor = Future<String> Function(ToolCall call);
 
@@ -63,9 +72,8 @@ class OpenRouterClient {
     void Function(String delta)? onText,
     double temperature = 0.7,
   }) async {
-    if (apiKey.trim().isEmpty) {
-      throw OpenRouterException('Add your OpenRouter API key in Settings first.');
-    }
+    final keyProblem = openRouterKeyProblem(apiKey);
+    if (keyProblem != null) throw OpenRouterException(keyProblem);
     final req = http.Request('POST', _endpoint)
       ..headers.addAll({
         'Authorization': 'Bearer ${apiKey.trim()}',

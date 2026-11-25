@@ -96,7 +96,8 @@ class HabitDetailScreen extends StatelessWidget {
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                        DailyBarChart(values: metricHistory(state.logs, habit, daily.$2), target: habit.target),
+                        DailyBarChart(values: metricHistory(state.logs, habit, daily.$2, end: d), target: habit.target,
+                            end: d, unit: daily.$2 == 'minutes' ? 'minutes' : habit.unit),
                         const SizedBox(height: 4),
                         Text('Last 30 days · dashed line is the target of ${formatChartValue(habit.target)}',
                             style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
@@ -205,7 +206,7 @@ class MetricChartCard extends StatelessWidget {
           if (points.isEmpty)
             Text('No data yet', style: muted)
           else
-            LineChart(points: points),
+            LineChart(points: points, unit: field.unit),
         ]),
       ),
     );

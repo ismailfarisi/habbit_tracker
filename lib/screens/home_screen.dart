@@ -81,6 +81,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final ios = isCupertino(context);
+    final wide = MediaQuery.sizeOf(context).width >= 840;
     return Scaffold(
       appBar: AppBar(
         title: Text(HomeScreen.tabs[_tab].label),
@@ -94,9 +95,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
       body: SafeArea(
         top: false,
-        child: IndexedStack(index: _tab, children: [for (final t in HomeScreen.tabs) t.build(widget.state, goTo)]),
+        child: Row(children: [
+          if (wide)
+            NavigationRail(
+              scrollable: true,
+              labelType: NavigationRailLabelType.all,
+              selectedIndex: _tab,
+              onDestinationSelected: goTo,
+              destinations: [
+                for (final t in HomeScreen.tabs)
+                  NavigationRailDestination(icon: Icon(t.icon), selectedIcon: Icon(t.selectedIcon), label: Text(t.label)),
+              ],
+            ),
+          Expanded(key: const ValueKey('tab-content'), child: Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 940),
+              child: IndexedStack(index: _tab, children: [for (final t in HomeScreen.tabs) t.build(widget.state, goTo)]),
+            ),
+          )),
+        ]),
       ),
-      bottomNavigationBar: ios
+      bottomNavigationBar: wide ? null : ios
           ? CupertinoTabBar(
               currentIndex: _tab,
               onTap: goTo,

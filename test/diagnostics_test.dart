@@ -96,8 +96,9 @@ void main() {
       await d.recordError(FormatException('bad'), null, source: 'platform');
       final r = d.report();
       expect(r, contains('Reminders scheduled: 7'));
-      expect(r, contains('[platform] FormatException: bad'));
-      expect(r, contains('Errors (1, newest first)'));
+      expect(r, isNot(contains('FormatException: bad')));
+      expect(r, contains('Recorded errors: 1'));
+      expect(d.report(includeErrorCount: false), isNot(contains('Recorded errors')));
     });
 
     test('installErrorHandlers records Flutter and platform errors and chains', () async {
@@ -166,8 +167,15 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Share report'));
       await tester.pumpAndSettle();
+      expect(shared, isNull);
+      expect(find.text('Review diagnostics'), findsOneWidget);
+      await tester.tap(find.text('Include error count'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Share this report'));
+      await tester.pumpAndSettle();
       expect(shared, contains('Reminders scheduled: 4'));
-      expect(shared, contains('Something broke'));
+      expect(shared, isNot(contains('Something broke')));
+      expect(shared, isNot(contains('Recorded errors')));
     });
 
     testWidgets('Settings has the diagnostics switch (off) and opens the screen', (tester) async {

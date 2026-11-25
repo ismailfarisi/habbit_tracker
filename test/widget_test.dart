@@ -108,9 +108,11 @@ void main() {
     await tester.tap(find.text('Add AI key'));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(TextField, 'API key'), findsOneWidget);
-    await tester.enterText(find.widgetWithText(TextField, 'API key'), 'sk-or-test');
+    await tester.enterText(find.widgetWithText(TextField, 'API key'), 'sk-or-v1-synthetic-test-key-0001');
+    await tester.ensureVisible(find.text('Save without testing'));
+    await tester.tap(find.text('Save without testing'));
     await tester.pumpAndSettle();
-    expect(state.apiKey, 'sk-or-test');
+    expect(state.apiKey, 'sk-or-v1-synthetic-test-key-0001');
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(find.text(AiKeyEmptyState.message), findsNothing);
@@ -301,10 +303,14 @@ void main() {
         await tester.tap(find.text(i < 2 ? 'Not now' : 'Continue'));
         await tester.pumpAndSettle();
       }
-      await tester.enterText(find.widgetWithText(TextField, 'API key'), 'sk-or-abc');
+      await tester.enterText(find.widgetWithText(TextField, 'API key'), 'sk-or-v1-synthetic-test-key-0001');
+      await tester.ensureVisible(find.text('Save without testing'));
+      await tester.tap(find.text('Save without testing'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Finish'));
       await tester.tap(find.text('Finish'));
       await tester.pumpAndSettle();
-      expect(state.apiKey, 'sk-or-abc');
+      expect(state.apiKey, 'sk-or-v1-synthetic-test-key-0001');
       expect(state.settings.onboarded, isTrue);
       expect(state.habits, isEmpty);
       expect(find.byType(NavigationBar), findsOneWidget);

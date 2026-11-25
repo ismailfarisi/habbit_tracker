@@ -38,7 +38,7 @@ OpenRouterClient Function() fakeModel() {
           ]);
     return http.StreamedResponse(Stream.value(utf8.encode(text)), 200);
   });
-  return () => OpenRouterClient(apiKey: 'k', model: 'm', client: client);
+  return () => OpenRouterClient(apiKey: 'sk-or-v1-synthetic-test-key-0001', model: 'm', client: client);
 }
 
 void main() {

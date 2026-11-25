@@ -62,6 +62,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final _backup = widget.backup ?? BackupService(widget.state.storage);
   late final _diagnostics = Diagnostics.global ?? Diagnostics(widget.state.storage.prefs);
   bool _locating = false;
+  String _search = '';
 
   AppState get state => widget.state;
   Settings get s => state.settings;
@@ -337,6 +338,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   List<Widget> _overview() {
     final place = s.latitude == null ? 'Location not set' : (s.locationName.isEmpty ? 'Location set' : s.locationName);
+    const keywords = {
+      SettingsSection.prayers: 'city location coordinates times calculation',
+      SettingsSection.reminders: 'notification permission alerts alarms',
+      SettingsSection.voice: 'whisper kokoro download microphone dictation audio tts private',
+      SettingsSection.ai: 'api key coach model chat openrouter',
+      SettingsSection.focus: 'accessibility block screen time sleep apps',
+      SettingsSection.backup: 'restore export import recovery files',
+      SettingsSection.diagnostics: 'counters errors report privacy',
+      SettingsSection.general: 'dark light theme freeze',
+      SettingsSection.wake: 'alarm bed bedtime morning',
+      SettingsSection.money: 'currency budget debt savings zakat',
+      SettingsSection.islamic: 'hijri ramadan duha witr friday',
+    };
+    final matches = SettingsSection.values.where((x) => '${x.label} ${keywords[x] ?? ''}'.toLowerCase().contains(_search.trim().toLowerCase()));
     return [
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -345,6 +360,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
         ),
       ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        child: TextField(
+          decoration: const InputDecoration(prefixIcon: Icon(Icons.search), labelText: 'Find a setting'),
+          onChanged: (s) => setState(() => _search = s),
+        ),
+      ),
+      if (_search.trim().isNotEmpty) ...[
+        if (matches.isEmpty) const ListTile(title: Text('No settings match')),
+        for (final s in matches) _entry(s, keywords[s] ?? ''),
+      ] else ...[
       _header('Your day'),
       _entry(SettingsSection.wake, 'Up at ${_fmt(s.wakeTime)} · sleep goal ${fmtSleepHours(s.sleepHours)}'),
       _entry(SettingsSection.prayers, '$place · ${calcMethodLabels[s.calcMethod] ?? s.calcMethod}'),
@@ -376,6 +402,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         onTap: _reset,
       ),
       const SizedBox(height: 24),
+      ],
     ];
   }
 
@@ -902,18 +929,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
 /// Opens Settings as a page (the gear icon in the app bar). With
 /// [aiKeyOnly] it opens just the AI key section.
-Future<void> openSettings(BuildContext context, AppState state, {bool aiKeyOnly = false}) {
+Future<void> openSettings(BuildContext context, AppState state, {bool aiKeyOnly = false, SettingsSection? section}) {
   return Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (_) => Scaffold(
-        appBar: AppBar(title: aiKeyOnly ? const Text('AI coach') : null),
+        appBar: AppBar(title: aiKeyOnly ? const Text('AI coach') : section == null ? null : Text(section.label)),
         body: SafeArea(
           child: aiKeyOnly
               ? ListView(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   children: [AiKeySection(state: state)],
                 )
-              : SettingsScreen(state: state),
+              : SettingsScreen(state: state, section: section),
         ),
       ),
     ),
@@ -938,6 +965,7 @@ class _AiKeySectionState extends State<AiKeySection> {
   late final _apiKey = TextEditingController(text: widget.state.apiKey);
   late final _model = TextEditingController(text: widget.state.settings.model);
   bool _hideKey = true;
+  bool _testing = false;
   String _status = '';
 
   AppState get state => widget.state;
@@ -957,30 +985,31 @@ class _AiKeySectionState extends State<AiKeySection> {
   }
 
   /// Picks up outside changes (e.g. "Reset all data").
-  void _sync() {
-    if (state.apiKey != _apiKey.text.trim()) _apiKey.text = state.apiKey;
-    if (state.settings.model != _model.text.trim() && _model.text.trim().isNotEmpty) _model.text = state.settings.model;
-    if (mounted) setState(() {});
-  }
+  void _sync() { if (mounted) setState(() {}); }
 
-  Future<void> _test() async {
-    await state.setApiKey(_apiKey.text);
-    await state.updateSettings((x) => x.model = _model.text.trim().isEmpty ? 'openai/gpt-4o-mini' : _model.text.trim());
-    if (state.apiKey.isEmpty) {
-      setState(() => _status = 'Paste your key first.');
+  Future<void> _saveKey({bool test = false}) async {
+    final key = _apiKey.text.trim();
+    final model = _model.text.trim().isEmpty ? state.settings.model : _model.text.trim();
+    final problem = openRouterKeyProblem(key);
+    if (problem != null) {
+      setState(() => _status = problem);
       return;
     }
-    setState(() => _status = 'Testing…');
-    final client = OpenRouterClient(apiKey: state.apiKey, model: state.settings.model);
+    setState(() { _testing = true; _status = test ? 'Testing with a sample message…' : ''; });
+    final client = OpenRouterClient(apiKey: key, model: model);
     try {
-      final reply = await client.complete([
-        const ChatMessage('user', 'Reply with exactly: Coach ready!'),
-      ], temperature: 0);
-      if (mounted) setState(() => _status = '✅ ${reply.trim()}');
+      if (test) await client.complete([const ChatMessage('user', 'Reply with: Ready.')], temperature: 0)
+          .timeout(const Duration(seconds: 20));
+      if (!mounted) return;
+      await state.setApiKey(key);
+      await state.updateSettings((x) => x.model = model);
+      if (mounted) setState(() => _status = test ? 'Connection verified. Key saved.' : 'Key saved. Connection not tested.');
     } catch (e) {
-      if (mounted) setState(() => _status = '❌ $e');
+      if (mounted) setState(() => _status = e is OpenRouterException
+          ? e.message.split('\n').first : 'Could not connect. Check your connection and try again.');
     } finally {
       client.close();
+      if (mounted) setState(() => _testing = false);
     }
   }
 
@@ -1010,7 +1039,7 @@ class _AiKeySectionState extends State<AiKeySection> {
               Expanded(
                 child: Text(
                   on
-                      ? 'The coach is on: it can build habits and plan tasks for you.'
+                      ? 'A key is saved. Sending a coach message uses OpenRouter.'
                       : 'Optional. Without a key everything works except the AI coach; habit templates are always available.',
                   style: t.textTheme.bodySmall,
                 ),
@@ -1023,7 +1052,7 @@ class _AiKeySectionState extends State<AiKeySection> {
             obscureText: _hideKey,
             autocorrect: false,
             enableSuggestions: false,
-            onChanged: state.setApiKey,
+            enabled: !_testing,
             decoration: InputDecoration(
               labelText: 'API key',
               hintText: 'sk-or-v1-…',
@@ -1049,14 +1078,15 @@ class _AiKeySectionState extends State<AiKeySection> {
             spacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              OutlinedButton(style: compactButton, onPressed: _test, child: const Text('Save & test')),
-              if (on) TextButton(onPressed: _remove, child: const Text('Remove key')),
+              OutlinedButton(style: compactButton, onPressed: _testing ? null : () => _saveKey(test: true), child: const Text('Save & test')),
+              TextButton(onPressed: _testing ? null : () => _saveKey(), child: const Text('Save without testing')),
+              if (on) TextButton(onPressed: _testing ? null : _remove, child: const Text('Remove key')),
             ],
           ),
           if (_status.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text(_status, style: t.textTheme.bodySmall),
+              child: Semantics(liveRegion: true, child: Text(_status, style: t.textTheme.bodySmall)),
             ),
         ],
       ),

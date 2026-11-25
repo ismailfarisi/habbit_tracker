@@ -130,6 +130,19 @@ void main() {
     expect(((await defaultSpeaker()) as FallbackSpeaker).primary, isA<GrokSpeaker>());
   });
 
+  test('private voice cannot use a configured cloud speaker or phone fallback', () async {
+    final dir = Directory.systemTemp.createTempSync('private-voice');
+    final original = KokoroModel.baseDir;
+    addTearDown(() {
+      KokoroModel.baseDir = original;
+      dir.deleteSync(recursive: true);
+    });
+    KokoroModel.baseDir = () async => dir.path;
+    voiceSettings = () => Settings(privateVoice: true, ttsEngine: 'grok');
+    ttsKeys = () => const TtsKeys(xai: 'example');
+    await expectLater(defaultSpeaker(), throwsA(isA<TtsException>()));
+  });
+
   test('speechChunks splits sentences, keeps a short first one, merges short later ones', () {
     expect(speechChunks('Hi! This is how your coach will sound.'), ['Hi!', 'This is how your coach will sound.']);
     expect(speechChunks('One. Two. Three is longer than the rest.'), ['One.', 'Two. Three is longer than the rest.']);

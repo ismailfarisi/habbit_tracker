@@ -18,7 +18,6 @@ class VoiceInputButton extends StatefulWidget {
 }
 
 class _VoiceInputButtonState extends State<VoiceInputButton> {
-  static bool _hintedDownload = false;
   Dictation? _dictation;
   bool _listening = false;
   bool _starting = false;
@@ -51,19 +50,14 @@ class _VoiceInputButtonState extends State<VoiceInputButton> {
     _base = widget.controller.text.trimRight();
     setState(() => _listening = true);
     _dictation?.dispose();
-    final d = _dictation = await dictationFactory();
-    final s = voiceSettings();
-    if (d is SystemDictation && s.voiceEngine == 'whisper' && !_hintedDownload) {
-      _hintedDownload = true;
-      _snack("Using the phone's voice input. Download Whisper in Settings → Voice for private, offline dictation.");
-    }
-    if (!mounted) {
-      d.dispose();
-      return;
-    }
     try {
+      final d = _dictation = await dictationFactory();
+      if (!mounted) {
+        d.dispose();
+        return;
+      }
       await d.start(
-        locale: s.speechLocale,
+        locale: voiceSettings().speechLocale,
         onText: _insert,
         onError: _snack,
         onDone: () {

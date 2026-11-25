@@ -30,6 +30,7 @@ SpeechEngine Function() speechEngineFactory = PluginSpeechEngine.new;
 /// voice engine (see [speakText]).
 class PluginSpeechEngine implements SpeechEngine {
   Dictation? _dictation;
+  bool _disposed = false;
   void Function()? _onStopped;
   void Function(String message)? _onError;
 
@@ -44,13 +45,22 @@ class PluginSpeechEngine implements SpeechEngine {
   Future<void> listen({required void Function(String words) onWords, String? localeId}) async {
     await stopSpeakingAloud();
     _dictation?.dispose();
-    final d = _dictation = await dictationFactory();
-    await d.start(
+    try {
+      final d = _dictation = await dictationFactory();
+      if (_disposed) {
+        d.dispose();
+        return;
+      }
+      await d.start(
       locale: localeId ?? '',
       onText: onWords,
       onDone: () => _onStopped?.call(),
       onError: (m) => _onError?.call(m),
-    );
+      );
+    } catch (e) {
+      _onError?.call('$e');
+      _onStopped?.call();
+    }
   }
 
   @override
@@ -66,6 +76,7 @@ class PluginSpeechEngine implements SpeechEngine {
 
   @override
   void dispose() {
+    _disposed = true;
     _dictation?.dispose();
     stopSpeakingAloud();
   }

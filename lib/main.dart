@@ -9,6 +9,26 @@ import 'services/backup_service.dart';
 import 'services/diagnostics.dart';
 import 'services/notification_service.dart';
 import 'services/storage.dart';
+import 'services/tts.dart' show speakingEngine, stopSpeaking, voiceNotice;
+import 'services/voice_input.dart' show confirmPhoneFallback, finishDictation, listeningEngine;
+
+final _navigator = GlobalKey<NavigatorState>();
+
+Future<bool> _confirmFallback() async {
+  final context = _navigator.currentContext;
+  if (context == null) return false;
+  return await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Use phone recognition this time?'),
+      content: const Text('Whisper is unavailable. Your phone’s speech provider may send audio off this device. You can keep typing instead.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep typing')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Use phone')),
+      ],
+    ),
+  ) ?? false;
+}
 
 /// Routes a notification tap or action: a habit reminder opens that habit,
 /// "done" actions are applied, a task reminder opens Plan, anything
@@ -28,6 +48,7 @@ void routeNotification(AppState state, String payload, String? actionId) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  confirmPhoneFallback = _confirmFallback;
   final notifications = NotificationService.instance;
   await notifications.init();
   final state = await AppState.load(await Storage.open(), notifications);
@@ -58,6 +79,8 @@ class DailyDisciplineApp extends StatelessWidget {
       listenable: state,
       builder: (context, _) => MaterialApp(
         title: 'Daily Discipline',
+        navigatorKey: _navigator,
+        builder: (_, navigator) => _VoiceActivity(child: navigator!),
         debugShowCheckedModeBanner: false,
         theme: appTheme(Brightness.light),
         darkTheme: appTheme(Brightness.dark),
@@ -70,6 +93,45 @@ class DailyDisciplineApp extends StatelessWidget {
       ),
     );
   }
+}
+
+class _VoiceActivity extends StatelessWidget {
+  final Widget child;
+  const _VoiceActivity({required this.child});
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([listeningEngine, speakingEngine, voiceNotice]),
+    child: child,
+    builder: (context, child) {
+      final listening = listeningEngine.value;
+      final speaking = speakingEngine.value;
+      final notice = voiceNotice.value;
+      return Column(children: [
+        if (listening != null || speaking != null || notice != null)
+          Material(
+            color: Theme.of(context).colorScheme.secondaryContainer,
+            child: SafeArea(bottom: false, child: Padding(
+              padding: const EdgeInsetsDirectional.only(start: 16, end: 4),
+              child: Row(children: [
+                Expanded(child: Semantics(liveRegion: true, child: Text(
+                  listening != null ? 'Listening with $listening' : speaking != null ? 'Speaking · $speaking' : notice!,
+                ))),
+                if (listening == null && speaking == null)
+                  IconButton(onPressed: () => voiceNotice.value = null, icon: const Icon(Icons.close), tooltip: 'Dismiss')
+                else
+                TextButton.icon(
+                  onPressed: listening != null ? finishDictation : stopSpeaking,
+                  icon: const Icon(Icons.stop),
+                  label: const Text('Stop'),
+                ),
+              ]),
+            )),
+          ),
+        Expanded(child: child!),
+      ]);
+    },
+  );
 }
 
 /// Deep teal on a soft off-white, or on near-black in dark mode, with a

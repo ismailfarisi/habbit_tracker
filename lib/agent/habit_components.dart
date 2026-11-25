@@ -18,6 +18,7 @@ import '../logic/speech_metrics.dart';
 import 'habit_catalog.dart';
 import 'speech_engine.dart';
 import '../widgets/adaptive.dart';
+import '../widgets/charts.dart';
 
 /// Context a habit surface is rendered in.
 class HabitScope extends InheritedWidget {
@@ -683,7 +684,7 @@ class MetricTrendView extends StatelessWidget {
     final good = delta == null || delta == 0 ? null : (delta > 0) != lowerIsBetter;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(children: [
+      child: Column(children: [Row(children: [
         Expanded(
           flex: 3,
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
@@ -706,7 +707,7 @@ class MetricTrendView extends StatelessWidget {
             child: CustomPaint(painter: _SparklinePainter(values, t.colorScheme.primary)),
           ),
         ),
-      ]),
+      ]), if (points.isNotEmpty) ChartValues.days(values, HabitScope.maybeOf(context)?.day ?? DateTime.now(), unit)]),
     );
   }
 }

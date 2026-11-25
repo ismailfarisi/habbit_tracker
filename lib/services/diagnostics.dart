@@ -121,7 +121,7 @@ class Diagnostics {
 
   /// Plain-text report for the share sheet: counters and errors only, no
   /// habit, prayer or task data.
-  String report() {
+  String report({bool includeErrorCount = true}) {
     final b = StringBuffer()
       ..writeln('Daily Discipline diagnostics report')
       ..writeln('Generated: ${_clock().toIso8601String()}')
@@ -129,18 +129,10 @@ class Diagnostics {
       ..writeln('Platform: ${_platform()}')
       ..writeln()
       ..writeln('Counters');
-    for (final e in counters.entries) {
-      b.writeln('  ${counterLabels[e.key] ?? e.key}: ${e.value}');
+    for (final e in counterLabels.entries) {
+      b.writeln('  ${e.value}: ${counter(e.key)}');
     }
-    final errs = errors;
-    b
-      ..writeln()
-      ..writeln('Errors (${errs.length}, newest first)');
-    for (final e in errs.reversed) {
-      b
-        ..writeln('- ${e.at.toIso8601String()} [${e.source}] ${e.message}')
-        ..writeln(e.stack.split('\n').map((l) => '    $l').join('\n'));
-    }
+    if (includeErrorCount) b.writeln('\nRecorded errors: ${errors.length}');
     return b.toString();
   }
 

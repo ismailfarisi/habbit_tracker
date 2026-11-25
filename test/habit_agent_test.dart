@@ -66,7 +66,7 @@ void main() {
           {List<Map<String, dynamic>>? requests, List<HabitProposal>? proposals, List<ToolActivity>? activity}) =>
       HabitAgent(
         state,
-        client: () => OpenRouterClient(apiKey: 'k', model: 'm', client: fakeModel(turns, requests)),
+        client: () => OpenRouterClient(apiKey: 'sk-or-v1-synthetic-test-key-0001', model: 'm', client: fakeModel(turns, requests)),
         clock: () => now,
         onProposal: proposals?.add,
         onActivity: activity?.add,
@@ -291,7 +291,7 @@ void main() {
       state,
       systemPrompt: () => 'sys',
       client: () => OpenRouterClient(
-        apiKey: 'k',
+        apiKey: 'sk-or-v1-synthetic-test-key-0001',
         model: 'm',
         client: fakeModel([
           [

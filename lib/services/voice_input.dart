@@ -38,17 +38,36 @@ abstract class Dictation {
 /// The current voice settings; [AppState] points this at its settings.
 Settings Function() voiceSettings = Settings.new;
 
+final listeningEngine = ValueNotifier<String?>(null);
+Dictation? _listening;
+Future<bool> Function() confirmPhoneFallback = () async => false;
+Future<void> finishDictation() async => _listening?.stop();
+
+void _listeningStarted(Dictation d, String locale) {
+  _listening = d;
+  listeningEngine.value = '${d.name} · ${locale.isEmpty ? 'Automatic language' : locale.replaceAll('_', '-')}';
+}
+
+void _listeningEnded(Dictation d) {
+  if (_listening != d) return;
+  _listening = null;
+  listeningEngine.value = null;
+}
+
 /// Picks the engine for the current settings. Replace in tests.
 Future<Dictation> Function() dictationFactory = defaultDictation;
 
 Future<Dictation> defaultDictation() async {
   final s = voiceSettings();
-  if (s.voiceEngine == 'whisper') {
+  if (s.privateVoice || s.voiceEngine == 'whisper') {
     final models = WhisperModels.instance;
     await models.refresh();
     if (models.isReady(s.whisperModel)) {
-      return FallbackDictation(WhisperDictation(await models.pathFor(s.whisperModel)), SystemDictation.new);
+      final local = WhisperDictation(await models.pathFor(s.whisperModel));
+      return s.privateVoice ? local : FallbackDictation(local, () => SystemDictation(fallback: true));
     }
+    if (s.privateVoice) throw DictationUnavailable('Private voice needs the Whisper model. Type instead or download it in Settings → Voice.');
+    return SystemDictation(fallback: true);
   }
   return SystemDictation();
 }
@@ -137,6 +156,8 @@ class WhisperDictation implements Dictation {
       _finish();
       return;
     }
+    if (_finished) return;
+    _listeningStarted(this, locale);
     final Stream<Uint8List> pcm;
     try {
       pcm = await _recorder.startStream(
@@ -150,6 +171,7 @@ class WhisperDictation implements Dictation {
         keepModelLoaded: true,
       );
     } catch (e) {
+      _listeningEnded(this);
       await _recorder.stop().catchError((_) => null);
       throw DictationUnavailable('$e');
     }
@@ -176,6 +198,7 @@ class WhisperDictation implements Dictation {
   void _finish() {
     if (_finished) return;
     _finished = true;
+    _listeningEnded(this);
     _onDone?.call();
   }
 
@@ -185,6 +208,7 @@ class WhisperDictation implements Dictation {
 
   @override
   void dispose() {
+    _listeningEnded(this);
     _limit?.cancel();
     _partials?.cancel();
     final running = !_finished;
@@ -208,6 +232,8 @@ class WhisperDictation implements Dictation {
 /// is a singleton that keeps its first listeners, so status and errors are
 /// routed to whichever dictation is currently active.
 class SystemDictation implements Dictation {
+  final bool fallback;
+  SystemDictation({this.fallback = false});
   static final _stt = SpeechToText();
   static SystemDictation? _active;
   static bool? _available;
@@ -240,6 +266,15 @@ class SystemDictation implements Dictation {
   }) async {
     _onDone = onDone;
     _onError = onError;
+    if (fallback && !voiceSettings().privateVoice && !await confirmPhoneFallback()) {
+      _finish();
+      return;
+    }
+    if (voiceSettings().privateVoice) {
+      _finish();
+      return;
+    }
+    if (_finished) return;
     _active = this;
     if (!await _init()) {
       _available = null;
@@ -247,7 +282,10 @@ class SystemDictation implements Dictation {
       _finish();
       return;
     }
-    await _stt.listen(
+    if (_finished) return;
+    _listeningStarted(this, locale);
+    try {
+      await _stt.listen(
       onResult: (r) => onText(r.recognizedWords),
       listenOptions: SpeechListenOptions(
         listenFor: const Duration(minutes: 3),
@@ -256,12 +294,17 @@ class SystemDictation implements Dictation {
         listenMode: ListenMode.dictation,
         localeId: locale.isEmpty ? null : locale,
       ),
-    );
+      );
+    } catch (_) {
+      _finish();
+      rethrow;
+    }
   }
 
   void _finish() {
     if (_finished) return;
     _finished = true;
+    _listeningEnded(this);
     if (_active == this) _active = null;
     _onDone?.call();
   }
@@ -274,6 +317,7 @@ class SystemDictation implements Dictation {
 
   @override
   void dispose() {
+    _listeningEnded(this);
     if (_active == this) {
       _stt.cancel();
       _active = null;
@@ -294,6 +338,11 @@ class WhisperModels extends ChangeNotifier {
 
   final _ready = <String>{};
   final _progress = <String, double>{};
+  final _abort = <String, Completer<void>>{};
+  void cancel(String id) {
+    final signal = _abort[id];
+    if (signal != null && !signal.isCompleted) signal.complete();
+  }
   String? error;
 
   bool isReady(String id) => _ready.contains(id);
@@ -323,15 +372,17 @@ class WhisperModels extends ChangeNotifier {
   Future<void> download(String id, {http.Client? client}) async {
     if (_progress.containsKey(id) || isReady(id)) return;
     final model = WhisperModel.values.firstWhere((m) => m.modelName == id);
-    final path = await pathFor(id);
-    final part = File('$path.part');
+    File? part;
     final c = client ?? http.Client();
     error = null;
     _progress[id] = 0;
+    final signal = _abort[id] = Completer<void>();
     notifyListeners();
     IOSink? sink;
     try {
-      final res = await c.send(http.Request('GET', model.modelUri));
+      final path = await pathFor(id);
+      part = File('$path.part');
+      final res = await c.send(http.AbortableRequest('GET', model.modelUri, abortTrigger: signal.future));
       if (res.statusCode != 200) throw HttpException('HTTP ${res.statusCode}');
       final total = res.contentLength ?? sizesMb[id]! * 1024 * 1024;
       await part.parent.create(recursive: true);
@@ -349,14 +400,17 @@ class WhisperModels extends ChangeNotifier {
       }
       await sink.close();
       sink = null;
+      if (signal.isCompleted) throw const FileSystemException('Cancelled');
+      if (res.contentLength != null && got != res.contentLength) throw const FileSystemException('Incomplete download');
       await part.rename(path);
       _ready.add(id);
     } catch (e) {
-      error = 'Download failed: $e';
+      error = signal.isCompleted ? 'Download cancelled. You can retry any time.' : 'Download failed: $e';
       await sink?.close();
-      if (await part.exists()) await part.delete();
+      if (part != null && await part.exists()) await part.delete();
     } finally {
       _progress.remove(id);
+      _abort.remove(id);
       if (client == null) c.close();
       notifyListeners();
     }
