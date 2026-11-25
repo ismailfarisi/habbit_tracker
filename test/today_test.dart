@@ -298,15 +298,13 @@ void main() {
     });
   });
 
-  testWidgets('Reminders page lists planned reminders by day', (tester) async {
+  testWidgets('Upcoming does not claim planned items are queued when the device queue is unavailable', (tester) async {
     tallView(tester);
     await add(quranTemplate, reminder: '21:00');
     await tester.pumpWidget(MaterialApp(home: RemindersScreen(state: state, now: now)));
     await tester.pump();
-    expect(find.text('Today'), findsOneWidget);
-    expect(find.text('Tomorrow'), findsOneWidget);
-    expect(find.text('🕌 Time for Isha'), findsWidgets);
-    expect(find.text('📖 Read Quran'), findsWidgets);
+    expect(find.text('Could not read scheduled alerts on this device.'), findsOneWidget);
+    expect(find.text('📖 Read Quran'), findsNothing);
     await tester.tap(find.byType(Switch));
     await tester.pump();
     expect(state.settings.remindersEnabled, isFalse);

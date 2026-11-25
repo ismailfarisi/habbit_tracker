@@ -83,29 +83,33 @@ List<PlannedReminder> planReminders(
         when: DateTime(date.year, date.month, date.day, s.wakeTime.hour, s.wakeTime.minute),
         kind: ReminderKind.wake,
         title: '☀️ Time to wake up',
-        body: 'Rise and shine! Tap "I\'m up" to log it.',
+        body: s.wakeChallenge == WakeChallenge.off
+            ? 'Tap "I\'m up" to log your wake-up.'
+            : 'Open your wake challenge to check in.',
         payload: 'wake|$key',
       ));
     }
 
-    final times = prayerTimesFor(s, date).times;
-    final hadith = s.prayerHadith ? weeklyPrayerHadith(date) : const <String, Hadith>{};
-    for (var i = 0; i < prayerNames.length; i++) {
-      final name = prayerNames[i];
-      if (log?.prayers.contains(name) ?? false) continue;
-      final at = times[name]!;
-      final offset = s.prayerOffsetMin;
-      out.add(PlannedReminder(
-        id: reminderId(date, 1 + i),
-        when: at.subtract(Duration(minutes: offset)),
-        kind: ReminderKind.prayer,
-        title: prayerReminderTitle(s, name, date, offset),
-        body: prayerReminderBody(at, hadith[name]),
-        payload: 'prayer:$name|$key',
-      ));
-    }
+    if (prayerTimesConfirmed(s)) {
+      final times = prayerTimesFor(s, date).times;
+      final hadith = s.prayerHadith ? weeklyPrayerHadith(date) : const <String, Hadith>{};
+      for (var i = 0; i < prayerNames.length; i++) {
+        final name = prayerNames[i];
+        if (log?.prayers.contains(name) ?? false) continue;
+        final at = times[name]!;
+        final offset = s.prayerOffsetMin;
+        out.add(PlannedReminder(
+          id: reminderId(date, 1 + i),
+          when: at.subtract(Duration(minutes: offset)),
+          kind: ReminderKind.prayer,
+          title: prayerReminderTitle(s, name, date, offset),
+          body: prayerReminderBody(at, hadith[name]),
+          payload: 'prayer:$name|$key',
+        ));
+      }
 
-    out.addAll(muslimReminders(s, date, log, times));
+      out.addAll(muslimReminders(s, date, log, times));
+    }
 
     for (final h in habits) {
       if (h.archived || h.reminder == null || !h.isScheduledOn(date)) continue;

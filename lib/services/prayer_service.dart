@@ -13,6 +13,18 @@ class PrayerDay {
   const PrayerDay(this.times, {required this.calculated, this.sunrise});
 }
 
+/// Only these persisted choices authorize time-sensitive prayer reminders.
+bool prayerTimesConfirmed(Settings s) => s.useManualPrayer || s.hasLocation;
+
+String prayerTimeSource(Settings s) {
+  if (s.useManualPrayer) return 'Manual timetable';
+  if (!s.hasLocation) return 'Example times · prayer alerts off';
+  final place = s.locationName.trim().isEmpty
+      ? '${s.latitude!.toStringAsFixed(2)}, ${s.longitude!.toStringAsFixed(2)}'
+      : s.locationName;
+  return '$place · ${calcMethodLabels[s.calcMethod] ?? calcMethodLabels['muslim_world_league']}';
+}
+
 /// Prayer times for [date], calculated offline from the saved location, or
 /// the manual times when manual mode is on or no location is set.
 PrayerDay prayerTimesFor(Settings s, DateTime date) {
