@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -93,7 +94,27 @@ class AppState extends ChangeNotifier implements TaskBackend {
 
   DayLog _mutableDay(DateTime d) => logs.putIfAbsent(dayKey(d), DayLog.new);
 
+  // Finish an already-issued native update before clearing the widget,
+  // notifications and focus state. Queued work from an old generation expires.
+  Future<void>? _reminderUpdates;
+  bool _resetting = false;
+
   Future<void> _reschedule() async {
+    if (_resetting) return;
+    final generation = dataGeneration;
+    final previous = _reminderUpdates;
+    final finished = Completer<void>();
+    _reminderUpdates = finished.future;
+    try {
+      if (previous != null) await previous;
+      if (!_resetting && generation == dataGeneration) await _applyReminderState();
+    } finally {
+      if (identical(_reminderUpdates, finished.future)) _reminderUpdates = null;
+      finished.complete();
+    }
+  }
+
+  Future<void> _applyReminderState() async {
     await notifications.reschedule(settings, logs, tasks, habits: habits);
     await HomeWidgetService.publish(settings, logs, habits: habits, tasks: tasks);
     try {
@@ -468,34 +489,64 @@ class AppState extends ChangeNotifier implements TaskBackend {
   }
 
   Future<void> importBackup(String raw) async {
-    await storage.importJson(raw);
+    var replacing = false;
+    try {
+      await storage.importJson(raw, beforeReplace: () {
+        replacing = true;
+        _invalidateDataViews();
+      }, beforeCommit: () async {
+        _readRestoredData();
+        await _reschedule();
+      });
+    } catch (_) {
+      if (replacing) {
+        _readRestoredData();
+        // The journal has restored disk. Reconcile any OS work that ran
+        // before the failure against the original data as well.
+        try {
+          await _reschedule();
+        } catch (e) {
+          debugPrint('Could not refresh reminders after rollback: $e');
+        }
+        notifyListeners();
+      }
+      rethrow;
+    }
+    notifyListeners();
+  }
+
+  void _readRestoredData() {
     settings = storage.loadSettings();
     logs = storage.loadLogs();
     tasks = storage.loadTasks();
     habits = storage.loadHabits();
     goals = storage.loadGoals();
-    finance = storage.loadFinance();
-    _invalidateDataViews();
-    notifyListeners();
-    await _reschedule();
+    finance = storage.hasFinance ? storage.loadFinance()
+        : Finance(currency: currencyForLocale(ui.PlatformDispatcher.instance.locale.toString()));
   }
 
   Future<void> resetAll() async {
-    await notifications.clearAll();
-    await HomeWidgetService.clear();
-    await ChannelFocusGuard.clearDeviceData();
-    await storage.clearAll();
-    settings = Settings();
-    logs = {};
-    tasks = [];
-    habits = [];
-    goals = [];
-    finance = Finance(currency: currencyForLocale(ui.PlatformDispatcher.instance.locale.toString()));
-    apiKey = '';
-    openaiKey = '';
-    xaiKey = '';
+    _resetting = true;
     _invalidateDataViews();
-    notifyListeners();
+    try {
+      await _reminderUpdates;
+      await notifications.clearAll();
+      await HomeWidgetService.clear();
+      await ChannelFocusGuard.clearDeviceData();
+      await storage.clearAll();
+      settings = Settings();
+      logs = {};
+      tasks = [];
+      habits = [];
+      goals = [];
+      finance = Finance(currency: currencyForLocale(ui.PlatformDispatcher.instance.locale.toString()));
+      apiKey = '';
+      openaiKey = '';
+      xaiKey = '';
+    } finally {
+      _resetting = false;
+      notifyListeners();
+    }
   }
 
   void _invalidateDataViews() {

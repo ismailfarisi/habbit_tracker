@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../app_state.dart';
+import 'portable_backup.dart';
 import 'storage.dart';
 
 /// Local snapshots and portable backups of everything [Storage.exportJson] holds (settings, logs, tasks,
@@ -30,13 +31,15 @@ class BackupService {
   final Storage storage;
   final Future<Directory> Function() _documents;
   final Future<Directory> Function() _temporary;
+  final Future<Directory> Function() _support;
   final bool _sandboxedPaths;
   final DateTime Function() _clock;
 
-  BackupService(this.storage, {Future<Directory> Function()? documents, Future<Directory> Function()? temporary, DateTime Function()? clock})
+  BackupService(this.storage, {Future<Directory> Function()? documents, Future<Directory> Function()? temporary, Future<Directory> Function()? support, DateTime Function()? clock})
       : _documents = documents ?? getApplicationDocumentsDirectory,
         _sandboxedPaths = (Platform.isAndroid || Platform.isIOS) || (documents != null && temporary != null),
         _temporary = temporary ?? getTemporaryDirectory,
+        _support = support ?? getApplicationSupportDirectory,
         _clock = clock ?? DateTime.now;
 
   static AppLifecycleListener? _listener;
@@ -119,6 +122,8 @@ class BackupService {
   });
 
   Future<AutoBackup> _write(String raw, DateTime at, String reason) async {
+    // A safety copy must be restorable before reset or replacement proceeds.
+    Storage.describeBackup(raw);
     final dir = await _dir();
     var f = File('${dir.path}/${AutoBackup.fileName(at, reason)}');
     while (await f.exists()) {
@@ -163,22 +168,26 @@ class BackupService {
         await entry.delete(recursive: true);
       }
     }
+    final audio = Directory('${(await _support()).path}/quran-audio');
+    if (await audio.exists()) await audio.delete(recursive: true);
     if (Platform.isIOS) await FilePicker.clearTemporaryFiles();
     await state.resetAll();
   });
 
   /// Writes an export file (to [dir], by default the temporary directory).
-  Future<File> writeExportFile({Directory? dir}) async {
+  Future<File> writeExportFile({Directory? dir, String? contents}) async {
     final now = _clock();
-    final d = dir ?? await getTemporaryDirectory();
-    final f = File('${d.path}/${exportFileName(now)}');
-    await f.writeAsString(storage.exportJson(at: now), flush: true);
+    final d = dir ?? await _temporary();
+    final raw = contents ?? storage.exportJson(at: now);
+    final name = exportFileName(now);
+    final f = File('${d.path}/${PortableBackup.isEncrypted(raw) ? name.replaceFirst('.json', '.encrypted.json') : name}');
+    await f.writeAsString(raw, flush: true);
     return f;
   }
 
   /// Opens the share sheet with a backup file. Returns false if dismissed.
-  Future<bool> shareExport({Rect? origin}) async {
-    final f = await writeExportFile();
+  Future<bool> shareExport({Rect? origin, String? contents}) async {
+    final f = await writeExportFile(contents: contents);
     final r = await SharePlus.instance.share(ShareParams(
       files: [XFile(f.path, mimeType: 'application/json')],
       subject: 'Daily Discipline backup',
