@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../app_state.dart';
 import '../goals/goal.dart';
+import '../goals/goal_outcomes.dart';
 import '../logic/stats.dart';
 import '../models.dart';
 import '../services/openrouter.dart';
@@ -297,6 +298,7 @@ class GoalTools {
   Map<String, dynamic> describe(Goal g) {
     final now = clock();
     final linked = state.tasks.where((t) => g.taskIds.contains(t.id)).toList();
+    final outcomes = goalOutcomes(state, g, now);
     return {
       'id': g.id,
       'title': g.title,
@@ -306,7 +308,8 @@ class GoalTools {
       'review': g.cadence.name,
       'reviewDue': g.reviewDue(now),
       'timeElapsedPct': (g.elapsed(now) * 100).round(),
-      'progressPct': (g.progress(state.tasks) * 100).round(),
+      'outcomes': [for (final o in outcomes) o.label],
+      if (outcomes.singleOrNull?.fraction case final pct?) 'progressPct': (pct * 100).round(),
       'milestones': [for (final m in g.milestones) m.toJson()],
       'tasks': [
         for (final t in linked)
@@ -390,7 +393,7 @@ class GoalTools {
         g.milestones.addAll(_milestones(a['add_milestones']));
         final note = '${a['add_note'] ?? ''}'.trim();
         if (note.isNotEmpty) {
-          g.notes = '${g.notes.trimRight()}${g.notes.trim().isEmpty ? '' : '\n'}- ${dayKey(clock())}: $note';
+          g.noteEntries.add(GoalNote(note, shared: true, changedOn: dayKey(clock())));
         }
         for (final id in ((a['milestones_done'] as List?) ?? const []).cast<String>()) {
           for (final m in g.milestones.where((m) => m.id == id)) {
@@ -453,7 +456,7 @@ String goalsContext(AppState state, DateTime now) {
   if (active.isEmpty) return 'The user has no goals yet.';
   return 'User\'s goals (use list_goals for details):\n${[
     for (final g in active)
-      '- ${g.id}: ${g.title} (${g.start} → ${g.end}, ${(g.progress(state.tasks) * 100).round()}% done, '
+      '- ${g.id}: ${g.title} (${g.start} → ${g.end}, ${goalOutcomes(state, g, now).map((o) => o.label).join(', ')}, '
           '${(g.elapsed(now) * 100).round()}% of time passed${g.reviewDue(now) ? ', review due' : ''})',
   ].join('\n')}';
 }

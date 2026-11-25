@@ -129,9 +129,14 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: GoalScreen(state: s, goalId: g.id)));
     await tester.pump();
     expect(find.text('Next 14 days'), findsOneWidget);
+    expect(find.text('Session 2/3: Photograph 5 products'), findsNothing);
+    await tester.tap(find.text('Next 14 days'));
+    await tester.pumpAndSettle();
     expect(find.text('Session 2/3: Photograph 5 products'), findsOneWidget);
     expect(find.text('Milestone: Shop live'), findsOneWidget);
 
+    await tester.tap(find.byKey(const Key('goal-menu')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('goal-context')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('doc-frontmatter')), findsOneWidget);

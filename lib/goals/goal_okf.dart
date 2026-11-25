@@ -13,6 +13,7 @@ import '../logic/tasks.dart';
 import '../models.dart';
 import '../quran/quran.dart';
 import 'goal.dart';
+import 'goal_outcomes.dart';
 
 /// One thing a goal has planned on a day.
 class GoalDayItem {
@@ -35,7 +36,7 @@ List<GoalDayItem> goalPlanFor(AppState s, Goal g, DateTime day, {DateTime? today
   final d = dateOnly(day);
   final items = <GoalDayItem>[];
   for (final h in s.habits.where((h) => g.habitIds.contains(h.id))) {
-    if (!h.isScheduledOn(d)) continue;
+    if (h.archived || !h.isScheduledOn(d)) continue;
     final q = s.quranFor(h, d, today: today);
     items.add(
       GoalDayItem(
@@ -90,6 +91,7 @@ String goalOkf(AppState s, Goal g, DateTime now) {
   final f = DateFormat('EEE d MMM y');
   final habits = s.habits.where((h) => g.habitIds.contains(h.id)).toList();
   final tasks = s.tasks.where((t) => g.taskIds.contains(t.id)).toList();
+  final outcomes = goalOutcomes(s, g, now);
   final b = StringBuffer()
     ..writeln('---')
     ..writeln('type: Goal')
@@ -103,7 +105,7 @@ String goalOkf(AppState s, Goal g, DateTime now) {
     ..writeln('start: ${g.start}')
     ..writeln('end: ${g.end}')
     ..writeln('review: ${g.cadence.name}')
-    ..writeln('progress: ${(g.progress(s.tasks) * 100).round()}%')
+    ..writeln('outcomes: ${_q(outcomes.map((o) => o.label).join('; '))}')
     ..writeln('time_passed: ${(g.elapsed(now) * 100).round()}%')
     ..writeln('---')
     ..writeln()
@@ -120,7 +122,9 @@ String goalOkf(AppState s, Goal g, DateTime now) {
     ..writeln('## Timeline')
     ..writeln()
     ..writeln('${f.format(g.startDate)} → ${f.format(g.endDate)} (${g.horizon}). '
-        '${(g.progress(s.tasks) * 100).round()}% done, ${(g.elapsed(now) * 100).round()}% of the time passed.')
+        '${(g.elapsed(now) * 100).round()}% of the time passed.')
+    ..writeln()
+    ..writeAll(outcomes.map((o) => '- ${o.label}\n'))
     ..writeln()
     ..writeln('## Milestones')
     ..writeln();
@@ -154,13 +158,13 @@ String goalOkf(AppState s, Goal g, DateTime now) {
         }
       }
       if (gd != null && gd.sessions.isNotEmpty) {
-        final cur = s.habitSessionsBefore(h, today);
+        final cur = s.habitSessionsBefore(h, today) - gd.sessionStart;
         b
           ..writeln()
           ..writeln('Sessions:')
           ..writeln();
         for (final (i, x) in gd.sessions.indexed) {
-          b.writeln('- ${_box(i < done)} ${i + 1}. $x${i == cur ? ' ← today' : ''}');
+          b.writeln('- ${_box(i < done - gd.sessionStart)} ${i + 1}. $x${i == cur ? ' ← today' : ''}');
         }
       }
       b.writeln();
@@ -214,16 +218,29 @@ String goalOkf(AppState s, Goal g, DateTime now) {
         ..writeln(r.summary)
         ..writeln();
       for (final (i, x) in r.suggestions.indexed) {
-        b.writeln('- ${_box(r.applied.contains(i))} $x');
+        final milestone = g.milestones.where((m) => m.id == r.milestoneLinks[i]).firstOrNull;
+        b.writeln('- ${_box(milestone != null)} $x${milestone == null ? '' : ' → ${milestone.title}'}');
       }
       b.writeln();
     }
   }
+  final shared = g.noteEntries.where((n) => n.shared);
+  final dated = shared.where((n) => n.changedOn != null).toList()
+    ..sort((a, b) => b.changedOn!.compareTo(a.changedOn!));
   b
     ..writeln()
     ..writeln('## Notes')
-    ..writeln()
-    ..writeln(g.notes.trim().isEmpty ? 'None yet.' : g.notes.trim());
+    ..writeln();
+  if (shared.isEmpty) b.writeln('None shared.');
+  for (final n in shared.where((n) => n.changedOn == null)) {
+    b..writeln(n.text)..writeln();
+  }
+  if (dated.isNotEmpty) {
+    b..writeln('### Latest assumption updates')..writeln();
+    for (final n in dated) {
+      b..writeln('${n.changedOn} · ${n.text}')..writeln();
+    }
+  }
   return b.toString();
 }
 

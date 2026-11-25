@@ -13,6 +13,8 @@
 /// rules live in `lib/logic/stats.dart`.
 library;
 
+import '../goals/goal_pause.dart';
+
 import '../models.dart';
 
 enum HabitKind { check, count, duration, metric, practice }
@@ -151,6 +153,7 @@ class HabitEntry {
 }
 
 class HabitDef {
+  List<GoalPause> goalPauses = const [];
   final String id;
 
   /// Small sequential number used to derive stable notification ids.
@@ -219,6 +222,7 @@ class HabitDef {
   /// habit already existed.
   bool isScheduledOn(DateTime day) {
     final d = DateTime(day.year, day.month, day.day);
+    if (goalPauses.any((p) => p.contains(d))) return false;
     if (d.isBefore(DateTime(createdAt.year, createdAt.month, createdAt.day))) return false;
     return (weekdays.isEmpty || weekdays.contains(day.weekday)) &&
         (restDates.isEmpty || !restDates.contains(d.toIso8601String().split('T').first));

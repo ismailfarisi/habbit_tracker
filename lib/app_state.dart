@@ -18,6 +18,7 @@ import 'services/task_tools.dart';
 import 'services/tts.dart';
 import 'services/voice_input.dart';
 import 'goals/goal.dart';
+import 'goals/goal_pause.dart';
 import 'quran/surahs.dart';
 import 'finance/finance.dart';
 
@@ -183,7 +184,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
       setPrayerStatus(day, name, done ? (logFor(day).prayerStatus[name] ?? prayerOnTime) : null);
 
   // ---------- Habits ----------
-  List<HabitDef> get activeHabits => habits.where((h) => !h.archived).toList();
+  List<HabitDef> get activeHabits => habits.where((h) => !h.archived && !h.goalPauses.any((p) => p.end == null)).toList();
 
   bool tracksItem(String id, {bool task = false}) => tracking.tracksItem(settings, goals, id, task: task);
   List<HabitDef> get trackedHabits => activeHabits.where((h) => tracksItem(h.id)).toList();
@@ -218,6 +219,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
       }
       habits.add(stored);
     }
+    projectGoalPauses(goals, habits: [stored]);
     await _commitHabits();
     return stored;
   }
@@ -339,12 +341,12 @@ class AppState extends ChangeNotifier implements TaskBackend {
     await _commitTasks();
   }
 
-  /// The active goal a task or habit belongs to, if any.
+  /// Owner used for grouping. Paused work stays grouped until restored.
   Goal? goalFor(String id) {
     for (final g in goals) {
-      if (!g.archived && (g.taskIds.contains(id) || g.habitIds.contains(id))) return g;
+      if (!g.archived && g.owns(id)) return g;
     }
-    return null;
+    return goals.where((g) => g.workPaused && g.owns(id)).firstOrNull;
   }
 
   /// Days before [day] on which [h] was done.
@@ -368,7 +370,8 @@ class AppState extends ChangeNotifier implements TaskBackend {
     final q = t.guide?.quran;
     if (q == null || !t.isRepeating || q.perDay != null || q.mode == 'revise') return q;
     final end = q.surah >= 1 && q.surah <= surahInfo.length ? surahInfo[q.surah - 1].$3 : q.to;
-    return QuranRef(q.surah, q.from, end, mode: q.mode, perDay: q.to - q.from + 1);
+    return QuranRef(q.surah, q.from, end, mode: q.mode, perDay: q.to - q.from + 1,
+      startSession: q.startSession, coveredBefore: q.coveredBefore, earlier: q.earlier);
   }
 
   /// Sessions of a repeating task done before [day], plus those planned
@@ -386,15 +389,15 @@ class AppState extends ChangeNotifier implements TaskBackend {
   /// The planned session ([index], [count], [text]) for [day], if any.
   (int, int, String)? _session(List<String> s, int done) => s.isEmpty
       ? null
-      : done < s.length
+      : done >= 0 && done < s.length
       ? (done + 1, s.length, s[done])
       : null;
 
   (int, int, String)? sessionForHabit(HabitDef h, DateTime day, {DateTime? today}) =>
-      _session(h.guide?.sessions ?? const [], habitSessionsBefore(h, day, today: today));
+      _session(h.guide?.sessions ?? const [], habitSessionsBefore(h, day, today: today) - (h.guide?.sessionStart ?? 0));
 
   (int, int, String)? sessionForTask(Task t, DateTime day, {DateTime? today}) =>
-      t.isRepeating ? _session(t.guide?.sessions ?? const [], taskSessionsBefore(t, day, today: today)) : null;
+      t.isRepeating ? _session(t.guide?.sessions ?? const [], taskSessionsBefore(t, day, today: today) - (t.guide?.sessionStart ?? 0)) : null;
 
   /// Days from today up to (not including) a future [day] that [pending]
   /// says are still to do: their portions are assumed done by then.
@@ -420,22 +423,107 @@ class AppState extends ChangeNotifier implements TaskBackend {
     return null;
   }
 
-  /// Adds [goal], or replaces the stored goal with the same id.
-  Future<void> upsertGoal(Goal goal) async {
-    final i = goals.indexWhere((g) => g.id == goal.id);
-    i < 0 ? goals.add(goal) : goals[i] = goal;
-    await saveGoals();
+  Future<void> setGoalArchived(Goal goal, {required bool archived, bool pauseWork = true, DateTime? at}) async {
+    if (goal.archived == archived) return;
+    final day = dayKey(at ?? DateTime.now());
+    final next = goal.copy()..archived = archived;
+    if (archived && pauseWork) next.pauses.add(GoalPause(day));
+    if (!archived && next.pauses.isNotEmpty && next.pauses.last.end == null) {
+      final from = next.pauses.removeLast().start;
+      if (from.compareTo(day) < 0) next.pauses.add(GoalPause(from, day));
+    }
+    await upsertGoal(next, expected: goal);
+    await _reschedule();
   }
 
-  Future<void> deleteGoal(String id) async {
-    goals.removeWhere((g) => g.id == id);
-    await saveGoals();
+  /// All review state and its linked milestone are committed in one goals write.
+  Future<void> applyGoalSuggestion(Goal g, GoalReview review, int index, {required String title, String? due}) async {
+    if (goalById(g.id) != g || !g.reviews.contains(review)) throw StateError('The review has changed.');
+    if (title.trim().isEmpty) throw ArgumentError('Enter a milestone.');
+    if (review.milestoneLinks.containsKey(index)) return;
+    final next = g.copy();
+    final r = next.reviews[g.reviews.indexOf(review)];
+    final m = Milestone(id: 'm${newTaskId()}', title: title.trim(), due: due);
+    next.milestones.add(m);
+    r.milestoneLinks[index] = m.id;
+    r.applied.add(index);
+    await upsertGoal(next, expected: g);
   }
 
-  Future<void> saveGoals() async {
-    await storage.saveGoals(goals);
+  Future<void> undoGoalSuggestion(Goal g, GoalReview review, int index) async {
+    if (goalById(g.id) != g || !g.reviews.contains(review)) throw StateError('The review has changed.');
+    final next = g.copy();
+    final r = next.reviews[g.reviews.indexOf(review)];
+    final id = r.milestoneLinks.remove(index);
+    if (id == null) return;
+    r.applied.remove(index);
+    next.milestones.removeWhere((m) => m.id == id);
+    await upsertGoal(next, expected: g);
+  }
+
+  Future<Goal> createLocalGoal({required String outcome, required String practice, required List<int> weekdays,
+      String? reminder, required DateTime end}) async {
+    if (outcome.trim().isEmpty || practice.trim().isEmpty) throw ArgumentError('Enter an outcome and a practice.');
+    final now = DateTime.now();
+    final h = HabitDef(id: newHabitId(), seq: nextHabitSeq(habits), title: practice.trim(),
+      weekdays: List.of(weekdays), reminder: reminder, createdAt: now);
+    final g = Goal(id: 'g${newTaskId()}', title: outcome.trim(), start: dayKey(now), end: dayKey(end),
+      cadence: cadenceFor(end.difference(now).inDays), habitIds: [h.id]);
+    // An interrupted second write can leave an empty goal, but never a new
+    // practice with no owner. A reported failure rolls back its ownership.
+    await _queueGoalWrite(() async {
+      final next = [...goals, g];
+      await storage.saveGoals(next);
+      try {
+        await storage.saveHabits([...habits, h]);
+      } catch (_) {
+        await storage.saveGoals(goals);
+        rethrow;
+      }
+      goals = next;
+      habits.add(h);
+      _goalsChanged();
+    });
+    await _reschedule();
+    return g;
+  }
+
+  Future<void> _goalWrite = Future.value();
+
+  Future<void> _queueGoalWrite(Future<void> Function() operation) {
+    final next = _goalWrite.then((_) => operation());
+    _goalWrite = next.catchError((Object _) {});
+    return next;
+  }
+
+  void _goalsChanged() {
+    projectGoalPauses(goals, tasks: tasks, habits: habits);
     notifyListeners();
   }
+
+  /// Persist the whole goal (including review status and its milestone) before
+  /// exposing it to another frame. Serialize independent writes to the same key.
+  Future<void> upsertGoal(Goal goal, {Goal? expected}) => _queueGoalWrite(() async {
+    if (expected != null && goalById(goal.id) != expected) throw StateError('The goal has changed.');
+    final next = [...goals];
+    final i = next.indexWhere((g) => g.id == goal.id);
+    i < 0 ? next.add(goal) : next[i] = goal;
+    await storage.saveGoals(next);
+    goals = next;
+    _goalsChanged();
+  });
+
+  Future<void> deleteGoal(String id) => _queueGoalWrite(() async {
+    final next = goals.where((g) => g.id != id).toList();
+    await storage.saveGoals(next);
+    goals = next;
+    _goalsChanged();
+  });
+
+  Future<void> saveGoals() => _queueGoalWrite(() async {
+    await storage.saveGoals(goals);
+    _goalsChanged();
+  });
 
   /// Changes money data in place, then saves it.
   Future<void> updateFinance(void Function(Finance f) change) async {

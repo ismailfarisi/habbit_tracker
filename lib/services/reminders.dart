@@ -141,6 +141,7 @@ List<PlannedReminder> planReminders(
     }
 
     for (final t in tasks) {
+      if (t.pausedOn(date)) continue;
       final when = t.reminderOn(date);
       if (when == null) continue;
       final anytime = !t.isRepeating && t.date == null && !t.isOneOffDone;
