@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:habit_tracker/app_state.dart';
 import 'package:habit_tracker/logic/stats.dart';
@@ -186,6 +185,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Drink water'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Later'));
+    await tester.pumpAndSettle();
     final water = state.habits.single;
     expect(find.text('Drink water'), findsOneWidget);
     expect(find.text('0/8 glasses'), findsOneWidget);
@@ -202,112 +203,34 @@ void main() {
   });
 
   group('onboarding', () {
-    testWidgets('a fresh install walks through every step and lands on Today', (tester) async {
+    testWidgets('one choice opens a doable practice and it can be completed offline', (tester) async {
       phone(tester);
       final state = await pumpApp(tester, prefs: {});
-      expect(find.byType(OnboardingScreen), findsOneWidget);
-      expect(find.byType(NavigationBar), findsNothing);
-
-      await tester.tap(find.text('Get started'));
-      await tester.pumpAndSettle();
-      expect(find.text('Where do you pray?'), findsOneWidget);
-      await tester.tap(find.text('Choose my city'));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.widgetWithText(TextField, 'Search city'), 'dub');
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Dubai'));
-      await tester.pumpAndSettle();
-      expect(state.settings.locationName, 'Dubai');
-      expect(state.settings.calcMethod, 'dubai');
-      expect(state.settings.latitude, closeTo(25.2, 0.1));
-
-      await tester.tap(find.text('Continue'));
-      await tester.pumpAndSettle();
-      expect(find.text('Allow notifications and alarms'), findsOneWidget);
-      expect(find.text('Open battery settings'), findsOneWidget);
-      expect(find.text('Xiaomi / Redmi / POCO'), findsOneWidget);
-      expect(find.text('Samsung'), findsOneWidget);
-      expect(find.text('Huawei / Honor'), findsOneWidget);
-      await tester.tap(find.text('Allow notifications and alarms'));
-      await tester.pumpAndSettle();
-      expect(find.textContaining('Notifications are blocked'), findsOneWidget, reason: 'no plugin in tests');
-      await tester.ensureVisible(find.text('Open battery settings'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Open battery settings'));
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-
-      await tester.tap(find.text('Continue'));
-      await tester.pumpAndSettle();
-      expect(find.text('When do you want to wake up?'), findsOneWidget);
-      expect(find.text('Sleep goal: 7.5 hours'), findsOneWidget);
-      expect(find.textContaining('be asleep by about 9:30'), findsOneWidget);
-      await tester.drag(find.byType(Slider), const Offset(400, 0));
-      await tester.pumpAndSettle();
-      expect(state.settings.sleepHours, greaterThan(7.5));
-
-      await tester.tap(find.text('Continue'));
-      await tester.pumpAndSettle();
+      expect(find.text('What would you like to work on?'), findsOneWidget);
       await tester.tap(find.text('Drink water'));
-      await tester.tap(find.text('Read Quran'));
       await tester.pumpAndSettle();
-
-      await tester.tap(find.text('Continue'));
-      await tester.pumpAndSettle();
-      expect(find.text('AI coach (optional)'), findsOneWidget);
-      expect(find.widgetWithText(TextField, 'API key'), findsOneWidget);
-      await tester.tap(find.text('Skip'));
-      await tester.pumpAndSettle();
-
       expect(state.settings.onboarded, isTrue);
       expect(state.apiKey, isEmpty);
-      expect(state.habits.map((h) => h.title), containsAll(['Drink water', 'Read Quran']));
-      expect(find.byType(OnboardingScreen), findsNothing);
-      expect(find.byType(NavigationBar), findsOneWidget);
+      expect(state.settings.hasLocation, isFalse);
+      expect(find.text('Enable'), findsNothing);
+      expect(find.text('Set up'), findsNothing);
+      final habit = state.habits.single;
+      expect(habit.target, 1);
+      await tester.tap(find.byTooltip('More'));
+      await tester.pumpAndSettle();
+      expect(state.habitEntry(DateTime.now(), habit.id).value, 1);
+      expect(dayScore(DateTime.now(), state.settings, state.logs, habits: state.habits).toString(), '1/1');
+      expect(find.text('Done (1)'), findsOneWidget);
     });
 
-    testWidgets('denied location permission falls back to the city list', (tester) async {
-      phone(tester);
-      final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      const channel = MethodChannel('flutter.baseflow.com/geolocator');
-      messenger.setMockMethodCallHandler(
-        channel,
-        (call) async => switch (call.method) {
-          'isLocationServiceEnabled' => true,
-          'checkPermission' || 'requestPermission' => 0, // LocationPermission.denied
-          _ => null,
-        },
-      );
-      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-      final state = await pumpApp(tester, prefs: {});
-      await tester.tap(find.text('Get started'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Use my location'));
-      await tester.pumpAndSettle();
-      expect(find.text('Location permission was denied. Pick your city instead.'), findsOneWidget);
-      expect(find.widgetWithText(TextField, 'Search city'), findsOneWidget);
-      await tester.tap(find.text('Abu Dhabi'));
-      await tester.pumpAndSettle();
-      expect(state.settings.locationName, 'Abu Dhabi');
-      expect(find.text('Abu Dhabi'), findsOneWidget, reason: 'shown as the chosen location');
-    });
-
-    testWidgets('an AI key entered during onboarding is saved', (tester) async {
+    testWidgets('choosing later skips the practice and all setup', (tester) async {
       phone(tester);
       final state = await pumpApp(tester, prefs: {});
-      await tester.tap(find.text('Get started'));
+      await tester.tap(find.text('Choose later'));
       await tester.pumpAndSettle();
-      for (var i = 0; i < 4; i++) {
-        await tester.tap(find.text(i < 2 ? 'Not now' : 'Continue'));
-        await tester.pumpAndSettle();
-      }
-      await tester.enterText(find.widgetWithText(TextField, 'API key'), 'sk-or-abc');
-      await tester.tap(find.text('Finish'));
-      await tester.pumpAndSettle();
-      expect(state.apiKey, 'sk-or-abc');
-      expect(state.settings.onboarded, isTrue);
+      expect(find.text('Choose a practice when you’re ready.'), findsOneWidget);
       expect(state.habits, isEmpty);
-      expect(find.byType(NavigationBar), findsOneWidget);
+      expect(state.storage.loadSettings().todayHidden, containsAll(['wake', 'prayers']));
     });
 
     testWidgets('existing installs skip onboarding', (tester) async {

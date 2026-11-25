@@ -268,8 +268,9 @@ void main() {
     testWidgets('Today shows the Money card once money is logged', (tester) async {
       final s = (await tester.runAsync(state))!;
       expect(todayItems(s, now).any((i) => i.kind == TodayKind.money), isFalse);
+      await s.updateFinance((f) => f.debts.add(Debt(person: 'Shop', amount: 1000, due: now)));
       await s.addMoney(MoneyEntry(at: now, amount: 500, category: 'Food'));
-      expect(todayItems(s, now).firstWhere((i) => i.kind == TodayKind.money).done, isTrue);
+      expect(todayItems(s, now).firstWhere((i) => i.kind == TodayKind.money).done, isFalse);
       await pump(
         tester,
         Scaffold(
@@ -277,6 +278,7 @@ void main() {
         ),
       );
       expect(find.byKey(const Key('today-log-spend')), findsOneWidget);
+      expect(find.text('Pay Shop'), findsOneWidget);
     });
 
     testWidgets('Zakat keeps what you typed when you go back', (tester) async {

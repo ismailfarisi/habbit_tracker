@@ -18,6 +18,7 @@ import 'diagnostics_screen.dart';
 import '../widgets/focus_settings.dart';
 import '../widgets/voice_settings.dart';
 import '../widgets/adaptive.dart';
+import '../widgets/optional_setup.dart';
 import '../finance/money_screen.dart' show pickCurrency, openMoney;
 
 /// A Settings subpage; the main page lists these.
@@ -466,6 +467,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   : const Icon(Icons.my_location),
               label: const Text('Use my current location'),
             ),
+            TextButton(onPressed: () async {
+              final city = await pickPrayerCity(context);
+              if (city == null || !mounted) return;
+              _locName.text = city.name;
+              _lat.text = city.lat.toString();
+              _lng.text = city.lng.toString();
+              await state.updateSettings((s) {
+                s.locationName = city.name;
+                s.latitude = city.lat;
+                s.longitude = city.lng;
+                s.calcMethod = city.calcMethod;
+              });
+            }, child: const Text('Choose my city')),
             const SizedBox(height: 12),
             TextField(
               controller: _locName,
@@ -595,6 +609,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
       ),
+      const BatteryTips(),
     ],
     SettingsSection.voice => [
       VoiceSettingsSection(state: state),

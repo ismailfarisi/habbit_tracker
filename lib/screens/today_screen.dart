@@ -18,11 +18,13 @@ import '../widgets/cards/wake_card.dart';
 import '../widgets/yesterday_prompt.dart';
 import 'habit_detail_screen.dart';
 import 'home_screen.dart';
-import '../widgets/adaptive.dart';
 import '../goals/goal.dart';
 import '../finance/money_screen.dart';
 import '../goals/goals_card.dart';
 import '../logic/tasks.dart';
+import '../widgets/customize_today.dart';
+import '../widgets/task_editor.dart';
+import 'settings_screen.dart';
 
 enum TodayKind { wake, prayers, habit, goal, tasks, money }
 
@@ -91,8 +93,8 @@ List<TodayItem> todayItems(AppState state, DateTime now) {
           done: habitDone(log.habits[h.id], h),
         ),
     TodayItem(TodayKind.tasks, due: TasksCard.nextDue(state, now), done: TasksCard.allDone(state, now)),
-    if (!state.finance.isEmpty || s.todayPinned.contains('money'))
-      TodayItem(TodayKind.money, done: state.finance.onDay(now).isNotEmpty),
+    if (!state.finance.isEmpty || s.showMoneyShortcut || s.todayPinned.contains('money'))
+      const TodayItem(TodayKind.money, done: false),
   ]..removeWhere((i) => s.todayHidden.contains(i.id));
   int byDue(TodayItem a, TodayItem b) {
     if (a.due == null || b.due == null) return (a.due == null ? 1 : 0) - (b.due == null ? 1 : 0);
@@ -141,14 +143,21 @@ class _TodayScreenState extends State<TodayScreen> {
   Timer? _tick;
   bool? _notifOn;
   bool _showDone = false;
+  bool _showLater = false;
 
   @override
   void initState() {
     super.initState();
     _tick = Timer.periodic(const Duration(seconds: 30), (_) => setState(() {}));
     _checkNotifications();
+    widget.state.notifications.wakeChallengeRequest.addListener(_openWake);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openWake());
     widget.state.requestedHabit.addListener(_openRequestedHabit);
     WidgetsBinding.instance.addPostFrameCallback((_) => _openRequestedHabit());
+  }
+
+  void _openWake() {
+    if (mounted) openRequestedWake(context, widget.state, (widget.clock ?? DateTime.now)());
   }
 
   /// Opens the habit a notification asked for.
@@ -166,6 +175,7 @@ class _TodayScreenState extends State<TodayScreen> {
 
   @override
   void dispose() {
+    widget.state.notifications.wakeChallengeRequest.removeListener(_openWake);
     widget.state.requestedHabit.removeListener(_openRequestedHabit);
     _tick?.cancel();
     super.dispose();
@@ -185,7 +195,7 @@ class _TodayScreenState extends State<TodayScreen> {
   Widget _card(TodayItem i, DateTime now) {
     final state = widget.state;
     return switch (i.kind) {
-      TodayKind.wake => WakeCard(key: const ValueKey('today-wake'), state: state, log: state.logFor(now)),
+      TodayKind.wake => WakeCard(key: const ValueKey('today-wake'), state: state, log: state.logFor(now), now: now),
       TodayKind.prayers => PrayerCard(
         key: const ValueKey('today-prayers'),
         state: state,
@@ -204,187 +214,110 @@ class _TodayScreenState extends State<TodayScreen> {
     };
   }
 
+  Widget _featured(TodayItem item, DateTime now) {
+    final state = widget.state;
+    if (item.kind == TodayKind.goal) {
+      final (habits, tasks) = GoalTodayCard.itemsFor(state, item.goal!, now);
+      final habit = habits.where((h) => !habitDone(state.habitEntry(now, h.id), h)).firstOrNull;
+      if (habit != null) {
+        return Card(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: GoalHabitTile(state: state, habit: habit, day: now)));
+      }
+      return _task(tasks.firstWhere((t) => !t.isDoneOn(now)), now);
+    }
+    if (item.kind == TodayKind.tasks) {
+      return _task(TasksCard.ordered(state, now).first, now);
+    }
+    return _card(item, now);
+  }
+
+  Widget _task(Task task, DateTime now) => Card(child: Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    child: TaskTile(state: widget.state, task: task, day: now),
+  ));
+
+  void _openPrayerSetup() {
+    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => Scaffold(
+      appBar: AppBar(title: Text(SettingsSection.prayers.label)),
+      body: SafeArea(child: SettingsScreen(state: widget.state, section: SettingsSection.prayers)),
+    )));
+  }
+
+  Widget _setup(String id, String message, String action, VoidCallback onTap) => ListTile(
+    title: Text(message),
+    subtitle: Wrap(children: [
+      TextButton(onPressed: onTap, child: Text(action)),
+      TextButton(onPressed: () => widget.state.updateSettings((s) => s.dismissedTodaySetup.add(id)),
+        child: const Text('Dismiss')),
+    ]),
+  );
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: widget.state,
       builder: (context, _) {
-        final s = widget.state.settings;
+        final state = widget.state;
+        final s = state.settings;
         final now = (widget.clock ?? DateTime.now)();
-        final score = dayScore(now, s, widget.state.logs, habits: widget.state.habits, tasks: widget.state.tasks);
-        final items = todayItems(widget.state, now);
-        final pending = items.where((i) => !i.done).toList();
+        final items = todayItems(state, now);
+        final tasks = TasksCard.ordered(state, now);
+        final pending = items.where((i) => !i.done && (i.kind != TodayKind.tasks || tasks.isNotEmpty)).toList();
+        final first = pending.firstOrNull;
+        final money = pending.where((i) => i.kind == TodayKind.money && i != first).firstOrNull;
+        final later = [
+          if (first != null && (first.kind == TodayKind.goal || first.kind == TodayKind.tasks)) first,
+          ...pending.skip(1).where((i) => i != money),
+        ];
         final done = items.where((i) => i.done).toList();
+        final resume = state.logs.isNotEmpty && missedYesterday(state, now).isNotEmpty;
+        final hasReminder = s.tracks('wake') || s.tracks('prayers') ||
+            state.activeHabits.any((h) => h.reminder != null) || state.tasks.any((t) => t.time != null && !t.isOneOffDone);
+        final theme = Theme.of(context);
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            _Header(now: now, score: score, hijri: '${hijriToday(s, now)}'),
-            const SizedBox(height: 16),
-            if (_notifOn == false)
-              _Banner(
-                icon: Icons.notifications_off_outlined,
-                text: 'Notifications are off, so reminders and the wake-up alarm can\'t ring.',
-                action: 'Enable',
-                onTap: _enableNotifications,
-              ),
-            if (!s.hasLocation && !s.useManualPrayer)
-              _Banner(
-                icon: Icons.location_off_outlined,
-                text: 'Set your location for accurate prayer times. Using default times for now.',
-                action: 'Set up',
-                onTap: () => widget.onNavigate(HomeScreen.settingsTab),
-              ),
-            YesterdayPrompt(state: widget.state, now: now),
-            for (final i in pending) _card(i, now),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Center(
-                child: FilledButton.tonalIcon(
-                  style: compactButton,
-                  onPressed: () => showAddHabitSheet(context, widget.state),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add habit'),
-                ),
-              ),
-            ),
-            if (done.isNotEmpty) ...[
-              ListTile(
-                key: const ValueKey('today-done'),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                leading: const Icon(Icons.check_circle_outline),
-                title: Text('Done (${done.length})', style: const TextStyle(fontWeight: FontWeight.w600)),
-                trailing: Icon(_showDone ? Icons.expand_less : Icons.expand_more),
-                onTap: () => setState(() => _showDone = !_showDone),
-              ),
-              if (_showDone)
-                for (final i in done) _card(i, now),
+            Row(children: [
+              Expanded(child: Text(first == null ? 'Your day' : resume ? 'Resume today' : 'Up next',
+                style: theme.textTheme.headlineSmall)),
+              TextButton.icon(onPressed: () => customizeToday(context, state),
+                icon: const Icon(Icons.tune), label: const Text('Customize')),
+            ]),
+            Padding(padding: const EdgeInsets.only(bottom: 12),
+              child: Text([
+                DateFormat('EEEE, d MMMM').format(now),
+                if (s.tracks('prayers')) hijriToday(s, now).toString(),
+              ].join(' · '), style: theme.textTheme.bodySmall)),
+            if (first != null) _featured(first, now)
+            else Padding(padding: const EdgeInsets.only(bottom: 12),
+              child: Text(done.isEmpty ? 'Choose a practice when you’re ready.' : 'Your planned actions are complete.')),
+            if (money != null) _card(money, now),
+            if (later.isNotEmpty) ...[
+              ListTile(title: const Text('Later'), trailing: Icon(_showLater ? Icons.expand_less : Icons.expand_more),
+                onTap: () => setState(() => _showLater = !_showLater)),
+              if (_showLater) for (final i in later) _card(i, now),
             ],
+            if (resume && now.hour < promptUntilHour)
+              ExpansionTile(title: const Text('Edit yesterday’s log'), children: [
+                YesterdayPrompt(state: state, now: now),
+              ]),
+            if (done.isNotEmpty) ...[
+              ListTile(key: const ValueKey('today-done'), leading: const Icon(Icons.check_circle_outline),
+                title: Text('Done (${done.length})'), trailing: Icon(_showDone ? Icons.expand_less : Icons.expand_more),
+                onTap: () => setState(() => _showDone = !_showDone)),
+              if (_showDone) for (final i in done) _card(i, now),
+            ],
+            Align(alignment: AlignmentDirectional.centerStart, child: TextButton.icon(
+              onPressed: () => showAddHabitSheet(context, state), icon: const Icon(Icons.add),
+              label: const Text('Add habit'),
+            )),
+            if (s.tracks('prayers') && !s.hasLocation && !s.useManualPrayer && !s.dismissedTodaySetup.contains('location'))
+              _setup('location', 'Choose your location for local prayer times.', 'Set up', _openPrayerSetup),
+            if (_notifOn == false && s.remindersEnabled && hasReminder && !s.dismissedTodaySetup.contains('notifications'))
+              _setup('notifications', 'Enable notifications to hear your reminders.', 'Enable', _enableNotifications),
           ],
         );
       },
-    );
-  }
-}
-
-class _Header extends StatelessWidget {
-  final DateTime now;
-  final DayScore score;
-  final String hijri;
-  const _Header({required this.now, required this.score, required this.hijri});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context);
-    final dark = t.brightness == Brightness.dark;
-    final greeting = now.hour < 12 ? 'Good morning' : (now.hour < 17 ? 'Good afternoon' : 'Good evening');
-    const fg = Colors.white;
-    final dim = fg.withValues(alpha: 0.78);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 18, 16, 18),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: dark ? const [Color(0xFF0F4F4A), Color(0xFF0F766E)] : const [Color(0xFF0F766E), Color(0xFF14B8A6)],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF0F766E).withValues(alpha: dark ? 0.25 : 0.3),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  greeting,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: t.textTheme.titleLarge?.copyWith(color: fg, fontSize: 22, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 2),
-                Text(DateFormat('EEEE, d MMMM').format(now), style: t.textTheme.bodyMedium?.copyWith(color: dim)),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                  decoration: BoxDecoration(color: fg.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(99)),
-                  child: Text(
-                    hijri,
-                    key: const ValueKey('hijri-date'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: t.textTheme.labelSmall?.copyWith(color: fg, fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 64,
-            height: 64,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                CircularProgressIndicator(
-                  value: score.fraction,
-                  strokeWidth: 6,
-                  strokeCap: StrokeCap.round,
-                  color: fg,
-                  backgroundColor: fg.withValues(alpha: 0.2),
-                ),
-                Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '$score',
-                        style: t.textTheme.titleMedium?.copyWith(color: fg, fontWeight: FontWeight.w800),
-                      ),
-                      Text('today', style: t.textTheme.labelSmall?.copyWith(color: dim)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Banner extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  final String action;
-  final VoidCallback onTap;
-  const _Banner({required this.icon, required this.text, required this.action, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = Theme.of(context).colorScheme;
-    return Card(
-      color: c.tertiaryContainer,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
-        child: Row(
-          children: [
-            Icon(icon, color: c.onTertiaryContainer),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(text, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: c.onTertiaryContainer)),
-            ),
-            TextButton(onPressed: onTap, child: Text(action)),
-          ],
-        ),
-      ),
     );
   }
 }
