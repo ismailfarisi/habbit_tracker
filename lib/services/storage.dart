@@ -24,6 +24,10 @@ class Storage {
   static const _habitsKey = 'habits.v1';
   static const _goalsKey = 'goals.v1';
   static const _financeKey = 'finance.v1';
+  static const _threadsKey = 'chat.threads.v1';
+  static const _currentThreadKey = 'chat.current.v1';
+  static const _legacyChatKey = 'chat.v1';
+  static const _restoreJournal = 'restore.undo.v1';
   static const backupVersion = 2;
   static const _apiKeyKey = 'openrouter_api_key';
   static const openaiKeyName = 'openai_api_key';
@@ -152,10 +156,32 @@ class Storage {
   Future<void> saveSecret(String name, String value) =>
       value.isEmpty ? _secure.delete(key: name) : _secure.write(key: name, value: value);
 
-  /// True when there is nothing worth backing up (fresh install or reset).
-  bool get hasNoData => loadLogs().isEmpty && loadTasks().isEmpty && loadHabits().isEmpty;
+  // Presence matters for currency-only or zakat-only Money and settings-only installs.
+  bool get hasNoData => !prefs.containsKey(_settingsKey) && !hasFinance &&
+      loadLogs().isEmpty && loadTasks().isEmpty && loadHabits().isEmpty && loadGoals().isEmpty &&
+      !prefs.containsKey(_legacyChatKey) && (prefs.getString(_threadsKey) ?? '[]') == '[]';
 
-  String exportJson({DateTime? at}) => const JsonEncoder.withIndent('  ').convert({
+  Map<String, dynamic> _exportChat() {
+    final raw = prefs.getString(_threadsKey);
+    final legacy = prefs.getString(_legacyChatKey);
+    if (raw == null && legacy != null) {
+      final messages = jsonDecode(legacy) as List;
+      if (messages.isNotEmpty) {
+        return {
+          'threads': [
+            {'id': 'legacy', 'title': 'Chat', 'messages': messages},
+          ],
+          'current': 'legacy',
+        };
+      }
+    }
+    return {
+      'threads': raw == null ? [] : jsonDecode(raw),
+      'current': prefs.getString(_currentThreadKey),
+    };
+  }
+
+  String exportJson({DateTime? at, bool includeChat = false}) => const JsonEncoder.withIndent('  ').convert({
     'app': 'daily-discipline',
     'version': backupVersion,
     'exportedAt': (at ?? DateTime.now()).toIso8601String(),
@@ -165,73 +191,140 @@ class Storage {
     'habits': loadHabits().map((h) => h.toJson()).toList(),
     'goals': loadGoals().map((g) => g.toJson()).toList(),
     'finance': loadFinance().toJson(),
+    if (includeChat) 'chat': _exportChat(),
   });
 
-  /// Restores a backup made by [exportJson] (version 2) or by an older
-  /// build (version 1, no `habits`; they are derived from the training
-  /// data). Throws [FormatException] on bad input.
-  Future<void> importJson(String raw) async {
-    final j = _decodeBackup(raw);
-    final settings = Settings.fromJson((j['settings'] as Map).cast<String, dynamic>());
-    final logs = (j['logs'] as Map).map(
-      (k, v) => MapEntry(k as String, DayLog.fromJson((v as Map).cast<String, dynamic>())),
-    );
-    final tasks = ((j['tasks'] as List?) ?? const [])
-        .map((e) => Task.fromJson((e as Map).cast<String, dynamic>()))
-        .toList();
-    final rawHabits = j['habits'];
-    final habits = rawHabits is List
-        ? rawHabits.map((e) => HabitDef.fromJson((e as Map).cast<String, dynamic>())).toList()
-        : migrateHabits(settings, logs, existingInstall: true);
-    await saveSettings(settings);
-    await saveLogs(logs);
-    await saveTasks(tasks);
-    await saveHabits(habits);
-    await saveGoals([
-      for (final g in (j['goals'] as List? ?? const [])) Goal.fromJson((g as Map).cast<String, dynamic>()),
-    ]);
-    await saveFinance(j['finance'] is Map ? Finance.fromJson((j['finance'] as Map).cast()) : Finance());
-  }
-
-  /// Checks [raw] without restoring it, for a confirmation prompt.
-  /// Throws [FormatException] like [importJson].
-  static BackupSummary describeBackup(String raw) {
-    final j = _decodeBackup(raw);
-    final logs = j['logs'];
-    final tasks = j['tasks'];
-    final habits = j['habits'];
-    if (logs is! Map || j['settings'] is! Map) throw const FormatException('The backup is incomplete');
-    return BackupSummary(
-      version: (j['version'] as num?)?.toInt() ?? 1,
-      exportedAt: DateTime.tryParse('${j['exportedAt'] ?? ''}'),
-      days: logs.length,
-      tasks: tasks is List ? tasks.length : 0,
-      habits: habits is List ? habits.length : null,
-    );
-  }
-
-  static Map _decodeBackup(String raw) {
-    final Object? j;
+  /// Materialize the same replacement for preview and import. Serializing every
+  /// domain here also forces lazy casts in nested model fields before writing.
+  static ({BackupSummary summary, Map<String, String?> values}) _prepare(String raw) {
+    final dynamic decoded;
     try {
-      j = jsonDecode(raw.trim());
+      decoded = jsonDecode(raw);
     } on FormatException {
       throw const FormatException('Not a Daily Discipline backup (the file is not JSON)');
     }
-    if (j is! Map || j['app'] != 'daily-discipline') {
+    if (decoded is! Map<String, dynamic> || decoded['app'] != 'daily-discipline') {
       throw const FormatException('Not a Daily Discipline backup');
     }
-    final v = j['version'];
-    if (v is num && v > backupVersion) {
+    final j = decoded;
+    final version = j['version'] ?? 1;
+    if (version is! int || version < 1) throw const FormatException('Invalid backup version');
+    if (version > backupVersion) {
       throw const FormatException('This backup was made by a newer version of the app. Update the app first.');
     }
-    return j;
+    String section = 'settings';
+    try {
+      List<Map<String, dynamic>> rows(String key) {
+        section = key;
+        return j.containsKey(key) ? (j[key] as List).cast<Map<String, dynamic>>() : [];
+      }
+      final settings = Settings.fromJson(j['settings'] as Map<String, dynamic>);
+      final values = <String, String?>{_settingsKey: jsonEncode(settings.toJson())};
+      section = 'logs';
+      final logs = (j['logs'] as Map<String, dynamic>).map(
+        (k, v) => MapEntry(k, DayLog.fromJson(v as Map<String, dynamic>)),
+      );
+      values[_logsKey] = jsonEncode({for (final e in logs.entries) if (!e.value.isEmpty) e.key: e.value.toJson()});
+      final tasks = rows('tasks').map(Task.fromJson).toList();
+      values[_tasksKey] = jsonEncode(tasks);
+      final habits = j.containsKey('habits')
+          ? rows('habits').map(HabitDef.fromJson).toList()
+          : migrateHabits(settings, logs, existingInstall: true);
+      values[_habitsKey] = jsonEncode(habits);
+      final goals = rows('goals').map(Goal.fromJson).toList();
+      values[_goalsKey] = jsonEncode(goals);
+      section = 'finance';
+      final money = j.containsKey('finance') ? j['finance'] as Map<String, dynamic> : <String, dynamic>{};
+      if (money.containsKey('zakat') && money['zakat'] is! Map) {
+        throw const FormatException('Invalid zakat settings');
+      }
+      final finance = Finance.fromJson(money);
+      values[_financeKey] = jsonEncode(finance.toJson());
+      section = 'chat';
+      int? threadCount;
+      if (j.containsKey('chat')) {
+        final chat = j['chat'] as Map<String, dynamic>;
+        final threads = (chat['threads'] as List).cast<Map<String, dynamic>>();
+        _validateThreads(threads);
+        threadCount = threads.length;
+        values[_threadsKey] = jsonEncode(threads);
+        values[_currentThreadKey] = chat['current'] as String?;
+        values[_legacyChatKey] = null;
+      }
+      return (values: values, summary: BackupSummary(
+        version: version,
+        exportedAt: DateTime.tryParse('${j['exportedAt'] ?? ''}'),
+        days: logs.length, tasks: tasks.length, habits: j.containsKey('habits') ? habits.length : null,
+        goals: j.containsKey('goals') ? goals.length : null,
+        money: j.containsKey('finance') ? finance : null, chats: threadCount,
+      ));
+    } catch (_) {
+      throw FormatException('The $section section of this backup is invalid');
+    }
+  }
+
+  static void _validateThreads(List<Map<String, dynamic>> threads) {
+    for (final t in threads) {
+      if (t['id'] is! String || (t['title'] != null && t['title'] is! String) ||
+          (t['goalId'] != null && t['goalId'] is! String) ||
+          (t['updatedAt'] != null && t['updatedAt'] is! String)) {
+        throw const FormatException('Invalid conversation');
+      }
+      for (final m in (t['messages'] as List).cast<Map>()) {
+        if (m['role'] is! String || (m['content'] != null && m['content'] is! String) ||
+            (m['callId'] != null && m['callId'] is! String)) throw const FormatException('Invalid message');
+        for (final c in (m['calls'] as List? ?? []).cast<Map>()) {
+          if (c['id'] is! String || c['name'] is! String || (c['args'] != null && c['args'] is! String)) {
+            throw const FormatException('Invalid message');
+          }
+        }
+      }
+    }
+  }
+
+  static BackupSummary describeBackup(String raw) => _prepare(raw).summary;
+
+  Future<void> _set(String key, String? value) async {
+    final ok = value == null ? await prefs.remove(key) : await prefs.setString(key, value);
+    if (!ok) throw StateError('Could not save device data');
+  }
+
+  // A single journal holds exact old strings (including absent keys), so a
+  // failed write or a process stopped between writes can undo the whole import.
+  Future<void> recoverInterruptedRestore() async {
+    final raw = prefs.getString(_restoreJournal);
+    if (raw == null) return;
+    final old = (jsonDecode(raw) as Map).cast<String, String?>();
+    for (final e in old.entries) {
+      await _set(e.key, e.value);
+    }
+    await _set(_restoreJournal, null);
+  }
+
+  Future<void> importJson(String raw) async {
+    final values = _prepare(raw).values;
+    await recoverInterruptedRestore();
+    final old = {for (final key in values.keys) key: prefs.getString(key)};
+    await _set(_restoreJournal, jsonEncode(old));
+    try {
+      for (final e in values.entries) {
+        await _set(e.key, e.value);
+      }
+      await _set(_restoreJournal, null);
+    } catch (_) {
+      // SharedPreferences changes its cache before the platform write finishes.
+      // Use the local copy even if removing the journal itself failed.
+      for (final e in old.entries) {
+        await _set(e.key, e.value);
+      }
+      await _set(_restoreJournal, null);
+      rethrow;
+    }
   }
 
   Future<void> clearAll() async {
-    await prefs.remove(_settingsKey);
-    await prefs.remove(_logsKey);
-    await prefs.remove(_tasksKey);
-    await prefs.remove(_financeKey);
+    if (!await prefs.clear()) throw StateError('Could not clear device data');
+    // Record an empty habit list so saving new settings cannot trigger v1 migration.
     await saveHabits([]);
     await saveApiKey('');
     await saveSecret(openaiKeyName, '');
@@ -239,21 +332,33 @@ class Storage {
   }
 }
 
-/// What a backup holds; [habits] is null for a version 1 backup (they are
-/// derived from its training data on import).
 class BackupSummary {
   final int version;
   final DateTime? exportedAt;
-  final int days;
-  final int tasks;
-  final int? habits;
-  const BackupSummary({required this.version, this.exportedAt, required this.days, required this.tasks, this.habits});
+  final int days, tasks;
+  final int? habits, goals, chats;
+  final Finance? money;
+  const BackupSummary({required this.version, this.exportedAt, required this.days, required this.tasks,
+    this.habits, this.goals, this.money, this.chats});
 
   String describe() => [
     '$days ${days == 1 ? 'day' : 'days'} of history',
     '$tasks ${tasks == 1 ? 'task' : 'tasks'}',
     if (habits != null) '$habits ${habits == 1 ? 'habit' : 'habits'}',
   ].join(', ');
+
+  String manifest() {
+    final f = money;
+    return [
+      'Settings, ${describe()}${habits == null ? ' (habits derived from older training data)' : ''}.',
+      goals == null ? 'Goals omitted.' : 'Goals: $goals.',
+      if (f == null) 'Money omitted.' else
+        'Money (${f.currency}): ${f.entries.length} entries, ${f.budgets.length} budgets, '
+        '${f.pots.length} savings pots, ${f.debts.length} debts and zakat settings.',
+      chats == null ? 'Chat omitted.' : 'Chat: $chats conversations.',
+      'API keys, screen-time history, diagnostics and downloaded files are excluded.',
+    ].join('\n');
+  }
 }
 
 /// Habits for data written before habits existed: an install that already

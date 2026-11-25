@@ -46,6 +46,8 @@ class AppState extends ChangeNotifier implements TaskBackend {
 
   /// Text to send in the Chat tab (e.g. "review my goal"), set from other screens.
   final ValueNotifier<ChatRequest?> chatPrompt = ValueNotifier(null);
+  /// Invalidates conversations and routes that were built with replaced data.
+  int dataGeneration = 0;
   String apiKey = '';
 
   /// Keys for OpenAI / xAI (Grok) voices; separate from the OpenRouter key.
@@ -61,6 +63,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
   AppState._(this.storage, this.notifications, this.settings, this.logs, this.tasks, this.habits);
 
   static Future<AppState> load(Storage storage, NotificationService n) async {
+    await storage.recoverInterruptedRestore();
     final s = AppState._(
       storage,
       n,
@@ -472,23 +475,34 @@ class AppState extends ChangeNotifier implements TaskBackend {
     habits = storage.loadHabits();
     goals = storage.loadGoals();
     finance = storage.loadFinance();
+    _invalidateDataViews();
     notifyListeners();
     await _reschedule();
   }
 
   Future<void> resetAll() async {
+    await notifications.clearAll();
+    await HomeWidgetService.clear();
+    await ChannelFocusGuard.clearDeviceData();
     await storage.clearAll();
     settings = Settings();
     logs = {};
     tasks = [];
     habits = [];
     goals = [];
-    finance = Finance(currency: finance.currency);
+    finance = Finance(currency: currencyForLocale(ui.PlatformDispatcher.instance.locale.toString()));
     apiKey = '';
     openaiKey = '';
     xaiKey = '';
+    _invalidateDataViews();
     notifyListeners();
-    await _reschedule();
+  }
+
+  void _invalidateDataViews() {
+    dataGeneration++;
+    requestedHabit.value = null;
+    requestedTab.value = null;
+    chatPrompt.value = null;
   }
 }
 

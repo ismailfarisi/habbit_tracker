@@ -78,6 +78,7 @@ class DailyDisciplineApp extends StatelessWidget {
     return ListenableBuilder(
       listenable: state,
       builder: (context, _) => MaterialApp(
+        key: ValueKey(state.dataGeneration),
         title: 'Daily Discipline',
         navigatorKey: _navigator,
         builder: (_, navigator) => _VoiceActivity(child: navigator!),

@@ -243,6 +243,10 @@ class NotificationService {
     await Diagnostics.global?.count(Diagnostics.remindersFailed, failed);
   }
 
+  Future<void> clearAll() async {
+    if (_ready) await _plugin.cancelAll();
+  }
+
   Future<void> cancel(int id) async {
     if (_ready) await _plugin.cancel(id: id);
   }
