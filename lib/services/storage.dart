@@ -156,10 +156,13 @@ class Storage {
   Future<void> saveSecret(String name, String value) =>
       value.isEmpty ? _secure.delete(key: name) : _secure.write(key: name, value: value);
 
-  // Presence matters for currency-only or zakat-only Money and settings-only installs.
+  // Check stored values instead of forgiving model loaders: a damaged
+  // local record must not be mistaken for an empty device before replacement.
+  bool _empty(String key, String empty) => !prefs.containsKey(key) || prefs.get(key) == empty;
+
   bool get hasNoData => !prefs.containsKey(_settingsKey) && !hasFinance &&
-      loadLogs().isEmpty && loadTasks().isEmpty && loadHabits().isEmpty && loadGoals().isEmpty &&
-      !prefs.containsKey(_legacyChatKey) && (prefs.getString(_threadsKey) ?? '[]') == '[]';
+      _empty(_logsKey, '{}') && _empty(_tasksKey, '[]') && _empty(_habitsKey, '[]') &&
+      _empty(_goalsKey, '[]') && _empty(_threadsKey, '[]') && _empty(_legacyChatKey, '[]');
 
   Map<String, dynamic> _exportChat() {
     final raw = prefs.getString(_threadsKey);
@@ -185,12 +188,12 @@ class Storage {
     'app': 'daily-discipline',
     'version': backupVersion,
     'exportedAt': (at ?? DateTime.now()).toIso8601String(),
-    'settings': loadSettings().toJson(),
-    'logs': {for (final e in loadLogs().entries) e.key: e.value.toJson()},
+    'settings': prefs.containsKey(_settingsKey) ? jsonDecode(prefs.getString(_settingsKey)!) : Settings().toJson(),
+    'logs': jsonDecode(prefs.getString(_logsKey) ?? '{}'),
     'tasks': jsonDecode(prefs.getString(_tasksKey) ?? '[]'),
-    'habits': loadHabits().map((h) => h.toJson()).toList(),
-    'goals': loadGoals().map((g) => g.toJson()).toList(),
-    'finance': loadFinance().toJson(),
+    'habits': hasHabits ? jsonDecode(prefs.getString(_habitsKey)!) : loadHabits().map((h) => h.toJson()).toList(),
+    'goals': jsonDecode(prefs.getString(_goalsKey) ?? '[]'),
+    'finance': hasFinance ? jsonDecode(prefs.getString(_financeKey)!) : Finance().toJson(),
     if (includeChat) 'chat': _exportChat(),
   });
 
@@ -218,11 +221,16 @@ class Storage {
         section = key;
         return j.containsKey(key) ? (j[key] as List).cast<Map<String, dynamic>>() : [];
       }
-      final settings = Settings.fromJson(j['settings'] as Map<String, dynamic>);
+      final rawSettings = j['settings'] as Map<String, dynamic>;
+      final settings = Settings.fromJson(rawSettings);
+      final apps = rawSettings['focusApps'] as List?;
+      if (apps != null && apps.length != settings.focusApps.length) {
+        throw const FormatException('Invalid focus apps');
+      }
       final values = <String, String?>{_settingsKey: jsonEncode(settings.toJson())};
       section = 'logs';
       final logs = (j['logs'] as Map<String, dynamic>).map(
-        (k, v) => MapEntry(k, DayLog.fromJson(v as Map<String, dynamic>)),
+        (k, v) => MapEntry(k, _readBackupDay(k, v as Map<String, dynamic>)),
       );
       values[_logsKey] = jsonEncode({for (final e in logs.entries) if (!e.value.isEmpty) e.key: e.value.toJson()});
       final tasks = rows('tasks').map(Task.fromJson).toList();
@@ -235,11 +243,29 @@ class Storage {
       values[_goalsKey] = jsonEncode(goals);
       section = 'finance';
       final money = j.containsKey('finance') ? j['finance'] as Map<String, dynamic> : <String, dynamic>{};
-      if (money.containsKey('zakat') && money['zakat'] is! Map) {
-        throw const FormatException('Invalid zakat settings');
+      // Additional currencies are independent ledgers. Count each in its own
+      // unit and preserve their optional fields when moving between app builds.
+      final ledgers = [money, ...(money['otherLedgers'] as List? ?? []).cast<Map<String, dynamic>>()];
+      final ledgerLines = <String>[];
+      for (final ledger in ledgers) {
+        if (ledger.containsKey('zakat') && ledger['zakat'] is! Map) {
+          throw const FormatException('Invalid zakat settings');
+        }
+        final f = Finance.fromJson(ledger);
+        // Force lazy model casts now, before a single preference is changed.
+        jsonEncode(f.toJson());
+        final recurring = (ledger['recurring'] as List? ?? []).cast<Map<String, dynamic>>().toList();
+        final categories = (ledger['customCategories'] as List? ?? []).cast<String>().toList();
+        final parts = [
+          _count(f.entries.length, 'entry', 'entries'),
+          _count(f.budgets.length, 'budget'), _count(f.pots.length, 'savings pot'),
+          _count(f.debts.length, 'debt'),
+          if (recurring.isNotEmpty) _count(recurring.length, 'recurring item'),
+          if (categories.isNotEmpty) _count(categories.length, 'custom category', 'custom categories'),
+        ];
+        ledgerLines.add('Money (${f.currency}): ${parts.join(', ')} and zakat settings.');
       }
-      final finance = Finance.fromJson(money);
-      values[_financeKey] = jsonEncode(finance.toJson());
+      values[_financeKey] = jsonEncode(money);
       section = 'chat';
       int? threadCount;
       if (j.containsKey('chat')) {
@@ -256,12 +282,43 @@ class Storage {
         exportedAt: DateTime.tryParse('${j['exportedAt'] ?? ''}'),
         days: logs.length, tasks: tasks.length, habits: j.containsKey('habits') ? habits.length : null,
         goals: j.containsKey('goals') ? goals.length : null,
-        money: j.containsKey('finance') ? finance : null, chats: threadCount,
+        money: j.containsKey('finance') ? ledgerLines : null, chats: threadCount,
       ));
     } catch (_) {
       throw FormatException('The $section section of this backup is invalid');
     }
   }
+
+  // The on-device log reader tolerates damaged subtrees for display. During
+  // destructive import they must be checked rather than silently discarded.
+  static DayLog _readBackupDay(String key, Map<String, dynamic> day) {
+    if (DateTime.tryParse(key) == null) throw const FormatException('Invalid log day');
+    for (final field in ['wakeAt', 'bedtimeAt']) {
+      final at = day[field];
+      if (at != null && (at is! String || DateTime.tryParse(at) == null)) {
+        throw const FormatException('Invalid log time');
+      }
+    }
+    if ((day['prayers'] as List? ?? []).any((v) => v is! String) ||
+        (day['prayerStatus'] as Map? ?? {}).values.any((v) => v is! String)) {
+      throw const FormatException('Invalid prayer record');
+    }
+    for (final entry in (day['habits'] as Map? ?? {}).values.cast<Map>()) {
+      final sessions = (entry['sessions'] as List? ?? []).cast<Map>();
+      for (final row in [entry, ...sessions]) {
+        if ((row['metrics'] as Map? ?? {}).values.any((v) => v is! num)) {
+          throw const FormatException('Invalid habit metrics');
+        }
+      }
+      if (['value', 'minutes'].any((f) => entry[f] != null && entry[f] is! num)) {
+        throw const FormatException('Invalid habit log');
+      }
+    }
+    return DayLog.fromJson(day);
+  }
+
+  static String _count(int n, String singular, [String? plural]) =>
+      '$n ${n == 1 ? singular : plural ?? '${singular}s'}';
 
   static void _validateThreads(List<Map<String, dynamic>> threads) {
     for (final t in threads) {
@@ -272,7 +329,9 @@ class Storage {
       }
       for (final m in (t['messages'] as List).cast<Map>()) {
         if (m['role'] is! String || (m['content'] != null && m['content'] is! String) ||
-            (m['callId'] != null && m['callId'] is! String)) throw const FormatException('Invalid message');
+            (m['callId'] != null && m['callId'] is! String)) {
+          throw const FormatException('Invalid message');
+        }
         for (final c in (m['calls'] as List? ?? []).cast<Map>()) {
           if (c['id'] is! String || c['name'] is! String || (c['args'] != null && c['args'] is! String)) {
             throw const FormatException('Invalid message');
@@ -301,15 +360,21 @@ class Storage {
     await _set(_restoreJournal, null);
   }
 
-  Future<void> importJson(String raw) async {
+  Future<void> importJson(
+    String raw, {
+    void Function()? beforeReplace,
+    Future<void> Function()? beforeCommit,
+  }) async {
     final values = _prepare(raw).values;
     await recoverInterruptedRestore();
     final old = {for (final key in values.keys) key: prefs.getString(key)};
     await _set(_restoreJournal, jsonEncode(old));
     try {
+      beforeReplace?.call();
       for (final e in values.entries) {
         await _set(e.key, e.value);
       }
+      await beforeCommit?.call();
       await _set(_restoreJournal, null);
     } catch (_) {
       // SharedPreferences changes its cache before the platform write finishes.
@@ -337,7 +402,7 @@ class BackupSummary {
   final DateTime? exportedAt;
   final int days, tasks;
   final int? habits, goals, chats;
-  final Finance? money;
+  final List<String>? money;
   const BackupSummary({required this.version, this.exportedAt, required this.days, required this.tasks,
     this.habits, this.goals, this.money, this.chats});
 
@@ -348,14 +413,12 @@ class BackupSummary {
   ].join(', ');
 
   String manifest() {
-    final f = money;
     return [
       'Settings, ${describe()}${habits == null ? ' (habits derived from older training data)' : ''}.',
       goals == null ? 'Goals omitted.' : 'Goals: $goals.',
-      if (f == null) 'Money omitted.' else
-        'Money (${f.currency}): ${f.entries.length} entries, ${f.budgets.length} budgets, '
-        '${f.pots.length} savings pots, ${f.debts.length} debts and zakat settings.',
-      chats == null ? 'Chat omitted.' : 'Chat: $chats conversations.',
+      ...?money,
+      if (money == null) 'Money omitted.',
+      chats == null ? 'Chat omitted.' : 'Chat: $chats ${chats == 1 ? 'conversation' : 'conversations'}.',
       'API keys, screen-time history, diagnostics and downloaded files are excluded.',
     ].join('\n');
   }

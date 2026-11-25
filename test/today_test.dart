@@ -405,7 +405,12 @@ void main() {
       expect(find.byKey(ValueKey('settings-${x.name}')), findsOneWidget);
     }
     expect(find.text('Target wake-up time'), findsNothing);
-    expect(find.text('Reset all data'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('settings-backup')));
+    await tester.pumpAndSettle();
+    expect(find.text('Reset and keep a recovery copy'), findsOneWidget);
+    expect(find.text('Erase this device'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Wake-up & sleep'));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(AppBar, 'Wake-up & sleep'), findsOneWidget);

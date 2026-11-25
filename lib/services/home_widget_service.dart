@@ -125,9 +125,12 @@ class HomeWidgetService {
 
   static Future<void> clear() async {
     if (!enabled) return;
-    await HomeWidget.cancelScheduledWidgetUpdates(qualifiedAndroidName: homeWidgetProvider);
-    await HomeWidget.saveWidgetData<String>(homeWidgetDataKey, null, deleteFile: false);
-    await HomeWidget.updateWidget(qualifiedAndroidName: homeWidgetProvider);
+    final canceled = await HomeWidget.cancelScheduledWidgetUpdates(qualifiedAndroidName: homeWidgetProvider);
+    final removed = await HomeWidget.saveWidgetData<String>(homeWidgetDataKey, null, deleteFile: false);
+    final redrawn = await HomeWidget.updateWidget(qualifiedAndroidName: homeWidgetProvider);
+    if (canceled == false || removed == false || redrawn == false) {
+      throw StateError('Could not clear the home widget');
+    }
   }
 
   static bool _registered = false;

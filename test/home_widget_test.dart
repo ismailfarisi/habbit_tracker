@@ -113,6 +113,13 @@ void main() {
     expect((savedData()['slots'] as List).first['prayer'], 'Asr');
   });
 
+  test('clearing the device removes the timeline, cancels alarms and redraws the empty widget', () async {
+    await HomeWidgetService.clear();
+    expect(calls.map((c) => c.method), ['cancelScheduledWidgetUpdates', 'saveWidgetData', 'updateWidget']);
+    expect(calls[1].arguments, containsPair('data', null));
+    expect(calls[1].arguments, containsPair('id', homeWidgetDataKey));
+  });
+
   test('publish is a no-op when disabled and survives plugin errors', () async {
     HomeWidgetService.debugEnabled = false;
     await HomeWidgetService.publish(s, {});

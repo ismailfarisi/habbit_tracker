@@ -14,6 +14,8 @@ import '../services/openrouter_models.dart';
 import 'reminders_screen.dart';
 import 'wake_challenge_screen.dart';
 import '../services/storage.dart';
+import '../services/portable_backup.dart';
+import 'backup_dialogs.dart';
 import 'diagnostics_screen.dart';
 import '../widgets/focus_settings.dart';
 import '../widgets/voice_settings.dart';
@@ -76,7 +78,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
-  void _snack(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  void _snack(String msg) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
 
   String _fmt(TimeOfDay t) => DateFormat.jm().format(DateTime(2000, 1, 1, t.hour, t.minute));
 
@@ -160,19 +164,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _exportFile(BuildContext tileContext) async {
     final box = tileContext.findRenderObject() as RenderBox?;
     try {
-      await _backup.shareExport(origin: box == null ? null : box.localToGlobal(Offset.zero) & box.size);
+      final origin = box == null ? null : box.localToGlobal(Offset.zero) & box.size;
+      final contents = await previewPortableBackup(context, state.storage, copy: false);
+      if (contents != null && mounted) await _backup.shareExport(origin: origin, contents: contents);
     } catch (e) {
       _snack('Could not share the backup: $e');
     }
   }
 
   Future<void> _copyBackup() async {
-    await Clipboard.setData(ClipboardData(text: state.storage.exportJson()));
-    _snack('Backup copied to clipboard.');
+    try {
+      final contents = await previewPortableBackup(context, state.storage, copy: true);
+      if (contents == null || !mounted) return;
+      await Clipboard.setData(ClipboardData(text: contents));
+      _snack('Backup copied to clipboard.');
+    } catch (e) {
+      _snack('Could not copy the backup: $e');
+    }
   }
 
   Future<void> _pickAutomaticBackup() async {
-    final list = await _backup.automaticBackups();
+    final List<AutoBackup> list;
+    try {
+      list = await _backup.automaticBackups();
+    } catch (e) {
+      _snack('Could not open on-device recovery: $e');
+      return;
+    }
     if (!mounted) return;
     final picked = await showModalBottomSheet<AutoBackup>(
       context: context,
@@ -185,7 +203,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: Text('Restore from automatic backup'),
               subtitle: Text(
                 'A copy is saved on this phone once a day (last ${BackupService.keepDaily} kept), '
-                'and before every restore.',
+                'and before restore or reset. New recovery copies include chats and Money.',
               ),
             ),
             if (list.isEmpty)
@@ -195,7 +213,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ListTile(
                   leading: Icon(b.beforeRestore ? Icons.restore : Icons.event_available_outlined),
                   title: Text(DateFormat.yMMMEd().add_jm().format(b.at)),
-                  subtitle: Text(b.beforeRestore ? 'Saved before a restore' : 'Daily backup'),
+                  subtitle: Text(b.beforeRestore ? 'Saved before a restore' :
+                      b.reason == BackupService.resetReason ? 'Saved before a reset' : 'Daily backup'),
                   onTap: () => Navigator.pop(c, b),
                 ),
           ],
@@ -214,7 +233,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _confirmRestore(String raw, String what) async {
     final BackupSummary info;
+    final encrypted = PortableBackup.isEncrypted(raw);
     try {
+      if (!mounted) return;
+      if (encrypted) {
+        final unlocked = await unlockPortableBackup(context, raw);
+        if (unlocked == null) return;
+        raw = unlocked;
+      }
       info = Storage.describeBackup(raw);
     } catch (e) {
       _snack(_errorText(e));
@@ -228,14 +254,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context,
       title: 'Restore backup?',
       message:
-          'Restore $what: ${info.describe()}.$made\n\n'
-          'This replaces the data on this phone. A copy of your current data is saved first, so you can '
-          'undo this from "Restore from automatic backup". Your API key is not part of backups.',
+          'Restore $what?$made\n${encrypted ? 'Password-protected backup.' : 'Unencrypted backup.'}\n\n${info.manifest()}\n\n'
+          'This replaces settings, history, habits, tasks, goals and Money. '
+          '${info.chats == null ? 'Existing chats stay here.' : 'This replaces your conversations.'} '
+          'Undo with the copy saved under “Restore from automatic backup”.',
       confirm: 'Restore',
     );
     if (!ok) return;
     try {
       await _backup.restore(state, raw);
+      if (!mounted) return;
       _syncFields();
       _snack('Backup restored.');
     } catch (e) {
@@ -250,23 +278,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _reset() async {
+  Future<void> _reset({required bool keepRecovery}) async {
+    final action = keepRecovery ? 'Reset' : 'Erase';
     final ok = await confirmDialog(
       context,
-      title: 'Reset everything?',
-      message:
-          'This deletes all your history, settings, API key and diagnostics. '
-          'Automatic backups stay on this phone, so you can still restore one.',
-      confirm: 'Reset',
+      title: keepRecovery ? 'Reset and keep a recovery copy?' : 'Erase this device?',
+      message: keepRecovery
+          ? 'Save settings, history, tasks, habits, goals, Money and chats in on-device recovery, then reset the app. '
+              'API keys, screen-time history, diagnostics and app documents will be deleted, including downloaded recitations. Downloaded voice models stay.'
+          : 'Delete settings, all history, Money, chats, API keys, screen-time history, diagnostics, app documents '
+              '(including recitations) and all on-device recovery copies. Downloaded voice models and copies you saved outside the app stay. '
+              'You cannot undo this here.',
+      confirm: action,
       destructive: true,
     );
-    if (!ok) return;
-    await state.resetAll();
-    await _diagnostics.clear();
-    _lat.clear();
-    _lng.clear();
-    _locName.clear();
-    _snack('All data cleared.');
+    if (!ok || !mounted) return;
+    try {
+      await _backup.resetDevice(state, keepRecovery: keepRecovery);
+      if (!mounted) return;
+      _syncFields();
+      _snack(keepRecovery ? 'Reset complete. Recovery copies are on this phone.' : 'Device data erased.');
+    } catch (e) {
+      _snack('$action could not finish. Try again. $e');
+    }
   }
 
   Future<int?> _pickNumber(String title, int value, int min, int max, {String unit = 'min'}) async {
@@ -395,13 +429,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _entry(SettingsSection.voice, 'Dictation and the spoken voice'),
       _entry(SettingsSection.ai, 'OpenRouter key and model'),
       _header('Data'),
-      _entry(SettingsSection.backup, 'Export, import and automatic backups'),
+      _entry(SettingsSection.backup, 'Portable backup, on-device recovery and erase'),
       _entry(SettingsSection.diagnostics, _diagnostics.enabled ? 'Collecting on this phone' : 'Off'),
-      ListTile(
-        leading: Icon(Icons.delete_forever_outlined, color: Theme.of(context).colorScheme.error),
-        title: Text('Reset all data', style: TextStyle(color: Theme.of(context).colorScheme.error)),
-        onTap: _reset,
-      ),
       const SizedBox(height: 24),
       ],
     ];
@@ -645,11 +674,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       AiKeySection(state: state),
     ],
     SettingsSection.backup => [
+      _header('Portable backup'),
       Builder(
         builder: (tile) => ListTile(
           leading: const Icon(Icons.ios_share),
           title: const Text('Export backup file'),
-          subtitle: const Text('Save or send your history, habits, tasks and settings as a file'),
+          subtitle: const Text('Preview, protect with a password and save off this device'),
           onTap: () => _exportFile(tile),
         ),
       ),
@@ -660,12 +690,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         onTap: _importFile,
       ),
       ListTile(
-        leading: const Icon(Icons.history),
-        title: const Text('Restore from automatic backup'),
-        subtitle: const Text('Saved on this phone once a day, last ${BackupService.keepDaily} kept'),
-        onTap: _pickAutomaticBackup,
-      ),
-      ListTile(
         leading: const Icon(Icons.copy_outlined),
         title: const Text('Copy backup to clipboard'),
         onTap: _copyBackup,
@@ -674,6 +698,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
         leading: const Icon(Icons.content_paste_outlined),
         title: const Text('Paste backup'),
         onTap: _pasteBackup,
+      ),
+      _header('On-device recovery'),
+      ListTile(
+        leading: const Icon(Icons.history),
+        title: const Text('Restore from automatic backup'),
+        subtitle: const Text('Saved on this phone once a day, last ${BackupService.keepDaily} kept'),
+        onTap: _pickAutomaticBackup,
+      ),
+      ListTile(
+        leading: const Icon(Icons.restore),
+        title: const Text('Reset and keep a recovery copy'),
+        subtitle: const Text('Start fresh and keep your chats, goals and Money in a local backup'),
+        onTap: () => _reset(keepRecovery: true),
+      ),
+      ListTile(
+        leading: Icon(Icons.delete_forever_outlined, color: Theme.of(context).colorScheme.error),
+        title: const Text('Erase this device'),
+        subtitle: const Text('Delete personal data and all on-device recovery copies'),
+        onTap: () => _reset(keepRecovery: false),
       ),
     ],
     SettingsSection.focus => [FocusSettingsSection(state: state)],
