@@ -26,23 +26,15 @@ class CalendarDay {
 CalendarDay calendarDay(AppState s, DateTime day, DateTime today) {
   final d = dateOnly(day);
   final past = !d.isAfter(dateOnly(today));
-  final log = s.logs[dayKey(d)];
   final tasks = tasksForDay(s.tasks, d, today: today);
   final habits = s.activeHabits.where((h) => h.isScheduledOn(d)).toList();
-  var done = 0, total = 0;
-  if (past) {
-    total += 1 + prayerNames.length;
-    if (log?.wakeAt != null) done++;
-    done += prayerNames.where((p) => log?.prayers.contains(p) ?? false).length;
-    for (final h in habits) {
-      total++;
-      if (habitDone(log?.habits[h.id], h)) done++;
-    }
-    total += tasks.length;
-    done += tasks.where((t) => t.isDoneOn(d)).length;
-  }
+  final score = past ? dayScore(d, s.settings, s.logs, habits: habits, tasks: tasks) : const DayScore(0, 0);
+  // The shared habit score covers repeating tasks. The calendar also shows
+  // completion for dated one-offs on the selected day.
+  final oneOffs = past ? tasks.where((t) => !t.isRepeating) : const <Task>[];
+  final done = score.done + oneOffs.where((t) => t.isDoneOn(d)).length;
   final key = dayKey(d);
-  return CalendarDay(done, total, tasks.length, [
+  return CalendarDay(done, score.total + oneOffs.length, tasks.length, [
     for (final g in s.goals.where((g) => !g.archived))
       for (final m in g.milestones)
         if (m.due == key) m,
@@ -100,8 +92,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
           final scale = MediaQuery.textScalerOf(context);
           final agenda = _agendaChoice ?? (MediaQuery.sizeOf(context).width < 600 || scale.scale(14) > 20);
           final unit = agenda ? 'day' : 'month';
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+          final overview = Column(
             children: [
               Align(
                 child: SegmentedButton<bool>(
@@ -137,8 +128,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         children: [
                           Row(
                             children: [
-                              for (final name in const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])
-                                Expanded(child: Center(child: Text(name, style: t.textTheme.labelSmall))),
+                              for (final name in const ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'])
+                                Expanded(child: Center(child: Text(name.substring(0, 3), semanticsLabel: name, style: t.textTheme.labelSmall))),
                             ],
                           ),
                           GridView.count(
@@ -175,8 +166,27 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   ),
                 ),
               ],
-              _DayDetails(key: ValueKey(_selected), state: state, day: _selected, today: _today),
             ],
+          );
+          final details = _DayDetails(key: ValueKey(_selected), state: state, day: _selected, today: _today);
+          final split = !agenda && MediaQuery.sizeOf(context).width >= 840 && scale.scale(14) <= 20;
+          const padding = EdgeInsets.fromLTRB(12, 4, 12, 24);
+          if (split) {
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1200),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Expanded(child: SingleChildScrollView(primary: false, padding: padding, child: overview)),
+                  Expanded(child: SingleChildScrollView(primary: false, padding: padding, child: details)),
+                ]),
+              ),
+            );
+          }
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 800),
+              child: ListView(padding: padding, children: [overview, details]),
+            ),
           );
         },
       ),
@@ -207,7 +217,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         if (isToday) 'Today',
         '${info.tasks} planned tasks', '${info.habits} planned habits',
         '${info.milestones.length} milestones',
-        if (info.total > 0) '${info.done} of ${info.total} done' else 'Forecast',
+        if (isForecastDay(d, today: _today)) 'Forecast' else '${info.done} of ${info.total} tracked items done',
       ].join(', '),
       child: InkWell(
         onTap: select,
@@ -292,7 +302,7 @@ class _DayDetails extends StatelessWidget {
                   ),
               ],
             ),
-            if (past && info.total > 0) Text('${info.done} of ${info.total} done', style: muted),
+            if (past && info.total > 0) Text('${info.done} of ${info.total} tracked items done', style: muted),
             if (!past)
               Text('Forecast · A missed session moves later portions and sessions back.', style: muted),
             for (final g in [...groups.keys.whereType<Goal>(), if (groups.containsKey(null)) null]) ...[
