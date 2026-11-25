@@ -60,6 +60,7 @@ class FocusGuardService : AccessibilityService() {
     }
 
     override fun onServiceConnected() {
+        connected = this
         store = FocusStore(this)
         registerReceiver(screen, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
@@ -67,7 +68,13 @@ class FocusGuardService : AccessibilityService() {
         })
     }
 
+    override fun onUnbind(intent: Intent?): Boolean {
+        if (connected === this) connected = null
+        return super.onUnbind(intent)
+    }
+
     override fun onDestroy() {
+        if (connected === this) connected = null
         leave()
         runCatching { unregisterReceiver(screen) }
         super.onDestroy()
@@ -93,7 +100,12 @@ class FocusGuardService : AccessibilityService() {
         if (pkg == current) return
         leave()
         val cfg = store.config()
-        if (!cfg.enabled || !cfg.apps.containsKey(pkg)) return
+        if (!cfg.enabled || !cfg.apps.containsKey(pkg) || pkg in FocusSafety.excluded(this)) return
+        if (pkg == testPackage && SystemClock.elapsedRealtime() < testExpires) {
+            testPackage = null
+            showPause(pkg, cfg, PauseReason.TEST)
+            return
+        }
         val now = SystemClock.elapsedRealtime()
         if (countOpen && !(pkg == leftPkg && now - leftAt < REOPEN_MS)) store.addOpen(pkg)
         current = pkg
@@ -121,11 +133,24 @@ class FocusGuardService : AccessibilityService() {
     /** Pauses [pkg] if it should be; returns true while it may stay open. */
     private fun check(pkg: String): Boolean {
         val cfg = store.config()
+        if (!cfg.enabled || pkg !in cfg.apps) {
+            leave()
+            return false
+        }
         val c = Calendar.getInstance()
         val minute = c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)
         val reason = FocusRules.reason(cfg, pkg, minute, store.usedMs(pkg), store.isExtended(pkg)) ?: return true
+        if (pkg in FocusSafety.excluded(this)) {
+            leave()
+        } else {
+            showPause(pkg, cfg, reason)
+        }
+        return false
+    }
+
+    private fun showPause(pkg: String, cfg: FocusConfig, reason: PauseReason) {
         leave()
-        val app = cfg.apps[pkg] ?: return false
+        val app = cfg.apps[pkg] ?: return
         pausedPkg = pkg
         startActivity(
             Intent(this, PauseActivity::class.java)
@@ -135,9 +160,20 @@ class FocusGuardService : AccessibilityService() {
                 .putExtra(PauseActivity.REASON, reason.name)
                 .putExtra(PauseActivity.LIMIT, app.limitMin)
                 .putExtra(PauseActivity.WAKE, cfg.wakeLabel)
-                .putExtra(PauseActivity.CAN_EXTEND, !cfg.strict && store.canExtend(pkg)),
+                .putExtra(PauseActivity.CAN_EXTEND, reason != PauseReason.TEST && !cfg.strict && store.canExtend(pkg)),
         )
-        return false
+    }
+
+    private var testPackage: String? = null
+    private var testExpires = 0L
+
+    /** The same foreground event and pause screen as enforcement, once, with no grace or usage change. */
+    fun armTest(pkg: String): Boolean {
+        val cfg = store.config()
+        if (!cfg.enabled || pkg !in cfg.apps || pkg in FocusSafety.excluded(this)) return false
+        testPackage = pkg
+        testExpires = SystemClock.elapsedRealtime() + 10_000
+        return true
     }
 
     private fun keyboardPackage(): String? =
@@ -145,6 +181,9 @@ class FocusGuardService : AccessibilityService() {
             ?.let { ComponentName.unflattenFromString(it)?.packageName }
 
     companion object {
+        var connected: FocusGuardService? = null
+            private set
+
         const val TICK_MS = 10_000L
         const val REOPEN_MS = 3_000L
         private val IGNORED = setOf("com.android.systemui")

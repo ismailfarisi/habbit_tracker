@@ -29,6 +29,7 @@ class PauseActivity : Activity() {
         super.onCreate(savedInstanceState)
         val pkg = intent.getStringExtra(PKG) ?: return finish()
         val name = intent.getStringExtra(NAME) ?: pkg
+        val test = intent.getStringExtra(REASON) == PauseReason.TEST.name
         val sleep = intent.getStringExtra(REASON) == PauseReason.SLEEP.name
         val limit = intent.getIntExtra(LIMIT, 0)
         val wake = intent.getStringExtra(WAKE).orEmpty()
@@ -38,10 +39,11 @@ class PauseActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(28), dp(72), dp(28), dp(40))
         }
-        col.addView(text(if (sleep) "Time to rest" else "Time to pause", 30f, FG, bold = true))
+        col.addView(text(if (test) "Test pause" else if (sleep) "Time to rest" else "Time to pause", 30f, FG, bold = true))
         col.addView(
             text(
-                if (sleep) "It's your sleep time. $name opens again at $wake."
+                if (test) "Focus detected $name and opened this pause screen."
+                else if (sleep) "It's your sleep time. $name opens again at $wake."
                 else "You've used your $limit min of $name for today.",
                 17f, MUTED, top = 12,
             ),

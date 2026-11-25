@@ -12,6 +12,7 @@ import '../services/backup_service.dart';
 import '../services/diagnostics.dart';
 import '../services/openrouter.dart';
 import '../services/openrouter_models.dart';
+import '../services/focus_guard.dart';
 import '../services/prayer_service.dart';
 import '../widgets/wake_permission_tile.dart';
 import 'onboarding_screen.dart' show City, cities;
@@ -361,12 +362,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             : 'Off',
       ),
       if (Theme.of(context).platform == TargetPlatform.android)
-        _entry(
-          SettingsSection.focus,
-          s.focusEnabled && s.focusApps.isNotEmpty
-              ? 'Pausing ${s.focusApps.length} ${s.focusApps.length == 1 ? 'app' : 'apps'}${s.focusSleep ? ' · also at sleep time' : ''}'
-              : 'Pause apps after a daily limit and at sleep time',
-        ),
+        FocusDeviceStatus(builder: (device) => _entry(SettingsSection.focus, focusStatus(s, device)))
+      else
+        _entry(SettingsSection.focus, 'Set app limits and sleep hours with Screen Time'),
       _entry(SettingsSection.money, 'Currency ${state.finance.currency} · budgets, savings and zakat'),
       _header('App'),
       _entry(SettingsSection.general, 'Theme: ${s.themeMode[0].toUpperCase()}${s.themeMode.substring(1)} · ${s.freezesPerMonth} streak freezes a month'),

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_state.dart';
 import '../models.dart';
@@ -8,6 +11,68 @@ import 'adaptive.dart';
 const focusLimitChoices = [0, 5, 10, 15, 20, 30, 45, 60, 90, 120];
 
 String focusLimitLabel(int min) => min == 0 ? 'Sleep time only' : '${fmtUsage(Duration(minutes: min))} a day';
+
+/// All Focus surfaces query the same native service state, including on return
+/// from Accessibility settings. A grant can precede the actual service bind.
+class FocusDeviceStatus extends StatefulWidget {
+  final Widget Function(FocusReadiness?) builder;
+  const FocusDeviceStatus({super.key, required this.builder});
+
+  @override
+  State<FocusDeviceStatus> createState() => _FocusDeviceStatusState();
+}
+
+class _FocusDeviceStatusState extends State<FocusDeviceStatus> with WidgetsBindingObserver {
+  FocusReadiness? _current;
+  Timer? _retry;
+  int _revision = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    FocusGuard.configRevision.addListener(_refresh);
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    _retry?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    FocusGuard.configRevision.removeListener(_refresh);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState s) {
+    if (s == AppLifecycleState.resumed) {
+      setState(() => _current = null);
+      _refresh();
+    } else {
+      _revision++;
+      _retry?.cancel();
+    }
+  }
+
+  Future<void> _refresh() async {
+    final revision = ++_revision;
+    _retry?.cancel();
+    FocusReadiness? result;
+    try {
+      result = await FocusGuard.instance.readiness();
+    } on PlatformException {
+      // Leave protection unconfirmed when Android cannot report it.
+    }
+    if (!mounted || revision != _revision) return;
+    setState(() => _current = result);
+    if (result != null && result.permission && !result.running) {
+      _retry = Timer(const Duration(seconds: 3), _refresh);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(_current);
+}
 
 /// Settings → Focus & screen time: turning on the Accessibility service,
 /// the chosen apps and their daily limits, the sleep-time block and strict mode.
@@ -21,7 +86,6 @@ class FocusSettingsSection extends StatefulWidget {
 
 class _FocusSettingsSectionState extends State<FocusSettingsSection> with WidgetsBindingObserver {
   FocusGuard get _guard => FocusGuard.instance;
-  bool? _serviceOn;
   Map<String, AppUsage> _usage = const {};
   Map<String, InstalledApp> _installed = const {};
 
@@ -50,11 +114,9 @@ class _FocusSettingsSectionState extends State<FocusSettingsSection> with Widget
   }
 
   Future<void> _refresh() async {
-    final on = await _guard.isEnabled();
     final u = await _guard.usage();
     if (mounted) {
       setState(() {
-        _serviceOn = on;
         _usage = u;
       });
     }
@@ -152,13 +214,14 @@ class _FocusSettingsSectionState extends State<FocusSettingsSection> with Widget
     if (!_guard.supported) {
       return const ListTile(
         leading: Icon(Icons.phone_iphone),
-        title: Text('Only on Android'),
-        subtitle: Text('iPhones don\'t let apps see or pause other apps.'),
+        title: Text('Set up Screen Time on iPhone'),
+        subtitle: Text('Open Settings → Screen Time → App & Website Activity. Use App Limits for daily limits, '
+            'Downtime for sleep hours, and Always Allowed for essential apps.'),
       );
     }
     return ListenableBuilder(
       listenable: state,
-      builder: (context, _) {
+      builder: (context, _) => FocusDeviceStatus(builder: (device) {
         final t = Theme.of(context);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -171,7 +234,14 @@ class _FocusSettingsSectionState extends State<FocusSettingsSection> with Widget
                 style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
               ),
             ),
-            if (_serviceOn == false)
+            ListTile(
+              leading: const Icon(Icons.shield_outlined),
+              title: Text(focusStatus(s, device)),
+              subtitle: Text(s.focusSleep
+                  ? 'Tonight: ${focusSleepWindow(s, use24Hour: MediaQuery.alwaysUse24HourFormatOf(context))} · from your wake-up time and sleep goal'
+                  : 'Sleep-time pausing is off'),
+            ),
+            if (device != null && (!device.permission || !device.running))
               Card(
                 key: const Key('focus-setup'),
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -181,10 +251,10 @@ class _FocusSettingsSectionState extends State<FocusSettingsSection> with Widget
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Turn on app pausing', style: t.textTheme.titleMedium),
+                      Text(device.permission ? 'Accessibility service stopped' : 'Turn on app pausing', style: t.textTheme.titleMedium),
                       const SizedBox(height: 4),
                       Text(
-                        'Needs Android\'s Accessibility permission. It only sees which app is open, '
+                        device.permission ? 'Open Accessibility settings and restart Daily Discipline app pause.' : 'Needs Android\'s Accessibility permission. It only sees which app is open, '
                         'never what\'s on the screen.',
                         style: t.textTheme.bodyMedium,
                       ),
@@ -204,12 +274,30 @@ class _FocusSettingsSectionState extends State<FocusSettingsSection> with Widget
                   ),
                 ),
               )
-            else if (_serviceOn == true)
-              const ListTile(
-                leading: Icon(Icons.verified_user_outlined),
-                title: Text('App pausing is allowed'),
-                subtitle: Text('Android Accessibility → Daily Discipline app pause'),
+            else if (device != null && device.running && device.permission)
+              ListTile(
+                leading: const Icon(Icons.verified_user_outlined),
+                title: const Text('Accessibility service running'),
+                subtitle: const Text('Android Accessibility → Daily Discipline app pause'),
+                onTap: _guard.openAccessibilitySettings,
               ),
+            if (s.focusEnabled && device != null && s.focusApps.any(device.protects))
+              Builder(builder: (context) {
+                final app = s.focusApps.firstWhere(device.protects);
+                return ListTile(
+                  leading: const Icon(Icons.pause_circle_outline),
+                  title: const Text('Test pause'),
+                  subtitle: Text('Open ${app.name} for one pause. Its limit and extra minutes stay the same.'),
+                  onTap: () async {
+                    final opened = await _guard.testPause(app.package);
+                    if (!opened && context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Could not start the test. Check the app and Accessibility service.'),
+                      ));
+                    }
+                  },
+                );
+              }),
             SwitchListTile.adaptive(
               secondary: const Icon(Icons.hourglass_bottom),
               title: const Text('Pause chosen apps'),
@@ -249,7 +337,7 @@ class _FocusSettingsSectionState extends State<FocusSettingsSection> with Widget
             SwitchListTile.adaptive(
               secondary: const Icon(Icons.bedtime_outlined),
               title: const Text('Pause them during sleep time'),
-              subtitle: Text('${focusSleepWindow(s)}, from your wake-up time and sleep goal'),
+              subtitle: const Text('Apply the sleep window to every selected app, including apps without a daily limit.'),
               value: s.focusSleep,
               onChanged: (v) => state.updateSettings((x) => x.focusSleep = v),
             ),
@@ -263,7 +351,7 @@ class _FocusSettingsSectionState extends State<FocusSettingsSection> with Widget
             ),
           ],
         );
-      },
+      }),
     );
   }
 }
@@ -372,7 +460,7 @@ class _ScreenTimeCardState extends State<ScreenTimeCard> with WidgetsBindingObse
     final apps = widget.state.settings.focusApps;
     if (!FocusGuard.instance.supported || apps.isEmpty) return const SizedBox.shrink();
     final t = Theme.of(context);
-    return Card(
+    return FocusDeviceStatus(builder: (device) => Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -380,6 +468,7 @@ class _ScreenTimeCardState extends State<ScreenTimeCard> with WidgetsBindingObse
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text('Screen time today', style: t.textTheme.titleMedium),
+            Text(focusStatus(widget.state.settings, device)),
             for (final a in apps) ...[
               const SizedBox(height: 12),
               Builder(
@@ -405,7 +494,7 @@ class _ScreenTimeCardState extends State<ScreenTimeCard> with WidgetsBindingObse
                         ),
                       const SizedBox(height: 4),
                       Text(
-                        'Opened ${u.opens} ${u.opens == 1 ? 'time' : 'times'}${over ? ' · limit reached, paused for today' : ''}',
+                        'Opened ${u.opens} ${u.opens == 1 ? 'time' : 'times'}${over ? ' · daily limit reached' : ''}',
                         style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant),
                       ),
                     ],
@@ -416,6 +505,6 @@ class _ScreenTimeCardState extends State<ScreenTimeCard> with WidgetsBindingObse
           ],
         ),
       ),
-    );
+    ));
   }
 }
