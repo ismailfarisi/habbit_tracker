@@ -8,6 +8,7 @@ import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../habits/habit.dart';
+import '../hadith/hadith.dart';
 import '../models.dart';
 import 'diagnostics.dart';
 import 'reminders.dart';
@@ -141,7 +142,7 @@ class NotificationService {
     return p?.isEnabled ?? false;
   }
 
-  NotificationDetails _details(ReminderKind kind, Settings s) {
+  NotificationDetails _details(ReminderKind kind, Settings s, {String? body}) {
     final challenge = kind == ReminderKind.wake && s.wakeChallenge != WakeChallenge.off;
     final doneLabel = switch (kind) {
       ReminderKind.wake => "I'm up",
@@ -195,6 +196,7 @@ class NotificationService {
         importance: Importance.high,
         priority: Priority.high,
         category: AndroidNotificationCategory.reminder,
+        styleInformation: body == null ? null : BigTextStyleInformation(body),
         actions: actions,
       ),
       iOS: ios,
@@ -224,7 +226,7 @@ class NotificationService {
         await _plugin.zonedSchedule(
           id: r.id,
           scheduledDate: tz.TZDateTime.from(r.when, tz.local),
-          notificationDetails: _details(r.kind, s),
+          notificationDetails: _details(r.kind, s, body: r.body),
           androidScheduleMode: mode,
           title: r.title,
           body: r.body,
@@ -247,11 +249,15 @@ class NotificationService {
 
   Future<void> showTest(Settings s) async {
     if (!_ready) return;
+    final h = s.prayerHadith ? weeklyPrayerHadith(DateTime.now())['Dhuhr'] : null;
+    final body = h == null
+        ? 'You will be reminded to wake up, pray and keep your habits.'
+        : 'This week with your prayer reminders: ${h.quote} — ${h.ref}';
     await _plugin.show(
       id: 1,
       title: '✅ Reminders are working',
-      body: 'You will be reminded to wake up, pray and keep your habits.',
-      notificationDetails: _details(ReminderKind.prayer, s),
+      body: body,
+      notificationDetails: _details(ReminderKind.prayer, s, body: body),
     );
   }
 }

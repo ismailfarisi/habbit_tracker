@@ -1,4 +1,5 @@
 import '../habits/habit.dart';
+import '../hadith/hadith.dart';
 import '../logic/sleep.dart';
 import '../logic/prayer_status.dart';
 import '../logic/stats.dart';
@@ -88,6 +89,7 @@ List<PlannedReminder> planReminders(
     }
 
     final times = prayerTimesFor(s, date).times;
+    final hadith = s.prayerHadith ? weeklyPrayerHadith(date) : const <String, Hadith>{};
     for (var i = 0; i < prayerNames.length; i++) {
       final name = prayerNames[i];
       if (log?.prayers.contains(name) ?? false) continue;
@@ -98,7 +100,7 @@ List<PlannedReminder> planReminders(
         when: at.subtract(Duration(minutes: offset)),
         kind: ReminderKind.prayer,
         title: prayerReminderTitle(s, name, date, offset),
-        body: 'Prayer time ${_hm(at)}. Tap "Prayed" once you\'re done.',
+        body: prayerReminderBody(at, hadith[name]),
         payload: 'prayer:$name|$key',
       ));
     }
@@ -204,6 +206,12 @@ bool applyDoneAction(String payload, Map<String, DayLog> logs, DateTime now) {
 
 String _hm(DateTime t) =>
     '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+/// "05:12 · The nearest a servant comes … — Sahih Muslim 482", or the
+/// plain prompt without a hadith.
+String prayerReminderBody(DateTime at, Hadith? h) => h == null
+    ? 'Prayer time ${_hm(at)}. Tap "Prayed" once you\'re done.'
+    : '${_hm(at)} · ${h.quote} — ${h.ref}';
 
 // ---------- Prayer: Jumu'ah and Ramadan ----------
 

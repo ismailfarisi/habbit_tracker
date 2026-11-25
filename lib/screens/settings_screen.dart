@@ -545,6 +545,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (v != null) await state.updateSettings((x) => x.prayerOffsetMin = v);
         },
       ),
+      SwitchListTile.adaptive(
+        secondary: const Icon(Icons.format_quote_outlined),
+        title: const Text('Hadith with prayer reminders'),
+        subtitle: const Text('A saying of the Prophet ﷺ on salah, new each week'),
+        value: s.prayerHadith,
+        onChanged: (v) => state.updateSettings((x) => x.prayerHadith = v),
+      ),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Wrap(

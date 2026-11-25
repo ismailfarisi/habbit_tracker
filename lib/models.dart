@@ -93,6 +93,9 @@ class Settings {
 
   bool remindersEnabled;
   int prayerOffsetMin;
+
+  /// Add a hadith on salah to each prayer reminder.
+  bool prayerHadith;
   bool wakeAlarmLoud;
 
   /// Legacy (v1): only read when migrating the old articulation trainer
@@ -166,6 +169,7 @@ class Settings {
     this.hijriOffsetDays = 0,
     this.remindersEnabled = true,
     this.prayerOffsetMin = 0,
+    this.prayerHadith = true,
     this.wakeAlarmLoud = true,
     this.trainingTime = const TimeOfDay(hour: 7, minute: 0),
     this.trainingGoalMin = 15,
@@ -217,6 +221,7 @@ class Settings {
     'hijriOffsetDays': hijriOffsetDays,
     'remindersEnabled': remindersEnabled,
     'prayerOffsetMin': prayerOffsetMin,
+    'prayerHadith': prayerHadith,
     'wakeAlarmLoud': wakeAlarmLoud,
     'trainingTime': fmtHm(trainingTime),
     'trainingGoalMin': trainingGoalMin,
@@ -272,6 +277,7 @@ class Settings {
       hijriOffsetDays: ((j['hijriOffsetDays'] as num?)?.toInt() ?? 0).clamp(-2, 2),
       remindersEnabled: j['remindersEnabled'] as bool? ?? true,
       prayerOffsetMin: (j['prayerOffsetMin'] as num?)?.toInt() ?? 0,
+      prayerHadith: j['prayerHadith'] as bool? ?? d.prayerHadith,
       wakeAlarmLoud: j['wakeAlarmLoud'] as bool? ?? true,
       trainingTime: parseHm(j['trainingTime'] as String? ?? '', fallback: d.trainingTime),
       trainingGoalMin: (j['trainingGoalMin'] as num?)?.toInt() ?? d.trainingGoalMin,
