@@ -10,6 +10,8 @@ import '../../services/prayer_service.dart';
 import 'section_card.dart';
 import '../adaptive.dart';
 
+enum PrayerSection { all, next, remaining }
+
 /// Today's five prayers with their times and status (on time / late /
 /// qada). Tap marks a prayer (status from [autoPrayerStatus]) or un-marks
 /// it; long-press chooses the status. Shows Jumu'ah on Fridays, Ramadan
@@ -18,7 +20,8 @@ class PrayerCard extends StatelessWidget {
   final AppState state;
   final DayLog log;
   final DateTime now;
-  const PrayerCard({super.key, required this.state, required this.log, required this.now});
+  final PrayerSection section;
+  const PrayerCard({super.key, required this.state, required this.log, required this.now, this.section = PrayerSection.all});
 
   Future<void> _tap(BuildContext context, String name) async {
     if (!log.prayers.contains(name)) {
@@ -80,16 +83,24 @@ class PrayerCard extends StatelessWidget {
     final ramadan = isRamadan(s, now);
     final hijri = hijriToday(s, now);
     final optional = optionalPrayersOn(s, now);
+    final first = prayerNames.where((p) => !log.prayers.contains(p)).firstOrNull ??
+        optional.where((p) => !(log.habits[p.id]?.done ?? false)).firstOrNull?.id;
+    bool show(String id) => switch (section) {
+      PrayerSection.all => true,
+      PrayerSection.next => id == first,
+      PrayerSection.remaining => id != first,
+    };
+    final summary = section != PrayerSection.next;
     final c = Theme.of(context).colorScheme;
     final small = Theme.of(context).textTheme.bodySmall?.copyWith(color: c.onSurfaceVariant);
     String hm(DateTime t) => DateFormat.jm().format(t);
     return SectionCard(
       icon: Icons.mosque_outlined,
-      title: 'Five daily prayers',
-      trailing: CountBadge(done > 0 && onTime < done ? '$done/5 · $onTime on time' : '$done/5'),
+      title: summary ? 'Five daily prayers' : 'Prayer',
+      trailing: !summary ? null : CountBadge(done > 0 && onTime < done ? '$done/5 · $onTime on time' : '$done/5'),
       children: [
-        Text('Next: ${prayerLabel(next.key, next.value)} in $inText', style: TextStyle(color: c.onSurfaceVariant)),
-        if (ramadan)
+        if (summary) Text('Next: ${prayerLabel(next.key, next.value)} in $inText', style: TextStyle(color: c.onSurfaceVariant)),
+        if (summary && ramadan)
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
@@ -100,10 +111,10 @@ class PrayerCard extends StatelessWidget {
             ),
           ),
         for (final p in prayerNames) ...[
-          _PrayerRow(
+          if (show(p)) _PrayerRow(
             name: p,
             label: prayerLabel(p, now),
-            time: hm(day.times[p]!),
+            time: !summary && !s.hasLocation && !s.useManualPrayer ? '' : hm(day.times[p]!),
             status: prayerStatusOf(log, p),
             isNext: next.key == p && dateOnly(next.value) == dateOnly(now),
             tag: ramadan && p == 'Maghrib'
@@ -111,11 +122,11 @@ class PrayerCard extends StatelessWidget {
                 : ramadan && p == 'Fajr'
                     ? 'Suhoor ends'
                     : null,
-            onTap: () => _tap(context, p),
+            onTap: () => !summary && !s.hasLocation && !s.useManualPrayer ? _choose(context, p) : _tap(context, p),
             onLongPress: () => _choose(context, p),
           ),
           for (final o in optional)
-            if (o.after == p)
+            if (o.after == p && show(o.id))
               CheckboxListTile.adaptive(
                 key: ValueKey(o.id),
                 contentPadding: const EdgeInsets.only(left: 8),
@@ -129,7 +140,7 @@ class PrayerCard extends StatelessWidget {
                     : null,
               ),
         ],
-        Text(
+        if (summary) Text(
           day.calculated
               ? 'Calculated for ${s.locationName.isEmpty ? 'your location' : s.locationName} · ${calcMethodLabels[s.calcMethod]}'
               : 'Using manual times',

@@ -96,15 +96,11 @@ List<TodayItem> todayItems(AppState state, DateTime now) {
     if (!state.finance.isEmpty || s.showMoneyShortcut || s.todayPinned.contains('money'))
       const TodayItem(TodayKind.money, done: false),
   ]..removeWhere((i) => s.todayHidden.contains(i.id));
-  int byDue(TodayItem a, TodayItem b) {
-    if (a.due == null || b.due == null) return (a.due == null ? 1 : 0) - (b.due == null ? 1 : 0);
-    return a.due!.compareTo(b.due!);
-  }
 
   final pending = items.where((i) => !i.done).toList();
   final done = items.where((i) => i.done).toList();
-  stableSort(pending, byDue);
-  stableSort(done, byDue);
+  stableSort(pending, (a, b) => _byTime(a.due, b.due));
+  stableSort(done, (a, b) => _byTime(a.due, b.due));
   int pin(TodayItem i) {
     final p = s.todayPinned.indexOf(i.id);
     return p < 0 ? s.todayPinned.length : p;
@@ -112,6 +108,11 @@ List<TodayItem> todayItems(AppState state, DateTime now) {
 
   stableSort(pending, (a, b) => pin(a) - pin(b));
   return [...pending, ...done];
+}
+
+int _byTime(DateTime? a, DateTime? b) {
+  if (a == null || b == null) return (a == null ? 1 : 0) - (b == null ? 1 : 0);
+  return a.compareTo(b);
 }
 
 /// Insertion sort that keeps equal items in order.
@@ -214,21 +215,36 @@ class _TodayScreenState extends State<TodayScreen> {
     };
   }
 
-  Widget _featured(TodayItem item, DateTime now) {
+  /// Split grouped domains into individual actions so opening Later doesn't
+  /// repeat the featured task or practice.
+  List<Widget> _actions(TodayItem item, DateTime now) {
     final state = widget.state;
     if (item.kind == TodayKind.goal) {
       final (habits, tasks) = GoalTodayCard.itemsFor(state, item.goal!, now);
-      final habit = habits.where((h) => !habitDone(state.habitEntry(now, h.id), h)).firstOrNull;
-      if (habit != null) {
-        return Card(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: GoalHabitTile(state: state, habit: habit, day: now)));
+      final actions = <(DateTime?, Widget)>[];
+      for (final h in habits.where((h) => !habitDone(state.habitEntry(now, h.id), h))) {
+        final time = h.reminder == null ? null : parseHm(h.reminder!);
+        actions.add((time == null ? null : DateTime(now.year, now.month, now.day, time.hour, time.minute),
+          Card(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: GoalHabitTile(state: state, habit: h, day: now)))));
       }
-      return _task(tasks.firstWhere((t) => !t.isDoneOn(now)), now);
+      for (final task in tasks.where((t) => !t.isDoneOn(now))) {
+        actions.add((task.reminderOn(now), _task(task, now)));
+      }
+      stableSort(actions, (a, b) => _byTime(a.$1, b.$1));
+      return [for (final a in actions) a.$2];
     }
     if (item.kind == TodayKind.tasks) {
-      return _task(TasksCard.ordered(state, now).first, now);
+      return [for (final t in TasksCard.ordered(state, now)) if (!t.isDoneOn(now)) _task(t, now)];
     }
-    return _card(item, now);
+    if (item.kind == TodayKind.prayers) {
+      return [
+        for (final section in [PrayerSection.next, PrayerSection.remaining])
+          PrayerCard(key: ValueKey('today-prayers-${section.name}'),
+            state: state, log: state.logFor(now), now: now, section: section),
+      ];
+    }
+    return [_card(item, now)];
   }
 
   Widget _task(Task task, DateTime now) => Card(child: Padding(
@@ -265,10 +281,8 @@ class _TodayScreenState extends State<TodayScreen> {
         final pending = items.where((i) => !i.done && (i.kind != TodayKind.tasks || tasks.isNotEmpty)).toList();
         final first = pending.firstOrNull;
         final money = pending.where((i) => i.kind == TodayKind.money && i != first).firstOrNull;
-        final later = [
-          if (first != null && (first.kind == TodayKind.goal || first.kind == TodayKind.tasks)) first,
-          ...pending.skip(1).where((i) => i != money),
-        ];
+        final actions = first == null ? <Widget>[] : _actions(first, now);
+        final later = pending.skip(1).where((i) => i != money);
         final done = items.where((i) => i.done).toList();
         final resume = missedYesterday(state, now).isNotEmpty;
         final hasReminder = s.tracks('wake') || s.tracks('prayers') ||
@@ -288,14 +302,14 @@ class _TodayScreenState extends State<TodayScreen> {
                 DateFormat('EEEE, d MMMM').format(now),
                 if (s.tracks('prayers')) hijriToday(s, now).toString(),
               ].join(' · '), style: theme.textTheme.bodySmall)),
-            if (first != null) _featured(first, now)
+            if (actions.isNotEmpty) actions.first
             else Padding(padding: const EdgeInsets.only(bottom: 12),
               child: Text(done.isEmpty ? 'Choose a practice when you’re ready.' : 'Your planned actions are complete.')),
             if (money != null) _card(money, now),
-            if (later.isNotEmpty) ...[
+            if (actions.length > 1 || later.isNotEmpty) ...[
               ListTile(title: const Text('Later'), trailing: Icon(_showLater ? Icons.expand_less : Icons.expand_more),
                 onTap: () => setState(() => _showLater = !_showLater)),
-              if (_showLater) for (final i in later) _card(i, now),
+              if (_showLater) ...[...actions.skip(1), for (final i in later) _card(i, now)],
             ],
             if (resume && now.hour < promptUntilHour)
               ExpansionTile(title: const Text('Edit yesterday’s log'), children: [

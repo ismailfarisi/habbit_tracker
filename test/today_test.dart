@@ -184,6 +184,17 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('a featured prayer shows one action and Later contains only its siblings', (tester) async {
+      await state.updateSettings((s) => s.todayHidden = ['wake']);
+      await pumpToday(tester, now);
+      expect(find.text('Fajr'), findsOneWidget);
+      expect(find.text('Dhuhr'), findsNothing);
+      await tester.tap(find.text('Later'));
+      await tester.pumpAndSettle();
+      expect(find.text('Fajr'), findsOneWidget);
+      expect(find.text('Dhuhr'), findsOneWidget);
+    });
+
     testWidgets('Customize hides, pins and restores cards with undo and persistent choices', (tester) async {
       final habit = await add(quranTemplate);
       await pumpToday(tester, now);
