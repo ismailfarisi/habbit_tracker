@@ -298,6 +298,7 @@ class GoalTools {
   Map<String, dynamic> describe(Goal g) {
     final now = clock();
     final linked = state.tasks.where((t) => g.taskIds.contains(t.id)).toList();
+    final outcomes = goalOutcomes(state, g, now);
     return {
       'id': g.id,
       'title': g.title,
@@ -307,7 +308,8 @@ class GoalTools {
       'review': g.cadence.name,
       'reviewDue': g.reviewDue(now),
       'timeElapsedPct': (g.elapsed(now) * 100).round(),
-      'outcomes': [for (final o in goalOutcomes(state, g, now)) o.label],
+      'outcomes': [for (final o in outcomes) o.label],
+      if (outcomes.singleOrNull?.fraction case final pct?) 'progressPct': (pct * 100).round(),
       'milestones': [for (final m in g.milestones) m.toJson()],
       'tasks': [
         for (final t in linked)

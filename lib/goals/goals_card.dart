@@ -249,11 +249,12 @@ class GoalScreen extends StatelessWidget {
       listenable: state,
       builder: (context, _) {
         final g = state.goalById(goalId);
-        if (g == null)
+        if (g == null) {
           return Scaffold(
             appBar: AppBar(),
             body: const Center(child: Text('This goal was removed.')),
           );
+        }
         final t = Theme.of(context);
         final muted = t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant);
         final f = DateFormat('d MMM y');

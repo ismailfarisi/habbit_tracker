@@ -224,12 +224,23 @@ String goalOkf(AppState s, Goal g, DateTime now) {
       b.writeln();
     }
   }
+  final shared = g.noteEntries.where((n) => n.shared);
+  final dated = shared.where((n) => n.changedOn != null).toList()
+    ..sort((a, b) => b.changedOn!.compareTo(a.changedOn!));
   b
     ..writeln()
     ..writeln('## Notes')
-    ..writeln()
-    ..writeln(g.notes.trim().isEmpty ? 'None shared.' : g.noteEntries.where((n) => n.shared).map((n) =>
-      '${n.changedOn == null ? '' : '${n.changedOn} · '}${n.text}').join('\n\n'));
+    ..writeln();
+  if (shared.isEmpty) b.writeln('None shared.');
+  for (final n in shared.where((n) => n.changedOn == null)) {
+    b..writeln(n.text)..writeln();
+  }
+  if (dated.isNotEmpty) {
+    b..writeln('### Latest assumption updates')..writeln();
+    for (final n in dated) {
+      b..writeln('${n.changedOn} · ${n.text}')..writeln();
+    }
+  }
   return b.toString();
 }
 
