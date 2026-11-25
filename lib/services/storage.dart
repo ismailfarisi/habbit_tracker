@@ -73,7 +73,9 @@ class Storage {
     final raw = prefs.getString(_tasksKey);
     if (raw == null) return [];
     try {
-      return (jsonDecode(raw) as List).map((e) => Task.fromJson((e as Map).cast<String, dynamic>())).toList();
+      final tasks = (jsonDecode(raw) as List).map((e) => Task.fromJson((e as Map).cast<String, dynamic>())).toList();
+      projectGoalPauses(loadGoals(), tasks: tasks);
+      return tasks;
     } catch (_) {
       return [];
     }
@@ -95,7 +97,9 @@ class Storage {
       );
     }
     try {
-      return (jsonDecode(raw) as List).map((e) => HabitDef.fromJson((e as Map).cast<String, dynamic>())).toList();
+      final habits = (jsonDecode(raw) as List).map((e) => HabitDef.fromJson((e as Map).cast<String, dynamic>())).toList();
+      projectGoalPauses(loadGoals(), habits: habits);
+      return habits;
     } catch (_) {
       return [];
     }
@@ -112,8 +116,11 @@ class Storage {
     }
   }
 
-  Future<void> saveGoals(List<Goal> goals) =>
-      prefs.setString(_goalsKey, jsonEncode(goals.map((g) => g.toJson()).toList()));
+  Future<void> saveGoals(List<Goal> goals) async {
+    if (!await prefs.setString(_goalsKey, jsonEncode(goals.map((g) => g.toJson()).toList()))) {
+      throw StateError('Could not save goals.');
+    }
+  }
 
   Finance loadFinance() {
     try {

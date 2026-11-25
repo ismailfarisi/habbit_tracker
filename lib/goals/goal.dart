@@ -1,5 +1,7 @@
 import '../logic/stats.dart';
 import '../models.dart';
+import '../habits/habit.dart';
+import 'goal_pause.dart';
 import '../logic/tasks.dart';
 
 /// How often the AI looks back at a goal with the user.
@@ -27,21 +29,32 @@ class GoalReview {
   final String summary;
   final List<String> suggestions;
   final Set<int> applied;
-  GoalReview({required this.at, required this.summary, this.suggestions = const [], Set<int>? applied})
-    : applied = applied ?? <int>{};
+  final Map<int, String> milestoneLinks;
+  GoalReview({Map<int, String>? milestoneLinks, required this.at, required this.summary, this.suggestions = const [], Set<int>? applied})
+    : milestoneLinks = milestoneLinks ?? {}, applied = applied ?? <int>{};
 
   Map<String, dynamic> toJson() => {
     'at': at.toIso8601String(),
     'summary': summary,
     'suggestions': suggestions,
     'applied': applied.toList(),
+    if (milestoneLinks.isNotEmpty) 'milestoneLinks': milestoneLinks.map((k,v) => MapEntry(k.toString(),v)),
   };
   factory GoalReview.fromJson(Map<String, dynamic> j) => GoalReview(
     at: DateTime.tryParse(j['at'] as String? ?? '') ?? DateTime.now(),
     summary: j['summary'] as String? ?? '',
-    suggestions: ((j['suggestions'] as List?) ?? const []).cast<String>(),
+    suggestions: ((j['suggestions'] as List?) ?? const []).cast<String>().toList(),
+    milestoneLinks: {for (final e in ((j['milestoneLinks'] as Map?) ?? {}).entries) if (int.tryParse('${e.key}') != null && e.value is String) int.parse('${e.key}'): e.value as String},
     applied: ((j['applied'] as List?) ?? const []).map((e) => (e as num).toInt()).toSet(),
   );
+}
+
+class GoalNote {
+  String text;
+  bool shared;
+  String? changedOn;
+  GoalNote(this.text, {this.shared = false, this.changedOn});
+  Map<String, dynamic> toJson() => {'text': text, 'shared': shared, if (changedOn != null) 'changedOn': changedOn};
 }
 
 /// A goal of any length (a week to several years), broken into milestones,
@@ -61,7 +74,11 @@ class Goal {
   bool archived;
 
   /// Free-form Markdown context the user and the AI add to over time.
-  String notes;
+  final List<GoalNote> noteEntries;
+  String get notes => noteEntries.where((n) => n.shared).map((n) => n.text).join('\n');
+  final List<GoalPause> pauses;
+  bool get workPaused => archived && pauses.any((p) => p.end == null);
+  bool owns(String id) => habitIds.contains(id) || taskIds.contains(id);
 
   Goal({
     required this.id,
@@ -76,8 +93,12 @@ class Goal {
     List<String>? habitIds,
     List<GoalReview>? reviews,
     this.archived = false,
-    this.notes = '',
-  }) : milestones = milestones ?? [],
+    String notes = '',
+    List<GoalNote>? noteEntries,
+    List<GoalPause>? pauses,
+  }) : pauses = pauses ?? [],
+       noteEntries = noteEntries ?? [for (final part in notes.split(RegExp(r'\n(?=- )'))) if (part.trim().isNotEmpty) GoalNote(part, shared: true)],
+       milestones = milestones ?? [],
        taskIds = taskIds ?? [],
        habitIds = habitIds ?? [],
        reviews = reviews ?? [];
@@ -130,6 +151,8 @@ class Goal {
     'habitIds': habitIds,
     'reviews': reviews.map((r) => r.toJson()).toList(),
     'archived': archived,
+    if (pauses.isNotEmpty) 'pauses': pauses.map((p) => p.toJson()).toList(),
+    if (noteEntries.isNotEmpty) 'noteEntries': noteEntries.map((n) => n.toJson()).toList(),
     if (notes.isNotEmpty) 'notes': notes,
   };
 
@@ -142,14 +165,35 @@ class Goal {
     end: j['end'] as String? ?? dayKey(DateTime.now()),
     cadence: ReviewCadence.values.firstWhere((c) => c.name == j['cadence'], orElse: () => ReviewCadence.weekly),
     milestones: [for (final m in (j['milestones'] as List? ?? const [])) Milestone.fromJson((m as Map).cast())],
-    taskIds: ((j['taskIds'] as List?) ?? const []).cast<String>(),
-    habitIds: ((j['habitIds'] as List?) ?? const []).cast<String>(),
+    taskIds: ((j['taskIds'] as List?) ?? const []).cast<String>().toList(),
+    habitIds: ((j['habitIds'] as List?) ?? const []).cast<String>().toList(),
     reviews: [for (final r in (j['reviews'] as List? ?? const [])) GoalReview.fromJson((r as Map).cast())],
     archived: j['archived'] as bool? ?? false,
+    pauses: [for (final p in (j['pauses'] as List? ?? const []).whereType<Map>())
+      if (DateTime.tryParse('${p['start']}') != null && (p['end'] == null || DateTime.tryParse('${p['end']}') != null))
+        GoalPause(p['start'] as String, p['end'] as String?)],
+    noteEntries: j['noteEntries'] is! List ? null : [
+      for (final n in (j['noteEntries'] as List).whereType<Map>())
+        GoalNote(n['text'] as String? ?? '', shared: n['shared'] == true, changedOn: n['changedOn'] as String?),
+    ],
     notes: j['notes'] as String? ?? '',
   );
 
   Goal copy() => Goal.fromJson(toJson());
+}
+
+/// Rebuild scheduling inputs from the single persisted copy on each goal.
+void projectGoalPauses(List<Goal> goals, {Iterable<Task> tasks = const [], Iterable<HabitDef> habits = const []}) {
+  List<GoalPause> pauses(String id) {
+    final owners = goals.where((g) => g.owns(id));
+    if (owners.isEmpty) return const [];
+    // Older backups can link one item to multiple goals. An active owner
+    // must still be able to schedule it.
+    if (owners.length > 1 && owners.any((g) => !g.archived)) return const [];
+    return [for (final g in owners) ...g.pauses];
+  }
+  for (final t in tasks) { t.goalPauses = pauses(t.id); }
+  for (final h in habits) { h.goalPauses = pauses(h.id); }
 }
 
 /// The cadence that fits a goal's length: weekly up to ~3 months, monthly up

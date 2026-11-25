@@ -1,3 +1,4 @@
+import 'goals/goal_pause.dart';
 import 'package:flutter/material.dart';
 
 import 'habits/habit.dart';
@@ -404,6 +405,9 @@ const weekdayShort = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 /// A user- or AI-created task. One-off tasks have an optional [date];
 /// repeating tasks use [date] as an optional start date.
 class Task {
+  /// Derived from the owning goal on load or when ownership changes.
+  List<GoalPause> goalPauses = const [];
+  bool pausedOn(DateTime day) => goalPauses.any((p) => p.contains(day));
   final String id;
 
   /// Small sequential number used to derive stable notification ids.
