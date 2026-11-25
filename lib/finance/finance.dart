@@ -66,7 +66,8 @@ String formatMoney(int minor, String code, {bool sign = false}) {
 int? parseMoney(String text, String code) {
   final v = double.tryParse(text.replaceAll(',', '').replaceAll(' ', '').trim());
   if (v == null || v.isNaN || v.isInfinite || v <= 0) return null;
-  return (v * _unit(code)).round();
+  final minor = (v * _unit(code)).round();
+  return minor > 0 ? minor : null;
 }
 
 /// Converts an amount from an AI tool (major units, e.g. 12.5) to minor units.
@@ -229,6 +230,7 @@ class ZakatInfo {
   int? hijriMonth;
   int? hijriDay;
   DateTime? lastPaid;
+  DateTime? valuedOn;
 
   ZakatInfo({
     this.nisabBasis = 'silver',
@@ -245,6 +247,7 @@ class ZakatInfo {
     this.hijriMonth,
     this.hijriDay,
     this.lastPaid,
+    this.valuedOn,
   });
 
   Map<String, dynamic> toJson() => {
@@ -261,6 +264,7 @@ class ZakatInfo {
     'includePots': includePots,
     if (hijriMonth != null) 'hijriMonth': hijriMonth,
     if (hijriDay != null) 'hijriDay': hijriDay,
+    if (valuedOn != null) 'valuedOn': ymd(valuedOn!),
     if (lastPaid != null) 'lastPaid': ymd(lastPaid!),
   };
 
@@ -280,13 +284,18 @@ class ZakatInfo {
       includePots: j['includePots'] != false,
       hijriMonth: (j['hijriMonth'] as num?)?.toInt(),
       hijriDay: (j['hijriDay'] as num?)?.toInt(),
+      valuedOn: _date(j['valuedOn']),
       lastPaid: _date(j['lastPaid']),
     );
   }
 }
 
 class ZakatResult {
-  final int assets, liabilities, net, nisab, due;
+  final int assets, liabilities, net, nisab;
+  final int? due;
+  final List<String> missingPrices;
+  final Map<String, int?> breakdown;
+  bool get complete => missingPrices.isEmpty;
 
   /// False until the metal price for the chosen nisab is entered.
   final bool hasNisab;
@@ -297,29 +306,38 @@ class ZakatResult {
     required this.nisab,
     required this.due,
     required this.hasNisab,
+    required this.breakdown,
+    required this.missingPrices,
   });
 
-  bool get aboveNisab => hasNisab && net >= nisab;
+  bool get aboveNisab => complete && net >= nisab;
 }
 
 /// 2.5% of net zakatable wealth when it is at or above the nisab.
 ZakatResult calculateZakat(ZakatInfo z, {int potSavings = 0}) {
-  final assets =
-      z.cash +
-      (z.includePots ? potSavings : 0) +
-      (z.goldGrams * z.goldPricePerGram).round() +
-      (z.silverGrams * z.silverPricePerGram).round() +
-      z.investments +
-      z.businessStock +
-      z.receivables;
+  final missing = [
+    if ((z.goldGrams > 0 || z.nisabBasis == 'gold') && z.goldPricePerGram <= 0) 'gold',
+    if ((z.silverGrams > 0 || z.nisabBasis == 'silver') && z.silverPricePerGram <= 0) 'silver',
+  ];
+  final breakdown = <String, int?>{
+    'Cash': z.cash,
+    if (z.includePots) 'Savings pots': potSavings,
+    if (z.goldGrams > 0) 'Gold (${z.goldGrams} g)': z.goldPricePerGram > 0 ? (z.goldGrams * z.goldPricePerGram).round() : null,
+    if (z.silverGrams > 0) 'Silver (${z.silverGrams} g)': z.silverPricePerGram > 0 ? (z.silverGrams * z.silverPricePerGram).round() : null,
+    'Investments': z.investments,
+    'Business stock': z.businessStock,
+    'Receivables': z.receivables,
+  };
+  final assets = breakdown.values.whereType<int>().fold(0, (a, b) => a + b);
   final liabilities = z.debtsDue;
   final net = assets - liabilities;
   final gold = z.nisabBasis == 'gold';
   final price = gold ? z.goldPricePerGram : z.silverPricePerGram;
   final nisab = (price * (gold ? goldNisabGrams : silverNisabGrams)).round();
   final has = price > 0;
-  final due = has && net > 0 && net >= nisab ? (net * zakatRate).round() : 0;
-  return ZakatResult(assets: assets, liabilities: liabilities, net: net, nisab: nisab, due: due, hasNisab: has);
+  final due = missing.isNotEmpty ? null : net >= nisab ? (net * zakatRate).round() : 0;
+  return ZakatResult(assets: assets, liabilities: liabilities, net: net, nisab: nisab, due: due, hasNisab: has,
+      breakdown: breakdown, missingPrices: missing);
 }
 
 /// The next date on or after [from] that falls on Hijri [month]/[day]
@@ -346,7 +364,7 @@ class MonthSummary {
   int get left => income - spent - saved;
 }
 
-class Finance {
+class _Ledger {
   String currency;
   List<MoneyEntry> entries;
 
@@ -356,7 +374,7 @@ class Finance {
   List<Debt> debts;
   ZakatInfo zakat;
 
-  Finance({
+  _Ledger({
     this.currency = 'USD',
     List<MoneyEntry>? entries,
     Map<String, int>? budgets,
@@ -369,10 +387,15 @@ class Finance {
        debts = debts ?? [],
        zakat = zakat ?? ZakatInfo();
 
-  bool get isEmpty => entries.isEmpty && budgets.isEmpty && pots.isEmpty && debts.isEmpty;
+  bool locked = false;
+  bool get hasAmounts => entries.isNotEmpty || budgets.isNotEmpty || pots.isNotEmpty || debts.isNotEmpty ||
+      [zakat.cash, zakat.investments, zakat.businessStock, zakat.receivables, zakat.debtsDue,
+        zakat.goldGrams, zakat.silverGrams, zakat.goldPricePerGram, zakat.silverPricePerGram].any((n) => n != 0);
+
 
   Map<String, dynamic> toJson() => {
     'currency': currency,
+    if (locked || hasAmounts) 'currencyLocked': true,
     'entries': entries.map((e) => e.toJson()).toList(),
     'budgets': budgets,
     'pots': pots.map((p) => p.toJson()).toList(),
@@ -380,11 +403,11 @@ class Finance {
     'zakat': zakat.toJson(),
   };
 
-  factory Finance.fromJson(Map<String, dynamic> j) {
+  factory _Ledger.fromJson(Map<String, dynamic> j) {
     List<T> list<T>(String k, T Function(Map<String, dynamic>) f) => [
       for (final e in (j[k] as List? ?? const [])) f((e as Map).cast<String, dynamic>()),
     ];
-    return Finance(
+    return _Ledger(
       currency: j['currency'] as String? ?? 'USD',
       entries: list('entries', MoneyEntry.fromJson),
       budgets: {
@@ -393,7 +416,61 @@ class Finance {
       pots: list('pots', SavingsPot.fromJson),
       debts: list('debts', Debt.fromJson),
       zakat: j['zakat'] is Map ? ZakatInfo.fromJson((j['zakat'] as Map).cast()) : null,
-    );
+    )..locked = j['currencyLocked'] == true;
+  }
+
+}
+
+class Finance {
+  _Ledger _active;
+  final Map<String, _Ledger> _others = {};
+
+  Finance({String currency = 'USD', List<MoneyEntry>? entries, Map<String, int>? budgets,
+    List<SavingsPot>? pots, List<Debt>? debts, ZakatInfo? zakat})
+      : _active = _Ledger(currency: currency, entries: entries, budgets: budgets, pots: pots, debts: debts, zakat: zakat);
+
+  Finance._(this._active);
+  String get currency => _active.currency;
+  bool get currencyLocked => _active.locked || _active.hasAmounts;
+  bool get isEmpty => !_active.hasAmounts;
+  List<MoneyEntry> get entries => _active.entries;
+  Map<String, int> get budgets => _active.budgets;
+  List<SavingsPot> get pots => _active.pots;
+  List<Debt> get debts => _active.debts;
+  ZakatInfo get zakat => _active.zakat;
+  set zakat(ZakatInfo value) => _active.zakat = value;
+
+  set currency(String code) {
+    if (code == currency) return;
+    if (currencyLocked || _others.containsKey(code)) throw StateError('Choose a separate ledger for $code.');
+    _active.currency = code;
+  }
+
+  Set<String> get ledgerCurrencies => {currency, ..._others.keys};
+  Iterable<Finance> get ledgers => [Finance._(_active), ..._others.values.map(Finance._)];
+
+  /// Explicit user action. Previous balances remain in their original units.
+  void openLedger(String code) {
+    if (currency == code) return;
+    _others[currency] = _active;
+    _active = _others.remove(code) ?? _Ledger(currency: code);
+  }
+
+  Map<String, dynamic> toJson() {
+    if (_active.hasAmounts) _active.locked = true;
+    return {
+      ..._active.toJson(),
+      if (_others.isNotEmpty) 'otherLedgers': [for (final ledger in _others.values) ledger.toJson()],
+    };
+  }
+
+  factory Finance.fromJson(Map<String, dynamic> j) {
+    final f = Finance._(_Ledger.fromJson(j));
+    for (final data in (j['otherLedgers'] as List? ?? const []).whereType<Map>()) {
+      final ledger = _Ledger.fromJson(data.cast<String, dynamic>());
+      if (ledger.currency != f.currency) f._others[ledger.currency] = ledger;
+    }
+    return f;
   }
 
   String fmt(int minor, {bool sign = false}) => formatMoney(minor, currency, sign: sign);
@@ -479,7 +556,11 @@ class Finance {
       );
     }
     final z = zakatResult();
-    if (z.hasNisab) b.writeln('- Zakat: net wealth ${fmt(z.net)}, nisab ${fmt(z.nisab)}, due ${fmt(z.due)}.');
+    if (z.complete) {
+      b.writeln('- Zakat estimate: net wealth ${fmt(z.net)}, ${zakat.nisabBasis} nisab ${fmt(z.nisab)}, due ${fmt(z.due!)} assuming a full lunar year.');
+    } else {
+      b.writeln('- Zakat estimate incomplete. Missing price per gram: ${z.missingPrices.join(', ')}.');
+    }
     return b.toString();
   }
 }

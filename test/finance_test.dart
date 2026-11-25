@@ -29,6 +29,36 @@ void main() {
       expect(toMinor(19.99, 'USD'), 1999);
     });
 
+    test('ledger selection keeps every amount and its minor units together in backups', () async {
+      final s = await state();
+      await s.updateFinance((f) => f.currency = 'AED');
+      await s.addMoney(MoneyEntry(at: now, amount: 1250, category: 'Food'));
+      await s.setBudget('Food', 7500);
+      await s.updateFinance((f) => f.openLedger('KWD'));
+      await s.addMoney(MoneyEntry(at: now, amount: 1250, category: 'Rent & bills'));
+      final backup = s.storage.exportJson();
+      await s.importBackup(backup);
+      expect(s.finance.fmt(s.finance.entries.single.amount), 'KWD 1.250');
+      expect(s.finance.budgets, isEmpty);
+      await s.updateFinance((f) => f.openLedger('AED'));
+      expect(s.finance.fmt(s.finance.entries.single.amount), 'AED 12.50');
+      expect(s.finance.budgets['Food'], 7500);
+      expect(() => s.finance.currency = 'KWD', throwsStateError);
+    });
+
+    test('all stored balance types guard against a currency change', () {
+      for (final f in [
+        Finance(budgets: {'Food': 1}),
+        Finance(pots: [SavingsPot(name: 'Example', target: 1)]),
+        Finance(debts: [Debt(person: 'Example', amount: 1)]),
+        Finance(zakat: ZakatInfo(debtsDue: 1)), Finance(zakat: ZakatInfo(goldGrams: 1)),
+        Finance(zakat: ZakatInfo(businessStock: 1)), Finance(zakat: ZakatInfo(silverPricePerGram: 1)),
+      ]) {
+        expect(() => f.currency = 'KWD', throwsStateError);
+        expect(f.currency, 'USD');
+      }
+    });
+
     test('currency guess from locale', () {
       expect(currencyForLocale('en_AE'), 'AED');
       expect(currencyForLocale('ur-PK'), 'PKR');
@@ -53,7 +83,7 @@ void main() {
       expect(calculateZakat(gold).due, 0);
       final noPrice = calculateZakat(ZakatInfo(cash: 9999999));
       expect(noPrice.hasNisab, isFalse);
-      expect(noPrice.due, 0);
+      expect(noPrice.due, isNull);
     });
 
     test('gold and silver held are valued by weight; pots can be left out', () {

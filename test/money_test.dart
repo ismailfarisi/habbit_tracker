@@ -116,13 +116,25 @@ void main() {
       expect(s.finance.zakat.cash, 1000000);
     });
 
+    test('positive unpriced holding prevents a final coach estimate', () async {
+      final r = jsonDecode(await tools.execute(call('update_zakat',
+        {'cash': 10000, 'silver_price_per_gram': 3, 'gold_grams': 100})));
+      expect(r['zakat_due'], isNull);
+      expect(r['missing_prices'], ['gold']);
+      expect(r['asset_values']['Gold (100.0 g)'], 'Unpriced');
+      expect(s.finance.summary(now), contains('estimate incomplete'));
+      final priced = jsonDecode(await tools.execute(call('update_zakat', {'gold_price_per_gram': 50})));
+      expect(priced['zakat_due'], 'AED 375');
+      expect(priced['valuation_date'], '2026-11-25');
+    });
+
     test('money_summary and set_currency', () async {
       await tools.execute(call('log_money', {'amount': 20, 'category': 'Sadaqah'}));
       final r = jsonDecode(await tools.execute(call('money_summary', {})));
       expect(r['by_category'], {'Sadaqah': 'AED 20'});
       expect((r['recent'] as List).single, contains('Sadaqah'));
-      expect(jsonDecode(await tools.execute(call('set_currency', {'code': 'eur'})))['ok'], isTrue);
-      expect(s.finance.currency, 'EUR');
+      expect(jsonDecode(await tools.execute(call('set_currency', {'code': 'eur'})))['error'], contains('separate ledger'));
+      expect(s.finance.currency, 'AED');
       expect(jsonDecode(await tools.execute(call('set_currency', {'code': 'euro'})))['error'], isNotNull);
     });
 

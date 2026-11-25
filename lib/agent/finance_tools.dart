@@ -270,18 +270,28 @@ class FinanceTools {
           z.hijriMonth = m;
           z.hijriDay = (a['hijri_day'] as num?)?.toInt().clamp(1, 30) ?? 1;
         }
+        const valuationKeys = {'gold_price_per_gram', 'silver_price_per_gram', 'gold_grams', 'silver_grams',
+          'cash', 'investments', 'business_stock', 'receivables', 'debts_due'};
+        if (a.keys.any(valuationKeys.contains)) z.valuedOn = clock();
         await state.updateFinance((x) => x.zakat = z);
         final r = f.zakatResult();
         onActivity?.call(
           ToolActivity(
-            r.hasNisab ? 'Zakat: ${r.aboveNisab ? '${f.fmt(r.due)} due' : 'below the nisab'}' : 'Saved zakat details',
+            r.complete ? 'Zakat: ${r.aboveNisab ? '${f.fmt(r.due!)} due' : 'below the nisab'}' : 'Zakat estimate incomplete',
             undo: () => state.updateFinance((x) => x.zakat = prev),
           ),
         );
         return jsonEncode({
-          'net_wealth': f.fmt(r.net),
+          'status': r.complete ? 'Estimate complete' : 'Estimate incomplete',
+          if (r.complete) 'net_wealth': f.fmt(r.net),
+          'missing_prices': r.missingPrices,
+          'asset_values': {for (final a in r.breakdown.entries) a.key: a.value == null ? 'Unpriced' : f.fmt(a.value!)},
+          'debts_due': f.fmt(r.liabilities),
+          'basis': z.nisabBasis,
+          'valuation_date': z.valuedOn == null ? null : ymd(z.valuedOn!),
+          'assumption': 'A full lunar year above nisab',
           'nisab': r.hasNisab ? f.fmt(r.nisab) : 'unknown: ask for today\'s ${z.nisabBasis} price per gram',
-          'zakat_due': f.fmt(r.due),
+          if (r.complete) 'zakat_due': f.fmt(r.due!),
           'includes_savings_pots': z.includePots ? f.fmt(f.totalSaved) : 'no',
         });
       case 'money_summary':
@@ -298,9 +308,15 @@ class FinanceTools {
       case 'set_currency':
         final code = '${a['code'] ?? ''}'.trim().toUpperCase();
         if (!RegExp(r'^[A-Z]{3}$').hasMatch(code)) return _err('use a 3-letter ISO code');
+        if (code == f.currency) return jsonEncode({'ok': true});
+        if (f.currencyLocked || f.ledgerCurrencies.contains(code)) {
+          return _err('Amounts are kept in ${f.currency}. Open a separate ledger in Money to use $code.');
+        }
         final prev = f.currency;
         await state.updateFinance((x) => x.currency = code);
-        onActivity?.call(ToolActivity('Currency $code', undo: () => state.updateFinance((x) => x.currency = prev)));
+        onActivity?.call(ToolActivity('Currency $code', undo: () => state.updateFinance((x) {
+          if (x.currency == code && !x.currencyLocked && !x.ledgerCurrencies.contains(prev)) x.currency = prev;
+        })));
         return jsonEncode({'ok': true});
       case 'update_settings':
         final changes = a['changes'];

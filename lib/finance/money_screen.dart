@@ -570,10 +570,10 @@ class _ZakatCard extends StatelessWidget {
       ),
       children: [
         Text(
-          !z.hasNisab
-              ? 'Enter your wealth and today\'s ${info.nisabBasis} price to see if zakat is due.'
+          !z.complete
+              ? 'Estimate incomplete · enter the ${z.missingPrices.join(' and ')} price per gram.'
               : z.aboveNisab
-              ? 'Zakat due: ${f.fmt(z.due)} (2.5% of ${f.fmt(z.net)})'
+              ? 'Zakat due: ${f.fmt(z.due!)} (2.5% of ${f.fmt(z.net)})'
               : 'Below the nisab (${f.fmt(z.nisab)}): no zakat due.',
         ),
         if (next != null)
@@ -609,14 +609,21 @@ class _ZakatScreenState extends State<ZakatScreen> {
     initialValue: value == 0 ? '' : '${toMajor(value, cur)}'.replaceFirst(RegExp(r'\.0+$'), ''),
     keyboardType: const TextInputType.numberWithOptions(decimal: true),
     decoration: InputDecoration(labelText: label, suffixText: cur, helperText: help),
-    onChanged: (s) => setState(() => set(parseMoney(s, cur) ?? 0)),
+    onChanged: (s) => setState(() {
+      set(parseMoney(s, cur) ?? 0);
+      z.valuedOn = DateTime.now();
+    }),
   );
 
   Widget _grams(String label, double value, void Function(double v) set) => TextFormField(
     initialValue: value == 0 ? '' : '$value',
     keyboardType: const TextInputType.numberWithOptions(decimal: true),
     decoration: InputDecoration(labelText: label, suffixText: 'g'),
-    onChanged: (s) => setState(() => set(double.tryParse(s.trim()) ?? 0)),
+    onChanged: (s) => setState(() {
+      final grams = double.tryParse(s.trim());
+      set(grams != null && grams.isFinite && grams >= 0 ? grams : 0);
+      z.valuedOn = DateTime.now();
+    }),
   );
 
   @override
@@ -654,14 +661,21 @@ class _ZakatScreenState extends State<ZakatScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      !r.hasNisab
-                          ? 'Enter today\'s ${z.nisabBasis} price'
-                          : (r.aboveNisab ? 'Zakat due ${f.fmt(r.due)}' : 'No zakat due'),
+                      !r.complete
+                          ? 'Estimate incomplete'
+                          : (r.aboveNisab ? 'Zakat due ${f.fmt(r.due!)}' : 'No zakat due'),
                       key: const Key('zakat-result'),
                       style: t.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 4),
-                    Text('Net zakatable wealth ${f.fmt(r.net)}${r.hasNisab ? ' · nisab ${f.fmt(r.nisab)}' : ''}'),
+                    if (!r.complete)
+                      Text('Missing price per gram: ${r.missingPrices.join(' and ')}.'),
+                    for (final a in r.breakdown.entries.where((a) => a.value != 0))
+                      Text('${a.key} · ${a.value == null ? 'Unpriced' : f.fmt(a.value!)}'),
+                    if (r.liabilities > 0) Text('Debts due · −${f.fmt(r.liabilities)}'),
+                    if (r.complete) Text('Net zakatable wealth ${f.fmt(r.net)}${r.hasNisab ? ' · nisab ${f.fmt(r.nisab)}' : ''}'),
+                    Text('Valuation date: ${z.valuedOn == null ? 'not recorded' : DateFormat.yMMMd().format(z.valuedOn!)}. '
+                        'Estimate assumes a full lunar year above the ${z.nisabBasis} nisab.'),
                   ],
                 ),
               ),
@@ -713,17 +727,17 @@ class _ZakatScreenState extends State<ZakatScreen> {
             ),
             gap,
             FilledButton(key: const Key('zakat-save'), onPressed: _save, child: const Text('Save')),
-            if (r.due > 0)
+            if ((r.due ?? 0) > 0)
               TextButton(
                 onPressed: () async {
                   await _save(pop: false);
                   await widget.state.addMoney(
-                    MoneyEntry(at: DateTime.now(), amount: r.due, category: 'Zakat', note: 'Zakat'),
+                    MoneyEntry(at: DateTime.now(), amount: r.due!, category: 'Zakat', note: 'Zakat'),
                   );
                   await widget.state.updateFinance((f) => f.zakat.lastPaid = DateTime.now());
                   if (context.mounted) Navigator.pop(context);
                 },
-                child: Text('I paid ${f.fmt(r.due)}: log it'),
+                child: Text('I paid ${f.fmt(r.due!)}: log it'),
               ),
             gap,
             Text(moneyDisclaimer, style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
@@ -1043,9 +1057,17 @@ Future<void> pickCurrency(BuildContext context, AppState state) async {
       child: ListView(
         shrinkWrap: true,
         children: [
-          for (final code in commonCurrencies)
+          if (state.finance.currencyLocked || state.finance.ledgerCurrencies.length > 1)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('Each ledger keeps its own currency. Your ${state.finance.currency} records stay in that ledger.'),
+            ),
+          for (final code in {...commonCurrencies, ...state.finance.ledgerCurrencies})
             ListTile(
               title: Text(code),
+              subtitle: state.finance.currencyLocked || state.finance.ledgerCurrencies.length > 1
+                  ? Text(state.finance.ledgerCurrencies.contains(code) ? 'Existing ledger' : 'Create separate ledger')
+                  : null,
               trailing: code == state.finance.currency ? const Icon(Icons.check) : null,
               onTap: () => Navigator.pop(c, code),
             ),
@@ -1053,5 +1075,17 @@ Future<void> pickCurrency(BuildContext context, AppState state) async {
       ),
     ),
   );
-  if (c != null) await state.updateFinance((f) => f.currency = c);
+  if (c == null || c == state.finance.currency || !context.mounted) return;
+  final f = state.finance;
+  if (f.currencyLocked || f.ledgerCurrencies.length > 1) {
+    final exists = f.ledgerCurrencies.contains(c);
+    final ok = await confirmDialog(context,
+      title: exists ? 'Open $c ledger?' : 'Create $c ledger?',
+      message: 'Your ${f.currency} amounts stay in the ${f.currency} ledger. You can switch back at any time.',
+      confirm: exists ? 'Open ledger' : 'Create ledger',
+    );
+    if (ok) await state.updateFinance((f) => f.openLedger(c));
+  } else {
+    await state.updateFinance((f) => f.currency = c);
+  }
 }
