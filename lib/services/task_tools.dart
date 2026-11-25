@@ -87,7 +87,9 @@ class TaskTools {
   /// Called for each change so the UI can show it (with undo).
   final void Function(ToolActivity activity)? onActivity;
 
-  TaskTools(this.backend, {this.onActivity, DateTime Function()? clock}) : clock = clock ?? DateTime.now;
+  final bool Function(String id)? visible;
+
+  TaskTools(this.backend, {this.onActivity, this.visible, DateTime Function()? clock}) : clock = clock ?? DateTime.now;
 
   Future<String> execute(ToolCall call) async {
     Map<String, dynamic> args;
@@ -209,7 +211,7 @@ class TaskTools {
 
   Future<String> _list(Map<String, dynamic> a) async {
     final includeDone = a['include_completed'] == true;
-    final list = backend.tasks.where((t) => includeDone || !t.isOneOffDone).take(100).map(_summary).toList();
+    final list = backend.tasks.where((t) => (visible?.call(t.id) ?? true) && (includeDone || !t.isOneOffDone)).take(100).map(_summary).toList();
     return jsonEncode({'ok': true, 'count': list.length, 'tasks': list});
   }
 

@@ -97,7 +97,7 @@ void main() {
     await tester.tap(find.text('Coach'));
     await tester.pumpAndSettle();
     expect(find.text(AiKeyEmptyState.message), findsOneWidget);
-    expect(find.byType(TextField), findsNothing, reason: 'no chat input without a key');
+    expect(find.byKey(const Key('chat-input')), findsOneWidget, reason: 'drafts can be edited offline');
 
     await tester.tap(find.text('Browse templates'));
     await tester.pumpAndSettle();

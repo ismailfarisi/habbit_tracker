@@ -208,9 +208,9 @@ void main() {
           : sse({'content': 'Your goal is set.'});
       return http.StreamedResponse(Stream.value(utf8.encode(text)), 200);
     });
-    final agent = LocalAgUiAgent(s, client: () => OpenRouterClient(apiKey: 'k', model: 'm', client: client));
+    final agent = LocalAgUiAgent(s, client: () => OpenRouterClient(apiKey: 'sk-or-v1-synthetic-test-key-0001', model: 'm', client: client));
     final events = await agent
-        .run(threadId: 't', history: [const ChatMessage('user', 'Lose 5 kg by Ramadan')], system: 'sys')
+        .run(review: (_) async => true, threadId: 't', history: [const ChatMessage('user', 'Lose 5 kg by Ramadan')], system: 'sys')
         .toList();
     final start = events.whereType<agui.ToolCallStartEvent>().single;
     expect(start.toolCallName, 'create_goal');

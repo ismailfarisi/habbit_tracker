@@ -147,13 +147,19 @@ class OpenRouterClient {
     required List<Map<String, dynamic>> tools,
     required ToolExecutor execute,
     void Function(String delta)? onText,
+    Future<void> Function(List<ToolCall>)? beforeCalls,
+    void Function()? checkActive,
     int maxSteps = 8,
   }) async {
     for (var step = 0; step < maxSteps; step++) {
+      checkActive?.call();
       final msg = await turn([ChatMessage('system', system), ...history], tools: tools, onText: onText);
+      checkActive?.call();
       history.add(msg);
       if (msg.toolCalls.isEmpty) return msg.content;
+      await beforeCalls?.call(msg.toolCalls);
       for (final call in msg.toolCalls) {
+        checkActive?.call();
         String result;
         try {
           result = await execute(call);
@@ -163,7 +169,7 @@ class OpenRouterClient {
         history.add(ChatMessage('tool', result, toolCallId: call.id));
       }
     }
-    return '';
+    throw OpenRouterException('The coach reached the tool limit. Review the completed changes.');
   }
 
   /// Streams plain text (no tools).

@@ -32,6 +32,7 @@ import 'habit_templates.dart';
 import 'app_tools.dart';
 import 'goal_tools.dart';
 import 'finance_tools.dart';
+import 'coach_access.dart';
 
 const habitToolNames = {
   'create_habit',
@@ -98,12 +99,8 @@ A2uiRequestProcessor _agentProcessor() => _processor ??= A2uiGenerator(
 String a2uiPromptSnippet() => _agentProcessor().promptSnippet;
 
 /// The habit part of the system prompt, including the user's current habits.
-String habitAgentPrompt(AppState state, DateTime now) {
-  final habits = state.activeHabits;
-  final list = habits.isEmpty
-      ? 'none yet'
-      : habits.map((h) => '${h.title} (id ${h.id}, ${h.kind.name}, ${h.describeSchedule()})').join('; ');
-  return '$_coachInstructions\nThe user\'s habits: $list.\n\n'
+String habitAgentPrompt() {
+  return '$_coachInstructions\n'
       'Reference for the "ui" argument (A2UI format and component catalogs):\n${a2uiPromptSnippet()}\n'
       'Reminder: in this app the component list goes in the "ui" tool argument as {"components": [...]}. '
       'Do not put <a2ui-json> blocks in your reply.';
@@ -238,7 +235,9 @@ class HabitTools {
   /// the habit; call [accept] once the user confirms.
   final void Function(HabitProposal proposal)? onProposal;
 
-  HabitTools(this.state, {this.onActivity, this.onProposal, DateTime Function()? clock})
+  final bool Function(String id)? visible;
+
+  HabitTools(this.state, {this.onActivity, this.onProposal, this.visible, DateTime Function()? clock})
       : clock = clock ?? DateTime.now;
 
   Future<String> execute(ToolCall call) async {
@@ -444,7 +443,7 @@ class HabitTools {
 
   String _list(Map<String, dynamic> a) {
     final all = a['include_archived'] == true ? state.habits : state.activeHabits;
-    return jsonEncode({'ok': true, 'today': dayKey(clock()), 'habits': all.map(_summary).toList()});
+    return jsonEncode({'ok': true, 'today': dayKey(clock()), 'habits': all.where((h) => visible?.call(h.id) ?? true).map(_summary).toList()});
   }
 
   String _history(Map<String, dynamic> a) {
@@ -480,14 +479,17 @@ class HabitAgent {
   final OpenRouterClient Function() _client;
   final DateTime Function() clock;
 
-  late final habitTools = HabitTools(state, onActivity: onActivity, onProposal: onProposal, clock: clock);
-  late final taskTools = TaskTools(state, onActivity: onActivity, clock: clock);
+  final CoachAccess? access;
+
+  late final habitTools = HabitTools(state, visible: access?.habit, onActivity: onActivity, onProposal: onProposal, clock: clock);
+  late final taskTools = TaskTools(state, visible: access?.task, onActivity: onActivity, clock: clock);
   late final appTools = AppTools(state, onActivity: onActivity, clock: clock);
   late final goalTools = GoalTools(state, onActivity: onActivity, clock: clock);
   late final financeTools = FinanceTools(state, onActivity: onActivity, clock: clock);
 
   HabitAgent(
     this.state, {
+    this.access,
     this.onActivity,
     this.onProposal,
     OpenRouterClient Function()? client,
@@ -517,19 +519,47 @@ class HabitAgent {
     void Function()? onToolCall,
     void Function(ToolCall call)? onToolStart,
     void Function(ToolCall call, String result)? onToolResult,
+    ReviewChanges? review,
+    void Function()? checkActive,
+    bool replyOnly = false,
   }) async {
     final client = _client();
+    final scope = access;
+    var approved = <ToolCall>{};
     try {
       return await client.runAgent(
         history,
-        system: '$system\n\n${habitAgentPrompt(state, clock())}',
-        tools: tools,
+        system: '$system\n\n${habitAgentPrompt()}',
+        tools: [for (final tool in tools) if (!replyOnly && (scope?.advertises(tool['function']['name'] as String) ?? true)) tool],
+        checkActive: checkActive,
+        beforeCalls: scope == null ? null : (calls) async {
+          approved.clear();
+          if (replyOnly) return;
+          final changes = calls.where((c) => scope.allows(c) && scope.needsReview(c)).toList();
+          if (changes.isNotEmpty && await review?.call(List.unmodifiable(changes)) == true) {
+            approved = changes.toSet();
+          }
+        },
         execute: (call) async {
           onToolCall?.call();
           onToolStart?.call(call);
           String result;
           try {
-            result = await execute(call);
+            if (replyOnly || (scope != null && !scope.allows(call))) {
+              result = jsonEncode({'error': 'Outside the shared context. No change made.'});
+            } else if (scope != null && scope.needsReview(call) && !approved.remove(call)) {
+              result = jsonEncode({'error': 'Change was not approved.'});
+            } else if (scope != null && call.name == 'list_goals') {
+              result = jsonEncode({'goals': scope.goals.map(goalTools.describe).toList()});
+            } else if (scope?.money == CoachMoney.totals && call.name == 'money_summary') {
+              result = jsonEncode({'summary': scope!.totals(clock())});
+            } else {
+              result = await execute(call);
+              if (scope != null && call.name == 'customize_today' && jsonDecode(result)['ok'] == true) {
+                result = '{"ok":true}';
+              }
+            }
+            if (scope != null) result = scope.redactPeople(result);
           } catch (e) {
             result = jsonEncode({'error': e.toString()});
           }

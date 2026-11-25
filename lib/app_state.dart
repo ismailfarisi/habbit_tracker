@@ -30,6 +30,7 @@ import 'finance/finance.dart';
 ///
 /// Every mutation notifies listeners, saves, and reschedules reminders.
 class AppState extends ChangeNotifier implements TaskBackend {
+  int dataGeneration = 0;
   final Storage storage;
   final NotificationService notifications;
 
@@ -44,7 +45,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
   List<Goal> goals = [];
   Finance finance = Finance();
 
-  /// Text to send in the Chat tab (e.g. "review my goal"), set from other screens.
+  /// Text to draft in the Chat tab (e.g. "review my goal"), set from other screens.
   final ValueNotifier<ChatRequest?> chatPrompt = ValueNotifier(null);
   String apiKey = '';
 
