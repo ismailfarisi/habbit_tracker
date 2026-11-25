@@ -90,7 +90,9 @@ class MoneyEntry {
   String note;
   String? potId;
   String? debtId;
-  final EntryKind kind;
+  EntryKind kind;
+  /// For a payment logged from the calculator against a specific anniversary.
+  final int? zakatYear;
 
   MoneyEntry({
     String? id,
@@ -102,6 +104,7 @@ class MoneyEntry {
     this.potId,
     this.debtId,
     EntryKind? kind,
+    this.zakatYear,
   }) : kind = kind ?? (potId != null || category == 'Savings' ? EntryKind.savings
           : debtId != null || category == 'Debt' ? EntryKind.debt
           : income ? EntryKind.income : EntryKind.spending),
@@ -113,6 +116,7 @@ class MoneyEntry {
     'amount': amount,
     if (income) 'income': true,
     'kind': kind.name,
+    if (zakatYear != null) 'zakatYear': zakatYear,
     'category': category,
     if (note.isNotEmpty) 'note': note,
     if (potId != null) 'potId': potId,
@@ -124,6 +128,7 @@ class MoneyEntry {
     at: _date(j['at']) ?? DateTime.now(),
     amount: (j['amount'] as num?)?.toInt() ?? 0,
     income: j['income'] == true,
+    zakatYear: (j['zakatYear'] as num?)?.toInt(),
     kind: EntryKind.values.where((v) => v.name == j['kind']).firstOrNull,
     category: j['category'] as String? ?? 'Other',
     note: j['note'] as String? ?? '',
@@ -408,6 +413,11 @@ class MonthSummary {
   final Map<String, int> byCategory;
   const MonthSummary(this.income, this.spent, this.saved, this.sadaqah, this.byCategory, this.withdrawn, this.debtOut, this.debtIn);
   final int withdrawn, debtOut, debtIn;
+  int usedFor(String category) => switch (category) {
+    'Debt' => debtOut,
+    'Savings' => saved,
+    _ => byCategory[category] ?? 0,
+  };
   int get left => income - spent - saved + withdrawn - debtOut + debtIn;
 }
 
@@ -622,7 +632,7 @@ class Finance {
     for (final category in {...budgets.keys, ...expected.keys}) {
       final limit = budgets[category] ?? 0;
       final bills = expected[category] ?? 0;
-      final remaining = (limit > bills ? limit : bills) - (m.byCategory[category] ?? 0);
+      final remaining = (limit > bills ? limit : bills) - m.usedFor(category);
       if (remaining > 0) cash -= remaining;
     }
     return cash;
@@ -677,7 +687,7 @@ class Finance {
     b.writeln('- Spent today: ${fmt(spentOn(now))}. Sadaqah this week: ${fmt(sadaqahInWeek(now))}.');
     if (budgets.isNotEmpty) {
       b.writeln(
-        '- Budgets this month: ${budgets.entries.map((e) => '${e.key} ${fmt(m.byCategory[e.key] ?? 0)} of ${fmt(e.value)}').join(', ')}.',
+        '- Budgets this month: ${budgets.entries.map((e) => '${e.key} ${fmt(m.usedFor(e.key))} of ${fmt(e.value)}').join(', ')}.',
       );
     }
     for (final p in pots.where((p) => !p.archived)) {

@@ -364,6 +364,32 @@ void main() {
       expect(calculateZakat(s.finance.zakat).due, 25000);
     });
 
+    testWidgets('the currency picker requires a separate ledger for a populated currency', (tester) async {
+      final s = (await tester.runAsync(state))!;
+      await s.updateFinance((f) => f.currency = 'AED');
+      await s.addMoney(MoneyEntry(at: now, amount: 1250, category: 'Food'));
+      await pump(tester, Scaffold(body: Builder(builder: (c) =>
+        TextButton(onPressed: () => pickCurrency(c, s), child: const Text('Choose ledger')))));
+      Future<void> select() async {
+        await tester.tap(find.text('Choose ledger'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('KWD'));
+        await tester.pumpAndSettle();
+      }
+      await select();
+      expect(s.finance.currency, 'AED');
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(s.finance.ledgerCurrencies, {'AED'});
+      await select();
+      await tester.tap(find.text('Create ledger'));
+      await tester.pumpAndSettle();
+      expect(s.finance.currency, 'KWD');
+      expect(s.finance.entries, isEmpty);
+      await s.updateFinance((f) => f.openLedger('AED'));
+      expect(s.finance.fmt(s.finance.entries.single.amount), 'AED 12.50');
+    });
+
     testWidgets('Settings → Money changes the currency', (tester) async {
       final s = (await tester.runAsync(state))!;
       await s.updateFinance((f) => f.currency = 'USD');

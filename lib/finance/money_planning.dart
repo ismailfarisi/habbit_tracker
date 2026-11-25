@@ -11,13 +11,8 @@ class _MonthlyPlan extends StatelessWidget {
       final f = state.finance;
       final today = DateTime.now(), m = f.month(today);
       final available = f.afterPlannedExpenses(today);
-      final pots = f.pots.where(
-        (p) => !p.archived && p.by != null && p.target > f.potSaved(p.id),
-      );
-      final contributions = pots.fold<int>(
-        0,
-        (s, p) => s + f.contributionLeftThisMonth(p, today),
-      );
+      final pots = f.pots.where((p) => !p.archived && p.by != null && p.target > f.potSaved(p.id));
+      final contributions = pots.fold<int>(0, (s, p) => s + f.contributionLeftThisMonth(p, today));
       final after = available - contributions;
       return Scaffold(
         appBar: AppBar(title: Text(DateFormat.yMMMM().format(today))),
@@ -29,38 +24,25 @@ class _MonthlyPlan extends StatelessWidget {
               icon: Icons.calendar_month_outlined,
               children: [
                 Text('Logged net cash flow · ${f.fmt(m.left, sign: true)}'),
-                Text(
-                  'After remaining budgets and expected bills · ${f.fmt(available, sign: true)}',
-                ),
+                Text('After remaining budgets and expected bills · ${f.fmt(available, sign: true)}'),
                 if (pots.isNotEmpty)
                   Text(
                     after < 0
                         ? 'Short by ${f.fmt(-after)} after planned savings'
                         : '${f.fmt(after)} left after planned savings',
                   ),
-                const _Hint(
-                  'Uses income logged so far. Bills count toward their category budget.',
-                ),
+                const _Hint('Uses income logged so far. Bills count toward their category budget.'),
                 TextButton(
-                  onPressed: () => _openResource(
-                    context,
-                    moneyResources.firstWhere((r) => r.id == 'budget'),
-                  ),
+                  onPressed: () => _openResource(context, moneyResources.firstWhere((r) => r.id == 'budget')),
                   child: const Text('Build a simple budget'),
                 ),
               ],
             ),
             SectionCard(
               title: 'Expected monthly expenses',
-              trailing: TextButton(
-                onPressed: () => _bill(context),
-                child: const Text('Add'),
-              ),
+              trailing: TextButton(onPressed: () => _bill(context), child: const Text('Add')),
               children: [
-                if (f.recurring.isEmpty)
-                  const _Hint(
-                    'Plan regular bills here. Log the actual payment in the ledger.',
-                  ),
+                if (f.recurring.isEmpty) const _Hint('Plan regular bills here. Log the actual payment in the ledger.'),
                 for (final r in f.recurring)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -74,10 +56,7 @@ class _MonthlyPlan extends StatelessWidget {
             SectionCard(
               title: 'Savings contributions',
               children: [
-                if (pots.isEmpty)
-                  const _Hint(
-                    'Set a target date on a savings pot to plan its contributions.',
-                  ),
+                if (pots.isEmpty) const _Hint('Set a target date on a savings pot to plan its contributions.'),
                 for (final p in pots)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -92,10 +71,7 @@ class _MonthlyPlan extends StatelessWidget {
             ),
             SectionCard(
               title: 'Spending categories',
-              trailing: TextButton(
-                onPressed: () => _category(context),
-                child: const Text('Add'),
-              ),
+              trailing: TextButton(onPressed: () => _category(context), child: const Text('Add')),
               children: [
                 Text(
                   f.customCategories.isEmpty
@@ -107,12 +83,8 @@ class _MonthlyPlan extends StatelessWidget {
             ListTile(
               title: const Text('Personal reminders'),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute<void>(
-                  builder: (_) => _FinanceReminders(state: state),
-                ),
-              ),
+              onTap: () =>
+                  Navigator.push(context, MaterialPageRoute<void>(builder: (_) => _FinanceReminders(state: state))),
             ),
           ],
         ),
@@ -131,24 +103,15 @@ class _MonthlyPlan extends StatelessWidget {
           content: TextField(
             autofocus: true,
             maxLength: 60,
-            decoration: InputDecoration(
-              labelText: 'Name',
-              errorText: error.isEmpty ? null : error,
-            ),
+            decoration: InputDecoration(labelText: 'Name', errorText: error.isEmpty ? null : error),
             onChanged: (s) => name = s.trim(),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(c),
-              child: const Text('Cancel'),
-            ),
+            TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
             FilledButton(
               onPressed: () {
                 if (name.isEmpty ||
-                    [
-                      ...f.expenseCategories,
-                      ...incomeCategories,
-                    ].any((v) => v.toLowerCase() == name.toLowerCase())) {
+                    [...f.expenseCategories, ...incomeCategories].any((v) => v.toLowerCase() == name.toLowerCase())) {
                   set(() => error = 'Enter a new category name');
                 } else {
                   Navigator.pop(c, name);
@@ -160,8 +123,9 @@ class _MonthlyPlan extends StatelessWidget {
         ),
       ),
     );
-    if (result != null)
+    if (result != null) {
       await state.updateFinance((f) => f.customCategories.add(result));
+    }
   }
 
   Future<void> _bill(BuildContext context, {RecurringExpense? bill}) async {
@@ -173,9 +137,7 @@ class _MonthlyPlan extends StatelessWidget {
       builder: (c) => StatefulBuilder(
         builder: (c, set) => AlertDialog(
           scrollable: true,
-          title: Text(
-            bill == null ? 'Expected monthly expense' : 'Edit monthly expense',
-          ),
+          title: Text(bill == null ? 'Expected monthly expense' : 'Edit monthly expense'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -190,18 +152,12 @@ class _MonthlyPlan extends StatelessWidget {
                 onChanged: (s) => name = s.trim(),
               ),
               TextFormField(
-                initialValue: amount == null
-                    ? ''
-                    : toMajor(amount!, f.currency).toString(),
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
+                initialValue: amount == null ? '' : toMajor(amount!, f.currency).toString(),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(
                   labelText: 'Monthly amount',
                   suffixText: f.currency,
-                  errorText: showErrors && amount == null
-                      ? 'Enter a positive amount'
-                      : null,
+                  errorText: showErrors && amount == null ? 'Enter a positive amount' : null,
                 ),
                 onChanged: (s) => amount = parseMoney(s, f.currency),
               ),
@@ -210,9 +166,7 @@ class _MonthlyPlan extends StatelessWidget {
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Category'),
                 items: [
-                  for (final v in f.expenseCategories.where(
-                    (v) => v != 'Savings' && v != 'Debt',
-                  ))
+                  for (final v in f.expenseCategories.where((v) => v != 'Savings' && v != 'Debt'))
                     DropdownMenuItem(value: v, child: Text(v)),
                 ],
                 onChanged: (v) => category = v ?? category,
@@ -220,15 +174,8 @@ class _MonthlyPlan extends StatelessWidget {
             ],
           ),
           actions: [
-            if (bill != null)
-              TextButton(
-                onPressed: () => Navigator.pop(c, 'remove'),
-                child: const Text('Remove'),
-              ),
-            TextButton(
-              onPressed: () => Navigator.pop(c),
-              child: const Text('Cancel'),
-            ),
+            if (bill != null) TextButton(onPressed: () => Navigator.pop(c, 'remove'), child: const Text('Remove')),
+            TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
             FilledButton(
               onPressed: () {
                 if (amount == null || name.isEmpty) {
@@ -246,15 +193,9 @@ class _MonthlyPlan extends StatelessWidget {
     if (action == null) return;
     await state.updateFinance((f) {
       f.recurring.removeWhere((r) => r.id == bill?.id);
-      if (action == 'save')
-        f.recurring.add(
-          RecurringExpense(
-            id: bill?.id,
-            name: name,
-            category: category,
-            amount: amount!,
-          ),
-        );
+      if (action == 'save') {
+        f.recurring.add(RecurringExpense(id: bill?.id, name: name, category: category, amount: amount!));
+      }
     });
   }
 }
@@ -268,32 +209,21 @@ class _FinanceReminders extends StatelessWidget {
     listenable: state,
     builder: (context, _) {
       final today = DateTime.now();
-      final plans = financePlans(
-        state.finance,
-        hijriOffsetDays: state.settings.hijriOffsetDays,
-      ).toList();
+      final plans = financePlans(state.finance, hijriOffsetDays: state.settings.hijriOffsetDays).toList();
       return Scaffold(
         appBar: AppBar(title: const Text('Personal reminders')),
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const Text(
-              'Choose which dates appear in your daily plan. Notifications use “Personal reminder”.',
-            ),
+            const Text('Choose which dates appear in your daily plan. Notifications use “Personal reminder”.'),
             if (plans.isEmpty)
-              const ListTile(
-                title: Text(
-                  'Add a dated debt, savings pot or zakat anniversary to get started.',
-                ),
-              ),
+              const ListTile(title: Text('Add a dated debt, savings pot or zakat anniversary to get started.')),
             for (final plan in plans) ...[
               SwitchListTile.adaptive(
                 contentPadding: EdgeInsets.zero,
                 title: Text(plan.detail),
                 value: plan.reminder.enabled,
-                onChanged: (v) => state.updateFinance(
-                  (_) => plan.reminder.setEnabled(v, today),
-                ),
+                onChanged: (v) => state.updateFinance((_) => plan.reminder.setEnabled(v, today)),
               ),
               if (plan.next(today) case final FinanceAgendaItem item)
                 ListTile(
@@ -301,18 +231,16 @@ class _FinanceReminders extends StatelessWidget {
                   title: Text(DateFormat.yMMMd().format(item.date)),
                   trailing: TextButton(
                     onPressed: () async {
-                      final first =
-                          (item.date.isAfter(today) ? item.date : today).add(
-                            const Duration(days: 1),
-                          );
+                      final first = (item.date.isAfter(today) ? item.date : today).add(const Duration(days: 1));
                       final d = await showDatePicker(
                         context: context,
                         firstDate: first,
                         initialDate: first,
                         lastDate: DateTime(first.year + 5),
                       );
-                      if (d != null)
+                      if (d != null) {
                         await state.updateFinance((_) => item.snooze(d));
+                      }
                     },
                     child: const Text('Snooze'),
                   ),

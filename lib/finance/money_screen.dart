@@ -233,7 +233,7 @@ class _MonthCard extends StatelessWidget {
       title: DateFormat.yMMMM().format(now),
       icon: Icons.calendar_view_month_outlined,
       children: [
-        Row(children: [stat('In', m.income), stat('Spent', m.spent), stat('Saved', m.saved)]),
+        Row(children: [stat('In', m.income), stat('Spent', m.spent), stat('To savings', m.saved)]),
         const SizedBox(height: 8),
         Text(
           'Today ${f.fmt(f.spentOn(now))} · Sadaqah this week ${f.fmt(f.sadaqahInWeek(now))}'
@@ -271,7 +271,7 @@ class _BudgetsCard extends StatelessWidget {
             child: InkWell(
               onTap: () => _editBudget(context, category: e.key),
               child: BudgetBar(
-                spent: m.byCategory[e.key] ?? 0,
+                spent: m.usedFor(e.key),
                 limit: e.value,
                 label: '${categoryEmoji[e.key] ?? ''} ${e.key}',
                 f: f,
@@ -667,6 +667,8 @@ class _ZakatScreenState extends State<ZakatScreen> {
     final t = Theme.of(context);
     final f = widget.state.finance;
     final r = calculateZakat(z, potSavings: f.totalSaved);
+    final today = hijriOf(DateTime.now(), offsetDays: widget.state.settings.hijriOffsetDays);
+    final year = z.hijriMonth == null ? null : today.year + (z.hijriMonth! < today.month ? 1 : 0);
     const gap = SizedBox(height: 8);
     final goldPrice = _money(
       'Gold price per gram today',
@@ -768,14 +770,15 @@ class _ZakatScreenState extends State<ZakatScreen> {
                 onPressed: () async {
                   if (_saved) return;
                   _saved = true;
-                  final entry = MoneyEntry(at: DateTime.now(), amount: r.due!, category: 'Zakat', note: 'Zakat');
+                  final entry = MoneyEntry(at: DateTime.now(), amount: r.due!, category: 'Zakat', note: 'Zakat',
+                    zakatYear: year);
                   await widget.state.updateFinance((f) {
                     f.zakat = ZakatInfo.fromJson(z.toJson());
                     f.entries.add(entry);
                   });
                   if (context.mounted) Navigator.pop(context);
                 },
-                child: Text('I paid ${f.fmt(r.due!)}: log it'),
+                child: Text('I paid ${f.fmt(r.due!)}${year == null ? '' : ' for $year AH'}: log it'),
               ),
             gap,
             Text(moneyDisclaimer, style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
@@ -1098,8 +1101,15 @@ class _MoneySheetState extends State<_MoneySheet> {
       if (original == null) {
         f.entries.add(e);
       } else {
-        final i = f.entries.indexWhere((x) => x.id == original.id);
-        if (i >= 0) f.entries[i] = e;
+        final stored = f.entries.where((x) => x.id == original.id).firstOrNull;
+        if (stored == null) return;
+        stored
+          ..at = e.at
+          ..amount = e.amount
+          ..category = e.category
+          ..income = e.income
+          ..note = e.note
+          ..kind = e.kind;
       }
     });
     nav.pop();

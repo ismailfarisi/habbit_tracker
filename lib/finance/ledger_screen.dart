@@ -17,27 +17,12 @@ class _LedgerScreenState extends State<LedgerScreen> {
     listenable: widget.state,
     builder: (context, _) {
       final f = widget.state.finance;
-      final rows = f.ledgerEntries(
-        month: month,
-        category: category,
-        goalId: goalId,
-      );
-      final months = {
-        if (month != null) month!,
-        for (final e in f.entries) DateTime(e.at.year, e.at.month),
-      }.toList()..sort((a, b) => b.compareTo(a));
-      final categories = {
-        if (category != null) category!,
-        for (final e in f.entries) e.category,
-      }.toList()..sort();
-      final goals = {
-        if (goalId != null) goalId!,
-        for (final p in f.pots) ?p.goalId,
-      };
-      final net = rows.fold<int>(
-        0,
-        (sum, e) => sum + (e.income ? e.amount : -e.amount),
-      );
+      final rows = f.ledgerEntries(month: month, category: category, goalId: goalId);
+      final months = {if (month != null) month!, for (final e in f.entries) DateTime(e.at.year, e.at.month)}.toList()
+        ..sort((a, b) => b.compareTo(a));
+      final categories = {if (category != null) category!, for (final e in f.entries) e.category}.toList()..sort();
+      final goals = {if (goalId != null) goalId!, for (final p in f.pots) ?p.goalId};
+      final net = rows.fold<int>(0, (sum, e) => sum + (e.income ? e.amount : -e.amount));
       return Scaffold(
         appBar: AppBar(
           title: Text('${f.currency} ledger'),
@@ -53,8 +38,9 @@ class _LedgerScreenState extends State<LedgerScreen> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
           itemCount: rows.length + 1,
           itemBuilder: (context, index) {
-            if (index > 0)
+            if (index > 0) {
               return _LedgerRow(state: widget.state, entry: rows[index - 1]);
+            }
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -64,11 +50,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
                   decoration: const InputDecoration(labelText: 'Month'),
                   items: [
                     const DropdownMenuItem(child: Text('All months')),
-                    for (final m in months)
-                      DropdownMenuItem(
-                        value: m,
-                        child: Text(DateFormat.yMMMM().format(m)),
-                      ),
+                    for (final m in months) DropdownMenuItem(value: m, child: Text(DateFormat.yMMMM().format(m))),
                   ],
                   onChanged: (v) => setState(() => month = v),
                 ),
@@ -78,8 +60,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
                   decoration: const InputDecoration(labelText: 'Category'),
                   items: [
                     const DropdownMenuItem(child: Text('All categories')),
-                    for (final c in categories)
-                      DropdownMenuItem(value: c, child: Text(c)),
+                    for (final c in categories) DropdownMenuItem(value: c, child: Text(c)),
                   ],
                   onChanged: (v) => setState(() => category = v),
                 ),
@@ -93,10 +74,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
                       for (final id in goals)
                         DropdownMenuItem(
                           value: id,
-                          child: Text(
-                            widget.state.goalById(id)?.title ??
-                                'Previous goal · $id',
-                          ),
+                          child: Text(widget.state.goalById(id)?.title ?? 'Previous goal · $id'),
                         ),
                     ],
                     onChanged: (v) => setState(() => goalId = v),
@@ -127,9 +105,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                'Save ${rows.length} filtered entries with their date, type, direction, amount and currency.',
-              ),
+              Text('Save ${rows.length} filtered entries with their date, type, direction, amount and currency.'),
               CheckboxListTile(
                 value: details,
                 onChanged: (v) => set(() => details = v == true),
@@ -138,14 +114,8 @@ class _LedgerScreenState extends State<LedgerScreen> {
             ],
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(c),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Choose file'),
-            ),
+            TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Choose file')),
           ],
         ),
       ),
@@ -155,22 +125,17 @@ class _LedgerScreenState extends State<LedgerScreen> {
       final result = await FilePicker.saveFile(
         fileName: 'ledger-${f.currency}.csv',
         mimeType: 'text/csv',
-        bytes: Uint8List.fromList(
-          utf8.encode(ledgerCsv(f, rows, includeDetails: details)),
-        ),
+        bytes: Uint8List.fromList(utf8.encode(ledgerCsv(f, rows, includeDetails: details))),
       );
       if (result != null && mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Ledger CSV saved')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ledger CSV saved')));
       }
     } catch (_) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not save the CSV. Try another location.'),
-          ),
-        );
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Could not save the CSV. Try another location.')));
+      }
     }
   }
 }
@@ -185,44 +150,44 @@ class _LedgerRow extends StatelessWidget {
     final f = state.finance;
     final e = entry;
     final label = _RecentCard._label(f, e);
-    final details = [
-      if (label != e.kind.label) label,
-      e.kind.label,
-      DateFormat.yMMMd().format(e.at),
-    ];
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(e.note.isEmpty ? label : e.note),
-      subtitle: Text(
-        '${details.join(' · ')}\n${f.fmt(e.income ? e.amount : -e.amount, sign: true)}',
-      ),
-      onTap: () => showMoneySheet(context, state, entry: e),
-      trailing: PopupMenuButton<String>(
-        tooltip: 'Entry actions',
-        onSelected: (action) async {
-          if (action == 'edit') {
-            await showMoneySheet(context, state, entry: e);
-          } else {
-            final ledger = f.activeLedger;
-            await state.removeMoney(e.id);
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: const Text('Entry deleted'),
-                  action: SnackBarAction(
-                    label: 'Undo',
-                    onPressed: () =>
-                        state.updateFinance((_) => ledger.entries.add(e)),
-                  ),
-                ),
-              );
+    final details = [if (label != e.kind.label) label, e.kind.label, DateFormat.yMMMd().format(e.at)];
+    Future<void> remove() async {
+      final ledger = f.activeLedger;
+      final messenger = ScaffoldMessenger.of(context);
+      await state.removeMoney(e.id);
+      if (!messenger.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: const Text('Entry deleted'),
+          action: SnackBarAction(label: 'Undo', onPressed: () => state.updateFinance((_) => ledger.entries.add(e))),
+        ),
+      );
+    }
+
+    return Dismissible(
+      key: ValueKey(e.id),
+      direction: DismissDirection.endToStart,
+      background: const Align(alignment: AlignmentDirectional.centerEnd, child: Icon(Icons.delete_outline)),
+      onDismissed: (_) => remove(),
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(e.note.isEmpty ? label : e.note),
+        subtitle: Text('${details.join(' · ')}\n${f.fmt(e.income ? e.amount : -e.amount, sign: true)}'),
+        onTap: () => showMoneySheet(context, state, entry: e),
+        trailing: PopupMenuButton<String>(
+          tooltip: 'Entry actions',
+          onSelected: (action) async {
+            if (action == 'edit') {
+              await showMoneySheet(context, state, entry: e);
+            } else {
+              await remove();
             }
-          }
-        },
-        itemBuilder: (_) => const [
-          PopupMenuItem(value: 'edit', child: Text('Edit')),
-          PopupMenuItem(value: 'delete', child: Text('Delete')),
-        ],
+          },
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'edit', child: Text('Edit')),
+            PopupMenuItem(value: 'delete', child: Text('Delete')),
+          ],
+        ),
       ),
     );
   }

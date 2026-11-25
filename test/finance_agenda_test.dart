@@ -47,8 +47,10 @@ void main() {
 
   test('30th anniversary follows both month lengths and the selected Hijri offset', () {
     for (final length in [29, 30]) {
-      final end = List.generate(365, (i) => DateTime(2027, 1, 1 + i)).firstWhere((d) =>
-        hijriOf(d).day == length && hijriOf(DateTime(d.year, d.month, d.day + 1)).day == 1);
+      final end = List.generate(
+        365,
+        (i) => DateTime(2027, 1, 1 + i),
+      ).firstWhere((d) => hijriOf(d).day == length && hijriOf(DateTime(d.year, d.month, d.day + 1)).day == 1);
       final z = ZakatInfo(hijriMonth: hijriOf(end).month, hijriDay: 30);
       z.reminder.setEnabled(true, DateTime(2026));
       final f = Finance(zakat: z);
@@ -60,6 +62,17 @@ void main() {
       expect(financeAgenda(f, shifted, hijriOffsetDays: 1), isEmpty);
       f.entries.clear();
       expect(financeAgenda(f, shifted, hijriOffsetDays: 1), hasLength(1));
+      // An explicitly named anniversary can be paid before its Hijri month.
+      f.entries.add(
+        MoneyEntry(
+          at: DateTime(end.year, end.month - 2),
+          amount: 1000,
+          category: 'Zakat',
+          zakatYear: hijriOf(end).year,
+        ),
+      );
+      final back = Finance.fromJson(jsonDecode(jsonEncode(f.toJson())));
+      expect(financeAgenda(back, shifted, hijriOffsetDays: 1), isEmpty);
     }
   });
 

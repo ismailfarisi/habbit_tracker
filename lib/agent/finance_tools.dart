@@ -172,7 +172,8 @@ class FinanceTools {
   Future<String> execute(ToolCall call) async {
     final a = call.arguments.trim().isEmpty ? <String, dynamic>{} : jsonDecode(call.arguments) as Map<String, dynamic>;
     final ledger = f.activeLedger;
-    if (a['currency'] is String && (a['currency'] as String).toUpperCase() != f.currency) {
+    if (const {'log_money', 'update_zakat', 'set_budget', 'add_debt', 'create_savings_pot'}.contains(call.name) &&
+        a['currency'] is String && (a['currency'] as String).toUpperCase() != f.currency) {
       return _err('This ledger uses ${f.currency}. Choose the matching ledger in Money.');
     }
     switch (call.name) {
@@ -183,7 +184,7 @@ class FinanceTools {
         final cats = income ? incomeCategories : f.expenseCategories;
         final cat = cats.firstWhere(
           (c) => c.toLowerCase() == '${a['category']}'.toLowerCase(),
-          orElse: () => cats.last,
+          orElse: () => income ? 'Other income' : 'Other',
         );
         final potId = a['pot_id'] as String?, debtId = a['debt_id'] as String?;
         if (potId != null && f.pot(potId) == null) return _err('no pot $potId; see money_summary');
@@ -191,13 +192,13 @@ class FinanceTools {
         final d = _day(a['date']);
         final now = clock();
         final e = MoneyEntry(
-            at: d == null ? now : DateTime(d.year, d.month, d.day, now.hour, now.minute),
-            amount: amount,
-            income: debtId != null ? !f.debt(debtId)!.iOwe : income,
-            category: potId != null ? 'Savings' : debtId != null ? 'Debt' : cat,
-            note: (a['note'] as String? ?? '').trim(),
-            potId: potId,
-            debtId: debtId,
+          at: d == null ? now : DateTime(d.year, d.month, d.day, now.hour, now.minute),
+          amount: amount,
+          income: debtId != null ? !f.debt(debtId)!.iOwe : income,
+          category: potId != null ? 'Savings' : debtId != null ? 'Debt' : cat,
+          note: (a['note'] as String? ?? '').trim(),
+          potId: potId,
+          debtId: debtId,
         );
         final transferError = f.transferError(e);
         if (transferError != null) return _err(transferError);
