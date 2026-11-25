@@ -606,7 +606,7 @@ class _ZakatScreenState extends State<ZakatScreen> {
 
   Widget _money(String label, int value, void Function(int v) set, {String? help, Key? key}) => TextFormField(
     key: key,
-    initialValue: value == 0 ? '' : '${toMajor(value, cur)}',
+    initialValue: value == 0 ? '' : '${toMajor(value, cur)}'.replaceFirst(RegExp(r'\.0+$'), ''),
     keyboardType: const TextInputType.numberWithOptions(decimal: true),
     decoration: InputDecoration(labelText: label, suffixText: cur, helperText: help),
     onChanged: (s) => setState(() => set(parseMoney(s, cur) ?? 0)),
