@@ -52,7 +52,7 @@ jobs:
 
       # Publish a direct download link (Releases page) for pushes, not PRs.
       - name: Publish latest build
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/heads/devin/audit-')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-build
