@@ -18,6 +18,7 @@ import 'diagnostics_screen.dart';
 import '../widgets/focus_settings.dart';
 import '../widgets/voice_settings.dart';
 import '../widgets/adaptive.dart';
+import '../finance/money_screen.dart' show pickCurrency, openMoney;
 
 /// A Settings subpage; the main page lists these.
 enum SettingsSection {
@@ -26,6 +27,7 @@ enum SettingsSection {
   islamic("Ramadan, Jumu'ah & sunnah", Icons.nightlight_outlined),
   reminders('Reminders', Icons.notifications_active_outlined),
   focus('Focus & screen time', Icons.hourglass_bottom),
+  money('Money', Icons.account_balance_wallet_outlined),
   general('Appearance & streaks', Icons.palette_outlined),
   voice('Voice', Icons.record_voice_over_outlined),
   ai('AI coach', Icons.auto_awesome_outlined),
@@ -360,6 +362,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ? 'Pausing ${s.focusApps.length} ${s.focusApps.length == 1 ? 'app' : 'apps'}${s.focusSleep ? ' · also at sleep time' : ''}'
               : 'Pause apps after a daily limit and at sleep time',
         ),
+      _entry(SettingsSection.money, 'Currency ${state.finance.currency} · budgets, savings and zakat'),
       _header('App'),
       _entry(SettingsSection.general, 'Theme: ${s.themeMode[0].toUpperCase()}${s.themeMode.substring(1)} · ${s.freezesPerMonth} streak freezes a month'),
       _entry(SettingsSection.voice, 'Dictation and the spoken voice'),
@@ -377,6 +380,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   List<Widget> _sectionTiles(SettingsSection section) => switch (section) {
+    SettingsSection.money => [
+      ListTile(
+        key: const ValueKey('settings-currency'),
+        leading: const Icon(Icons.currency_exchange),
+        title: const Text('Currency'),
+        subtitle: Text(state.finance.currency),
+        onTap: () => pickCurrency(context, state),
+      ),
+      ListTile(
+        leading: const Icon(Icons.account_balance_wallet_outlined),
+        title: const Text('Open Money'),
+        subtitle: const Text('Spending, budgets, savings pots, debts and zakat'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => openMoney(context, state),
+      ),
+    ],
     SettingsSection.general => [
       _header('Appearance'),
       Padding(

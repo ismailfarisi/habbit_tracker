@@ -7,6 +7,7 @@ import '../agent/habit_templates.dart';
 import '../habits/habit.dart';
 import '../models.dart';
 import '../goals/goal.dart';
+import '../finance/finance.dart';
 
 /// Persists settings, daily logs, tasks and habits. Safe to use from the
 /// background notification-action isolate as well as the UI isolate.
@@ -22,6 +23,7 @@ class Storage {
   static const _tasksKey = 'tasks.v1';
   static const _habitsKey = 'habits.v1';
   static const _goalsKey = 'goals.v1';
+  static const _financeKey = 'finance.v1';
   static const backupVersion = 2;
   static const _apiKeyKey = 'openrouter_api_key';
   static const openaiKeyName = 'openai_api_key';
@@ -60,12 +62,12 @@ class Storage {
   }
 
   Future<void> saveLogs(Map<String, DayLog> logs) => prefs.setString(
-        _logsKey,
-        jsonEncode({
-          for (final e in logs.entries)
-            if (!e.value.isEmpty) e.key: e.value.toJson(),
-        }),
-      );
+    _logsKey,
+    jsonEncode({
+      for (final e in logs.entries)
+        if (!e.value.isEmpty) e.key: e.value.toJson(),
+    }),
+  );
 
   List<Task> loadTasks() {
     final raw = prefs.getString(_tasksKey);
@@ -104,9 +106,7 @@ class Storage {
 
   List<Goal> loadGoals() {
     try {
-      return [
-        for (final g in jsonDecode(prefs.getString(_goalsKey) ?? '[]') as List) Goal.fromJson((g as Map).cast()),
-      ];
+      return [for (final g in jsonDecode(prefs.getString(_goalsKey) ?? '[]') as List) Goal.fromJson((g as Map).cast())];
     } catch (_) {
       return [];
     }
@@ -114,6 +114,19 @@ class Storage {
 
   Future<void> saveGoals(List<Goal> goals) =>
       prefs.setString(_goalsKey, jsonEncode(goals.map((g) => g.toJson()).toList()));
+
+  Finance loadFinance() {
+    try {
+      final raw = prefs.getString(_financeKey);
+      return raw == null ? Finance() : Finance.fromJson((jsonDecode(raw) as Map).cast());
+    } catch (_) {
+      return Finance();
+    }
+  }
+
+  bool get hasFinance => prefs.containsKey(_financeKey);
+
+  Future<void> saveFinance(Finance f) => prefs.setString(_financeKey, jsonEncode(f.toJson()));
 
   Future<String> loadApiKey() async {
     try {
@@ -123,9 +136,8 @@ class Storage {
     }
   }
 
-  Future<void> saveApiKey(String key) => key.isEmpty
-      ? _secure.delete(key: _apiKeyKey)
-      : _secure.write(key: _apiKeyKey, value: key);
+  Future<void> saveApiKey(String key) =>
+      key.isEmpty ? _secure.delete(key: _apiKeyKey) : _secure.write(key: _apiKeyKey, value: key);
 
   /// Another provider's API key kept in secure storage ([openaiKeyName],
   /// [xaiKeyName]); never part of backups.
@@ -144,15 +156,16 @@ class Storage {
   bool get hasNoData => loadLogs().isEmpty && loadTasks().isEmpty && loadHabits().isEmpty;
 
   String exportJson({DateTime? at}) => const JsonEncoder.withIndent('  ').convert({
-        'app': 'daily-discipline',
-        'version': backupVersion,
-        'exportedAt': (at ?? DateTime.now()).toIso8601String(),
-        'settings': loadSettings().toJson(),
-        'logs': {for (final e in loadLogs().entries) e.key: e.value.toJson()},
-        'tasks': jsonDecode(prefs.getString(_tasksKey) ?? '[]'),
-        'habits': loadHabits().map((h) => h.toJson()).toList(),
-        'goals': loadGoals().map((g) => g.toJson()).toList(),
-      });
+    'app': 'daily-discipline',
+    'version': backupVersion,
+    'exportedAt': (at ?? DateTime.now()).toIso8601String(),
+    'settings': loadSettings().toJson(),
+    'logs': {for (final e in loadLogs().entries) e.key: e.value.toJson()},
+    'tasks': jsonDecode(prefs.getString(_tasksKey) ?? '[]'),
+    'habits': loadHabits().map((h) => h.toJson()).toList(),
+    'goals': loadGoals().map((g) => g.toJson()).toList(),
+    'finance': loadFinance().toJson(),
+  });
 
   /// Restores a backup made by [exportJson] (version 2) or by an older
   /// build (version 1, no `habits`; they are derived from the training
@@ -177,6 +190,7 @@ class Storage {
     await saveGoals([
       for (final g in (j['goals'] as List? ?? const [])) Goal.fromJson((g as Map).cast<String, dynamic>()),
     ]);
+    await saveFinance(j['finance'] is Map ? Finance.fromJson((j['finance'] as Map).cast()) : Finance());
   }
 
   /// Checks [raw] without restoring it, for a confirmation prompt.
@@ -217,6 +231,7 @@ class Storage {
     await prefs.remove(_settingsKey);
     await prefs.remove(_logsKey);
     await prefs.remove(_tasksKey);
+    await prefs.remove(_financeKey);
     await saveHabits([]);
     await saveApiKey('');
     await saveSecret(openaiKeyName, '');
@@ -235,10 +250,10 @@ class BackupSummary {
   const BackupSummary({required this.version, this.exportedAt, required this.days, required this.tasks, this.habits});
 
   String describe() => [
-        '$days ${days == 1 ? 'day' : 'days'} of history',
-        '$tasks ${tasks == 1 ? 'task' : 'tasks'}',
-        if (habits != null) '$habits ${habits == 1 ? 'habit' : 'habits'}',
-      ].join(', ');
+    '$days ${days == 1 ? 'day' : 'days'} of history',
+    '$tasks ${tasks == 1 ? 'task' : 'tasks'}',
+    if (habits != null) '$habits ${habits == 1 ? 'habit' : 'habits'}',
+  ].join(', ');
 }
 
 /// Habits for data written before habits existed: an install that already

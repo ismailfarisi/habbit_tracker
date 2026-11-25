@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -15,6 +17,7 @@ import 'services/tts.dart';
 import 'services/voice_input.dart';
 import 'goals/goal.dart';
 import 'quran/surahs.dart';
+import 'finance/finance.dart';
 
 /// App state and the only writer of persisted data.
 ///
@@ -39,6 +42,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
   /// [archiveHabit] and [deleteHabit].
   List<HabitDef> habits;
   List<Goal> goals = [];
+  Finance finance = Finance();
 
   /// Text to send in the Chat tab (e.g. "review my goal"), set from other screens.
   final ValueNotifier<ChatRequest?> chatPrompt = ValueNotifier(null);
@@ -67,6 +71,9 @@ class AppState extends ChangeNotifier implements TaskBackend {
     );
     if (!storage.hasHabits) await storage.saveHabits(s.habits);
     s.goals = storage.loadGoals();
+    s.finance = storage.hasFinance
+        ? storage.loadFinance()
+        : Finance(currency: currencyForLocale(ui.PlatformDispatcher.instance.locale.toString()));
     s.apiKey = await storage.loadApiKey();
     s.openaiKey = await storage.loadSecret(Storage.openaiKeyName);
     s.xaiKey = await storage.loadSecret(Storage.xaiKeyName);
@@ -335,9 +342,14 @@ class AppState extends ChangeNotifier implements TaskBackend {
       habitDaysDoneBefore(h, day) + _plannedDays(day, (d) => h.isScheduledOn(d) && !habitDone(habitEntry(d, h.id), h));
 
   /// The planned session ([index], [count], [text]) for [day], if any.
-  (int, int, String)? _session(List<String> s, int done) => s.isEmpty ? null : done < s.length ? (done + 1, s.length, s[done]) : null;
+  (int, int, String)? _session(List<String> s, int done) => s.isEmpty
+      ? null
+      : done < s.length
+      ? (done + 1, s.length, s[done])
+      : null;
 
-  (int, int, String)? sessionForHabit(HabitDef h, DateTime day) => _session(h.guide?.sessions ?? const [], habitSessionsBefore(h, day));
+  (int, int, String)? sessionForHabit(HabitDef h, DateTime day) =>
+      _session(h.guide?.sessions ?? const [], habitSessionsBefore(h, day));
 
   (int, int, String)? sessionForTask(Task t, DateTime day) =>
       t.isRepeating ? _session(t.guide?.sessions ?? const [], taskSessionsBefore(t, day)) : null;
@@ -382,6 +394,55 @@ class AppState extends ChangeNotifier implements TaskBackend {
     notifyListeners();
   }
 
+  /// Changes money data in place, then saves it.
+  Future<void> updateFinance(void Function(Finance f) change) async {
+    change(finance);
+    notifyListeners();
+    await storage.saveFinance(finance);
+  }
+
+  Future<MoneyEntry> addMoney(MoneyEntry e) async {
+    await updateFinance((f) => f.entries.add(e));
+    return e;
+  }
+
+  Future<void> removeMoney(String id) => updateFinance((f) => f.entries.removeWhere((e) => e.id == id));
+
+  Future<void> setBudget(String category, int? limit) =>
+      updateFinance((f) => limit == null || limit <= 0 ? f.budgets.remove(category) : f.budgets[category] = limit);
+
+  Future<void> upsertPot(SavingsPot p) => updateFinance((f) {
+    final i = f.pots.indexWhere((x) => x.id == p.id);
+    i < 0 ? f.pots.add(p) : f.pots[i] = p;
+  });
+
+  Future<void> deletePot(String id) => updateFinance((f) {
+    f.pots.removeWhere((p) => p.id == id);
+    for (final e in f.entries.where((e) => e.potId == id)) {
+      e.potId = null;
+    }
+  });
+
+  Future<void> upsertDebt(Debt d) => updateFinance((f) {
+    final i = f.debts.indexWhere((x) => x.id == d.id);
+    i < 0 ? f.debts.add(d) : f.debts[i] = d;
+  });
+
+  Future<void> deleteDebt(String id) => updateFinance((f) {
+    f.debts.removeWhere((d) => d.id == id);
+    for (final e in f.entries.where((e) => e.debtId == id)) {
+      e.debtId = null;
+    }
+  });
+
+  /// Replaces all settings at once (AI changes and their Undo).
+  Future<void> setSettings(Settings s) async {
+    settings = s;
+    notifyListeners();
+    await storage.saveSettings(settings);
+    await _reschedule();
+  }
+
   Future<void> updateSettings(void Function(Settings s) change) async {
     change(settings);
     notifyListeners();
@@ -410,6 +471,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
     tasks = storage.loadTasks();
     habits = storage.loadHabits();
     goals = storage.loadGoals();
+    finance = storage.loadFinance();
     notifyListeners();
     await _reschedule();
   }
@@ -421,6 +483,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
     tasks = [];
     habits = [];
     goals = [];
+    finance = Finance(currency: finance.currency);
     apiKey = '';
     openaiKey = '';
     xaiKey = '';

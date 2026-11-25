@@ -18,7 +18,7 @@ Future<void> showAddHabitSheet(BuildContext context, AppState state) {
         children: [
           Text('Add a habit', style: Theme.of(sheet).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          for (final t in habitTemplates)
+          for (final t in [...habitTemplates, ...moneyHabitTemplates])
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: Text(t.emoji, style: const TextStyle(fontSize: 28)),

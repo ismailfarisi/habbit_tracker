@@ -98,6 +98,12 @@ class Settings {
   bool prayerHadith;
   bool wakeAlarmLoud;
 
+  /// Today cards the user (or the AI) hid, by [TodayItem.id].
+  List<String> todayHidden;
+
+  /// Today cards shown first while unfinished, in this order.
+  List<String> todayPinned;
+
   /// Legacy (v1): only read when migrating the old articulation trainer
   /// into the "Articulation practice" habit.
   TimeOfDay trainingTime;
@@ -171,6 +177,8 @@ class Settings {
     this.prayerOffsetMin = 0,
     this.prayerHadith = true,
     this.wakeAlarmLoud = true,
+    List<String>? todayHidden,
+    List<String>? todayPinned,
     this.trainingTime = const TimeOfDay(hour: 7, minute: 0),
     this.trainingGoalMin = 15,
     this.model = 'openai/gpt-4o-mini',
@@ -194,7 +202,9 @@ class Settings {
     List<FocusApp>? focusApps,
     this.focusSleep = true,
     this.focusStrict = false,
-  }) : manualTimes = manualTimes ?? Map.of(defaultManualTimes),
+  }) : todayHidden = todayHidden ?? [],
+       todayPinned = todayPinned ?? [],
+       manualTimes = manualTimes ?? Map.of(defaultManualTimes),
        focusApps = focusApps ?? [];
 
   bool get hasLocation => latitude != null && longitude != null;
@@ -223,6 +233,8 @@ class Settings {
     'prayerOffsetMin': prayerOffsetMin,
     'prayerHadith': prayerHadith,
     'wakeAlarmLoud': wakeAlarmLoud,
+    'todayHidden': todayHidden,
+    'todayPinned': todayPinned,
     'trainingTime': fmtHm(trainingTime),
     'trainingGoalMin': trainingGoalMin,
     'model': model,
@@ -279,6 +291,8 @@ class Settings {
       prayerOffsetMin: (j['prayerOffsetMin'] as num?)?.toInt() ?? 0,
       prayerHadith: j['prayerHadith'] as bool? ?? d.prayerHadith,
       wakeAlarmLoud: j['wakeAlarmLoud'] as bool? ?? true,
+      todayHidden: [for (final v in (j['todayHidden'] as List? ?? const [])) '$v'],
+      todayPinned: [for (final v in (j['todayPinned'] as List? ?? const [])) '$v'],
       trainingTime: parseHm(j['trainingTime'] as String? ?? '', fallback: d.trainingTime),
       trainingGoalMin: (j['trainingGoalMin'] as num?)?.toInt() ?? d.trainingGoalMin,
       model: (j['model'] as String?)?.trim().isNotEmpty == true ? j['model'] as String : d.model,
@@ -466,7 +480,6 @@ class Task {
 
   Task copy() => Task.fromJson(toJson());
 }
-
 
 /// A Quran passage for a task: verses [from]..[to] of [surah].
 class QuranRef {

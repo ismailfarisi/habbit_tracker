@@ -11,6 +11,8 @@ import 'package:a2ui_core/a2ui_core.dart';
 import 'package:a2ui_flutter/a2ui_flutter.dart';
 import 'package:flutter/material.dart';
 
+import '../finance/finance.dart';
+import '../finance/money_screen.dart' show BudgetBar;
 import '../habits/habit.dart';
 import '../logic/speech_metrics.dart';
 import 'habit_catalog.dart';
@@ -27,12 +29,20 @@ class HabitScope extends InheritedWidget {
   /// [days] days ending at [day], oldest first; null where nothing was logged.
   final List<num?> Function(String metric, int days) history;
 
+  /// The user's money data, for the money components; null in previews.
+  final Finance? finance;
+
+  /// Records a money entry (MoneyLog); null where it cannot be saved.
+  final Future<void> Function(MoneyEntry entry)? addMoney;
+
   const HabitScope({
     super.key,
     required this.habit,
     required this.day,
     required this.history,
     this.speechLocale = '',
+    this.finance,
+    this.addMoney,
     required super.child,
   });
 
@@ -735,4 +745,172 @@ class _SparklinePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_SparklinePainter old) => old.values != values || old.color != color;
+}
+
+Widget buildMoneyLog(
+  BuildContext context,
+  ComponentNode<ComponentImplementation> node,
+  ComponentProps props,
+  ChildWidgetBuilder buildChild,
+) => MoneyLogView(
+  label: props.string('label') ?? '',
+  category: props.string('category') ?? 'Other',
+  income: props.value('income') == true,
+  value: props.number('value') ?? 0,
+  onLogged: (major) {
+    _write(context, props.writable('value'), _tidy((props.number('value') ?? 0) + major));
+    _write(context, props.writable('done'), true);
+    unawaited(props.action('onChanged')?.call());
+  },
+);
+
+/// An amount field that records a spending (or income) entry in Money and
+/// adds the amount to the habit's value for the day.
+class MoneyLogView extends StatefulWidget {
+  final String label, category;
+  final bool income;
+  final num value;
+  final void Function(num major) onLogged;
+  const MoneyLogView({
+    super.key,
+    required this.label,
+    required this.category,
+    required this.income,
+    required this.value,
+    required this.onLogged,
+  });
+
+  @override
+  State<MoneyLogView> createState() => _MoneyLogViewState();
+}
+
+class _MoneyLogViewState extends State<MoneyLogView> {
+  final _ctl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _add(HabitScope scope, Finance f) async {
+    final minor = parseMoney(_ctl.text, f.currency);
+    if (minor == null || minor <= 0) return;
+    final day = scope.day, now = DateTime.now();
+    final cats = widget.income ? incomeCategories : spendCategories;
+    await scope.addMoney!(
+      MoneyEntry(
+        at: DateTime(day.year, day.month, day.day, now.hour, now.minute),
+        amount: minor,
+        income: widget.income,
+        category: cats.contains(widget.category) ? widget.category : cats.last,
+        note: scope.habit.title,
+      ),
+    );
+    _ctl.clear();
+    widget.onLogged(toMajor(minor, f.currency));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = HabitScope.maybeOf(context);
+    final f = scope?.finance;
+    final t = Theme.of(context);
+    final canSave = f != null && scope?.addMoney != null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.label.isNotEmpty) Text(widget.label, style: t.textTheme.titleSmall),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _ctl,
+                  enabled: canSave,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    hintText: '0',
+                    suffixText: f?.currency ?? '',
+                    helperText: widget.value > 0 && f != null
+                        ? '${f.fmt(toMinor(widget.value, f.currency))} today · ${widget.category}'
+                        : widget.category,
+                  ),
+                  onSubmitted: canSave ? (_) => _add(scope!, f) : null,
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonal(onPressed: canSave ? () => _add(scope!, f) : null, child: const Text('Add')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Widget buildBudgetBar(
+  BuildContext context,
+  ComponentNode<ComponentImplementation> node,
+  ComponentProps props,
+  ChildWidgetBuilder buildChild,
+) {
+  final scope = HabitScope.maybeOf(context);
+  final f = scope?.finance;
+  if (f == null) return const SizedBox.shrink();
+  final cat = props.string('category');
+  final m = f.month(scope!.day);
+  final limit = cat == null ? f.budgets.values.fold(0, (a, b) => a + b) : f.budgets[cat] ?? 0;
+  final spent = cat == null ? f.budgets.keys.fold(0, (a, k) => a + (m.byCategory[k] ?? 0)) : m.byCategory[cat] ?? 0;
+  final label = props.string('label') ?? (cat == null ? 'Budgets this month' : '$cat this month');
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: limit <= 0
+        ? Text(
+            '$label: ${f.fmt(cat == null ? m.spent : spent)} spent · no budget set',
+            style: Theme.of(context).textTheme.bodyMedium,
+          )
+        : BudgetBar(spent: spent, limit: limit, label: label, f: f),
+  );
+}
+
+Widget buildSavingsProgress(
+  BuildContext context,
+  ComponentNode<ComponentImplementation> node,
+  ComponentProps props,
+  ChildWidgetBuilder buildChild,
+) {
+  final f = HabitScope.maybeOf(context)?.finance;
+  final want = props.string('pot')?.toLowerCase();
+  final pots = f?.pots.where((p) => !p.archived).toList() ?? const <SavingsPot>[];
+  final pot =
+      pots.where((p) => want == null || p.id == want || p.name.toLowerCase() == want).firstOrNull ?? pots.firstOrNull;
+  final t = Theme.of(context);
+  if (f == null || pot == null) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Text('Create a savings pot in Money to see its progress here.', style: t.textTheme.bodyMedium),
+    );
+  }
+  final saved = f.potSaved(pot.id);
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('${pot.emoji} ${pot.name}', style: t.textTheme.titleSmall),
+        const SizedBox(height: 4),
+        LinearProgressIndicator(
+          value: pot.target <= 0 ? 0 : (saved / pot.target).clamp(0, 1).toDouble(),
+          minHeight: 8,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        const SizedBox(height: 4),
+        Text('${f.fmt(saved)} of ${f.fmt(pot.target)}', style: t.textTheme.bodySmall),
+      ],
+    ),
+  );
 }

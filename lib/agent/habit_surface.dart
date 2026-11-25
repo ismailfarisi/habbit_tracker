@@ -223,6 +223,8 @@ class HabitSurfaceState extends State<HabitSurface> {
       habit: widget.habit,
       day: widget.day,
       speechLocale: widget.state.settings.speechLocale,
+      finance: widget.state.finance,
+      addMoney: widget.persist ? widget.state.addMoney : null,
       history: (metric, days) =>
           metricHistory(widget.state.logs, widget.habit, metric, days: days, end: widget.day),
       child: surface == null

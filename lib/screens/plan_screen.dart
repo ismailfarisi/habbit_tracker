@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../finance/money_screen.dart';
+
 import '../app_state.dart';
 import '../habits/habit.dart';
 import '../logic/stats.dart';
@@ -61,6 +63,7 @@ class _PlanScreenState extends State<PlanScreen> {
             _CoachCard(state: state, onOpen: _openCoach),
             GoalsCard(state: state),
             CalendarEntryCard(state: state),
+            MoneyEntryCard(state: state),
             _HabitsCard(state: state),
             TaskSections(state: state),
           ],

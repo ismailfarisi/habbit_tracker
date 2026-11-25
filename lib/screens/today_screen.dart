@@ -20,10 +20,11 @@ import 'habit_detail_screen.dart';
 import 'home_screen.dart';
 import '../widgets/adaptive.dart';
 import '../goals/goal.dart';
+import '../finance/money_screen.dart';
 import '../goals/goals_card.dart';
 import '../logic/tasks.dart';
 
-enum TodayKind { wake, prayers, habit, goal, tasks }
+enum TodayKind { wake, prayers, habit, goal, tasks, money }
 
 /// One card on Today: when it is next due (null = any time) and whether it
 /// is finished for the day.
@@ -66,7 +67,10 @@ List<TodayItem> todayItems(AppState state, DateTime now) {
       done: nextPrayer == null && optionalPrayersOn(s, now).every((p) => log.habits[p.id]?.done ?? false),
     ),
     for (final g in state.goals.where((g) => !g.archived))
-      if (GoalTodayCard.itemsFor(state, g, now) case (final habits, final tasks) when habits.isNotEmpty || tasks.isNotEmpty)
+      if (GoalTodayCard.itemsFor(state, g, now) case (
+        final habits,
+        final tasks,
+      ) when habits.isNotEmpty || tasks.isNotEmpty)
         TodayItem(
           TodayKind.goal,
           goal: g,
@@ -87,7 +91,9 @@ List<TodayItem> todayItems(AppState state, DateTime now) {
           done: habitDone(log.habits[h.id], h),
         ),
     TodayItem(TodayKind.tasks, due: TasksCard.nextDue(state, now), done: TasksCard.allDone(state, now)),
-  ];
+    if (!state.finance.isEmpty || s.todayPinned.contains('money'))
+      TodayItem(TodayKind.money, done: state.finance.onDay(now).isNotEmpty),
+  ]..removeWhere((i) => s.todayHidden.contains(i.id));
   int byDue(TodayItem a, TodayItem b) {
     if (a.due == null || b.due == null) return (a.due == null ? 1 : 0) - (b.due == null ? 1 : 0);
     return a.due!.compareTo(b.due!);
@@ -97,6 +103,12 @@ List<TodayItem> todayItems(AppState state, DateTime now) {
   final done = items.where((i) => i.done).toList();
   stableSort(pending, byDue);
   stableSort(done, byDue);
+  int pin(TodayItem i) {
+    final p = s.todayPinned.indexOf(i.id);
+    return p < 0 ? s.todayPinned.length : p;
+  }
+
+  stableSort(pending, (a, b) => pin(a) - pin(b));
   return [...pending, ...done];
 }
 
@@ -182,6 +194,7 @@ class _TodayScreenState extends State<TodayScreen> {
       ),
       TodayKind.habit => HabitCard(key: ValueKey(i.habit!.id), state: state, habit: i.habit!, day: now),
       TodayKind.goal => GoalTodayCard(key: ValueKey(i.id), state: state, goal: i.goal!, now: now),
+      TodayKind.money => MoneyTodayCard(key: const ValueKey('today-money'), state: state, now: now),
       TodayKind.tasks => TasksCard(
         key: const ValueKey('today-tasks'),
         state: state,
@@ -273,9 +286,7 @@ class _Header extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: dark
-              ? const [Color(0xFF0F4F4A), Color(0xFF0F766E)]
-              : const [Color(0xFF0F766E), Color(0xFF14B8A6)],
+          colors: dark ? const [Color(0xFF0F4F4A), Color(0xFF0F766E)] : const [Color(0xFF0F766E), Color(0xFF14B8A6)],
         ),
         boxShadow: [
           BoxShadow(
@@ -302,10 +313,7 @@ class _Header extends StatelessWidget {
                 const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: fg.withValues(alpha: 0.16),
-                    borderRadius: BorderRadius.circular(99),
-                  ),
+                  decoration: BoxDecoration(color: fg.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(99)),
                   child: Text(
                     hijri,
                     key: const ValueKey('hijri-date'),
@@ -332,10 +340,16 @@ class _Header extends StatelessWidget {
                   backgroundColor: fg.withValues(alpha: 0.2),
                 ),
                 Center(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Text('$score', style: t.textTheme.titleMedium?.copyWith(color: fg, fontWeight: FontWeight.w800)),
-                    Text('today', style: t.textTheme.labelSmall?.copyWith(color: dim)),
-                  ]),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '$score',
+                        style: t.textTheme.titleMedium?.copyWith(color: fg, fontWeight: FontWeight.w800),
+                      ),
+                      Text('today', style: t.textTheme.labelSmall?.copyWith(color: dim)),
+                    ],
+                  ),
                 ),
               ],
             ),

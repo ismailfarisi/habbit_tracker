@@ -20,6 +20,7 @@ import '../widgets/ai_key_empty_state.dart';
 import '../widgets/simple_markdown.dart';
 import '../widgets/voice_input_button.dart';
 import '../services/coach_prompts.dart';
+import '../agent/finance_tools.dart';
 
 const toolLabels = {
   'create_task': 'Creating a task',
@@ -117,8 +118,9 @@ class AgUiChat extends ChangeNotifier {
 
   String get systemPrompt {
     final now = DateTime.now();
-    return '$plannerSystemPrompt\n$goalsPrompt\nWhen the user asks for feedback on speech practice:\n$coachSystemPrompt\n'
+    return '$plannerSystemPrompt\n$goalsPrompt\n$financePrompt\nWhen the user asks for feedback on speech practice:\n$coachSystemPrompt\n'
         '${plannerContext(state.settings, now)}\n${goalsContext(state, now)}'
+        '${state.finance.isEmpty ? '' : '\n${state.finance.summary(now)}'}'
         '${goal == null ? '' : '\n\n$goalChatPrompt\n${goalOkf(state, goal!, now)}'}';
   }
 
