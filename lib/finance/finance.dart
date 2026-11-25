@@ -36,8 +36,10 @@ const categoryEmoji = {
   'Other income': '➕',
 };
 
-/// Categories that move money aside rather than spend it.
-const _notSpending = {'Savings'};
+enum EntryKind { spending('Spending'), income('Income'), savings('Savings transfer'), debt('Debt payment');
+  const EntryKind(this.label);
+  final String label;
+}
 
 const commonCurrencies = [
   'AED', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR', 'USD', 'EUR', 'GBP', 'INR', 'PKR', 'BDT', //
@@ -88,6 +90,7 @@ class MoneyEntry {
   String note;
   String? potId;
   String? debtId;
+  final EntryKind kind;
 
   MoneyEntry({
     String? id,
@@ -98,13 +101,18 @@ class MoneyEntry {
     this.note = '',
     this.potId,
     this.debtId,
-  }) : id = id ?? 'm${_id()}';
+    EntryKind? kind,
+  }) : kind = kind ?? (potId != null || category == 'Savings' ? EntryKind.savings
+          : debtId != null || category == 'Debt' ? EntryKind.debt
+          : income ? EntryKind.income : EntryKind.spending),
+       id = id ?? 'm${_id()}';
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'at': at.toIso8601String(),
     'amount': amount,
     if (income) 'income': true,
+    'kind': kind.name,
     'category': category,
     if (note.isNotEmpty) 'note': note,
     if (potId != null) 'potId': potId,
@@ -116,6 +124,7 @@ class MoneyEntry {
     at: _date(j['at']) ?? DateTime.now(),
     amount: (j['amount'] as num?)?.toInt() ?? 0,
     income: j['income'] == true,
+    kind: EntryKind.values.where((v) => v.name == j['kind']).firstOrNull,
     category: j['category'] as String? ?? 'Other',
     note: j['note'] as String? ?? '',
     potId: j['potId'] as String?,
@@ -360,8 +369,9 @@ DateTime? nextHijriDate(int month, int day, DateTime from, {int offsetDays = 0})
 class MonthSummary {
   final int income, spent, saved, sadaqah;
   final Map<String, int> byCategory;
-  const MonthSummary(this.income, this.spent, this.saved, this.sadaqah, this.byCategory);
-  int get left => income - spent - saved;
+  const MonthSummary(this.income, this.spent, this.saved, this.sadaqah, this.byCategory, this.withdrawn, this.debtOut, this.debtIn);
+  final int withdrawn, debtOut, debtIn;
+  int get left => income - spent - saved + withdrawn - debtOut + debtIn;
 }
 
 class _Ledger {
@@ -498,23 +508,51 @@ class Finance {
   Iterable<MoneyEntry> onDay(DateTime day) =>
       entries.where((e) => e.at.year == day.year && e.at.month == day.month && e.at.day == day.day);
 
-  static bool _isSpending(MoneyEntry e) => !e.income && e.potId == null && !_notSpending.contains(e.category);
+  static bool _isSpending(MoneyEntry e) => e.kind == EntryKind.spending;
 
   MonthSummary month(DateTime month) {
     var income = 0, spent = 0, saved = 0, sadaqah = 0;
     final by = <String, int>{};
+    var withdrawn = 0, debtOut = 0, debtIn = 0;
     for (final e in inMonth(month)) {
-      if (e.income) {
-        if (e.potId == null && e.debtId == null) income += e.amount;
-      } else if (!_isSpending(e)) {
-        saved += e.amount;
-      } else {
-        spent += e.amount;
-        by[e.category] = (by[e.category] ?? 0) + e.amount;
-        if (e.category == 'Sadaqah') sadaqah += e.amount;
+      switch (e.kind) {
+        case EntryKind.income:
+          income += e.amount;
+        case EntryKind.savings:
+          if (e.income) { withdrawn += e.amount; } else { saved += e.amount; }
+        case EntryKind.debt:
+          if (e.income) { debtIn += e.amount; } else { debtOut += e.amount; }
+        case EntryKind.spending:
+          spent += e.amount;
+          by[e.category] = (by[e.category] ?? 0) + e.amount;
+          if (e.category == 'Sadaqah') sadaqah += e.amount;
       }
     }
-    return MonthSummary(income, spent, saved, sadaqah, by);
+    return MonthSummary(income, spent, saved, sadaqah, by, withdrawn, debtOut, debtIn);
+  }
+
+  List<MoneyEntry> ledgerEntries({DateTime? month, String? category, String? goalId}) {
+    final items = month == null ? entries : inMonth(month);
+    final ids = {for (final p in pots.where((p) => p.goalId == goalId)) p.id};
+    return items.where((e) => (category == null || e.category == category) &&
+        (goalId == null || ids.contains(e.potId))).toList()
+      ..sort((a, b) => b.at.compareTo(a.at));
+  }
+
+  String? transferError(MoneyEntry entry, {MoneyEntry? replacing}) {
+    if (entry.potId != null && entry.debtId != null) return 'Choose one savings pot or debt.';
+    if (entry.potId case final String id) {
+      final original = replacing?.potId == id ? (replacing!.income ? -replacing.amount : replacing.amount) : 0;
+      final available = potSaved(id) - original;
+      if (available + (entry.income ? -entry.amount : entry.amount) < 0) return 'The pot cannot cover this withdrawal.';
+    }
+    if (entry.debtId case final String id) {
+      final d = debt(id);
+      if (d == null || entry.income == d.iOwe) return 'Use the repayment direction for this debt.';
+      final original = replacing?.debtId == id ? replacing!.amount : 0;
+      if (debtPaid(id) - original + entry.amount > d.amount) return 'Repayment exceeds the outstanding debt.';
+    }
+    return null;
   }
 
   int spentOn(DateTime day) => onDay(day).where(_isSpending).fold(0, (s, e) => s + e.amount);

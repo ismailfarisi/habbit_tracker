@@ -182,17 +182,18 @@ class FinanceTools {
         if (debtId != null && f.debt(debtId) == null) return _err('no debt $debtId; see money_summary');
         final d = _day(a['date']);
         final now = clock();
-        final e = await state.addMoney(
-          MoneyEntry(
+        final e = MoneyEntry(
             at: d == null ? now : DateTime(d.year, d.month, d.day, now.hour, now.minute),
             amount: amount,
-            income: income,
-            category: potId != null && !income ? 'Savings' : cat,
+            income: debtId != null ? !f.debt(debtId)!.iOwe : income,
+            category: potId != null ? 'Savings' : debtId != null ? 'Debt' : cat,
             note: (a['note'] as String? ?? '').trim(),
             potId: potId,
             debtId: debtId,
-          ),
         );
+        final transferError = f.transferError(e);
+        if (transferError != null) return _err(transferError);
+        await state.addMoney(e);
         onActivity?.call(
           ToolActivity(
             '${income ? 'Received' : 'Spent'} ${f.fmt(amount)} · ${potId != null ? f.pot(potId)!.name : e.category}',

@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -10,6 +14,9 @@ import '../widgets/cards/section_card.dart';
 import '../widgets/document_viewer.dart';
 import 'finance.dart';
 import 'money_resources.dart';
+import 'ledger_csv.dart';
+
+part 'ledger_screen.dart';
 
 void openMoney(BuildContext context, AppState state) =>
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => MoneyScreen(state: state)));
@@ -219,7 +226,7 @@ class _MonthCard extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           'Today ${f.fmt(f.spentOn(now))} · Sadaqah this week ${f.fmt(f.sadaqahInWeek(now))}'
-          '${m.income > 0 ? ' · ${f.fmt(m.left)} unplanned' : ''}',
+          ' · Net cash flow ${f.fmt(m.left, sign: true)}',
           style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant),
         ),
       ],
@@ -813,34 +820,13 @@ class _RecentCard extends StatelessWidget {
       title: 'Recent',
       icon: Icons.receipt_long_outlined,
       children: [
-        if (recent.isEmpty) const _Hint('Tap Log to add what you spent or earned. A minute a day is enough.'),
-        for (final e in recent.take(30))
-          Dismissible(
-            key: ValueKey(e.id),
-            direction: DismissDirection.endToStart,
-            background: Container(
-              alignment: Alignment.centerRight,
-              padding: const EdgeInsets.only(right: 16),
-              child: const Icon(Icons.delete_outline),
-            ),
-            onDismissed: (_) {
-              state.removeMoney(e.id);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: const Text('Entry deleted'),
-                  action: SnackBarAction(label: 'Undo', onPressed: () => state.addMoney(e)),
-                ),
-              );
-            },
-            child: ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: Text(categoryEmoji[e.category] ?? '•', style: const TextStyle(fontSize: 20)),
-              title: Text(e.note.isEmpty ? _label(f, e) : e.note),
-              subtitle: Text('${e.note.isEmpty ? '' : '${_label(f, e)} · '}${DateFormat.MMMd().add_jm().format(e.at)}'),
-              trailing: Text(e.amount == 0 ? '—' : f.fmt(e.income ? e.amount : -e.amount, sign: true)),
-            ),
-          ),
+        if (recent.isEmpty) const _Hint('Tap Log to add what you spent or earned.'),
+        for (final e in recent.take(5)) _LedgerRow(state: state, entry: e),
+        TextButton.icon(
+          onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => LedgerScreen(state: state))),
+          icon: const Icon(Icons.receipt_long_outlined),
+          label: const Text('View full ledger'),
+        ),
       ],
     );
   }
@@ -936,12 +922,14 @@ Future<void> showMoneySheet(
   String? category,
   String? potId,
   String? debtId,
+  MoneyEntry? entry,
 }) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (c) => _MoneySheet(state: state, income: income, category: category, potId: potId, debtId: debtId),
+    builder: (c) => _MoneySheet(state: state, income: entry?.income ?? income, category: entry?.category ?? category,
+      potId: entry?.potId ?? potId, debtId: entry?.debtId ?? debtId, entry: entry),
   );
 }
 
@@ -949,7 +937,8 @@ class _MoneySheet extends StatefulWidget {
   final AppState state;
   final bool income;
   final String? category, potId, debtId;
-  const _MoneySheet({required this.state, required this.income, this.category, this.potId, this.debtId});
+  final MoneyEntry? entry;
+  const _MoneySheet({required this.state, required this.income, this.category, this.potId, this.debtId, this.entry});
 
   @override
   State<_MoneySheet> createState() => _MoneySheetState();
@@ -958,8 +947,18 @@ class _MoneySheet extends StatefulWidget {
 class _MoneySheetState extends State<_MoneySheet> {
   late bool income = widget.income;
   late String category = widget.category ?? (widget.income ? incomeCategories.first : spendCategories.first);
-  final amount = TextEditingController();
-  final note = TextEditingController();
+  late DateTime at = widget.entry?.at ?? DateTime.now();
+  late final amount = TextEditingController(text: widget.entry == null ? '' :
+      toMajor(widget.entry!.amount, widget.state.finance.currency).toString());
+  late final note = TextEditingController(text: widget.entry?.note ?? '');
+  var saving = false;
+
+  @override
+  void dispose() {
+    amount.dispose();
+    note.dispose();
+    super.dispose();
+  }
   String? error;
 
   bool get fixed => widget.potId != null || widget.debtId != null;
@@ -969,18 +968,26 @@ class _MoneySheetState extends State<_MoneySheet> {
     final f = widget.state.finance;
     final cats = income ? incomeCategories : spendCategories;
     final title = widget.potId != null
-        ? 'Add to ${f.pot(widget.potId!)?.name ?? 'savings'}'
+        ? f.pot(widget.potId!)?.name ?? 'Savings transfer'
         : widget.debtId != null
         ? (income ? 'Repayment received' : 'Repayment')
         : null;
-    return Padding(
+    return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + MediaQuery.viewInsetsOf(context).bottom),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (title != null)
-            Text(title, style: Theme.of(context).textTheme.titleMedium)
+          if (title != null) ...[
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            if (widget.potId != null)
+              SegmentedButton<bool>(
+                segments: const [ButtonSegment(value: false, label: Text('Add to pot')),
+                  ButtonSegment(value: true, label: Text('Withdraw'))],
+                selected: {income},
+                onSelectionChanged: (v) => setState(() => income = v.first),
+              ),
+          ]
           else
             SegmentedButton<bool>(
               segments: const [
@@ -1024,28 +1031,46 @@ class _MoneySheetState extends State<_MoneySheet> {
             decoration: const InputDecoration(labelText: 'Note (optional)'),
             onSubmitted: (_) => _save(),
           ),
+          ListTile(
+            title: Text(DateFormat.yMMMd().format(at)),
+            leading: const Icon(Icons.event_outlined),
+            onTap: () async {
+              final picked = await showDatePicker(context: context, initialDate: at,
+                firstDate: DateTime(at.year < 1900 ? at.year : 1900), lastDate: DateTime(at.year > 2200 ? at.year : 2200, 12, 31));
+              if (picked != null) setState(() => at = DateTime(picked.year, picked.month, picked.day, at.hour, at.minute));
+            },
+          ),
           const SizedBox(height: 12),
-          FilledButton(key: const Key('money-save'), onPressed: _save, child: const Text('Save')),
+          FilledButton(key: const Key('money-save'), onPressed: saving ? null : _save, child: const Text('Save')),
         ],
       ),
     );
   }
 
   Future<void> _save() async {
-    final a = parseMoney(amount.text, widget.state.finance.currency);
+    if (saving) return;
+    final f = widget.state.finance;
+    final original = widget.entry;
+    final a = original?.amount == 0 && double.tryParse(amount.text) == 0 ? 0 : parseMoney(amount.text, f.currency);
     if (a == null) return setState(() => error = 'Enter an amount');
-    final nav = Navigator.of(context);
-    await widget.state.addMoney(
-      MoneyEntry(
-        at: DateTime.now(),
-        amount: a,
-        income: income,
-        category: category,
-        note: note.text.trim(),
-        potId: widget.potId,
-        debtId: widget.debtId,
-      ),
+    final e = MoneyEntry(
+      id: original?.id,
+      at: at, amount: a, income: income, category: category, note: note.text.trim(),
+      potId: widget.potId, debtId: widget.debtId,
+      kind: original?.category == category && original?.income == income ? original?.kind : null,
     );
+    final problem = f.transferError(e, replacing: original);
+    if (problem != null) return setState(() => error = problem);
+    final nav = Navigator.of(context);
+    setState(() => saving = true);
+    await widget.state.updateFinance((f) {
+      if (original == null) {
+        f.entries.add(e);
+      } else {
+        final i = f.entries.indexWhere((x) => x.id == original.id);
+        if (i >= 0) f.entries[i] = e;
+      }
+    });
     nav.pop();
   }
 }

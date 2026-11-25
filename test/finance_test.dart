@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:habit_tracker/app_state.dart';
 import 'package:habit_tracker/finance/finance.dart';
 import 'package:habit_tracker/finance/money_resources.dart';
+import 'package:habit_tracker/finance/ledger_csv.dart';
 import 'package:habit_tracker/logic/hijri.dart';
 
 import 'support.dart';
@@ -130,6 +131,34 @@ void main() {
       expect(f.potSaved(pot.id), 90000);
       expect(f.spentOn(now), 7000);
       expect(f.sadaqahInWeek(now), 2000);
+    });
+
+    test('ledger reconciles spending, debt and two-way transfers', () {
+      final p = SavingsPot(name: 'Hajj', target: 30000, goalId: 'g');
+      final f = Finance(currency: 'KWD', pots: [p], entries: [
+        MoneyEntry(at: now, amount: 10000, category: 'Salary', income: true),
+        MoneyEntry(at: now, amount: 2000, category: 'Savings', potId: p.id),
+        MoneyEntry(at: now, amount: 500, category: 'Savings', potId: p.id, income: true),
+        MoneyEntry(at: now, amount: 250, category: 'Debt', debtId: 'd'),
+        MoneyEntry(at: now, amount: 125, category: 'Debt', debtId: 'd2', income: true),
+        MoneyEntry(at: DateTime(2020), amount: 1, category: 'Food'),
+      ]);
+      expect(f.month(now).left, 8375);
+      expect(f.month(now).spent, 0);
+      expect(f.ledgerEntries(month: now, goalId: 'g', category: 'Savings'), hasLength(2));
+      expect(f.transferError(MoneyEntry(at: now, amount: 1501, category: 'Savings', income: true, potId: p.id)), isNotNull);
+      f.entries[4].debtId = null;
+      expect(Finance.fromJson(f.toJson()).entries[4].kind, EntryKind.debt);
+    });
+
+    test('CSV exports only selected rows and protects optional private text', () {
+      final f = Finance(currency: 'KWD');
+      final e = MoneyEntry(at: now, amount: 1250, category: 'Private category', note: '=SUM(1,2) "my note"');
+      final csv = ledgerCsv(f, [e]);
+      expect(csv, contains('Spending,Out,1.250,"KWD"'));
+      expect(csv, isNot(contains('Private')));
+      expect(csv, isNot(contains('my note')));
+      expect(ledgerCsv(f, [e], includeDetails: true), contains("'=SUM(1,2)"));
     });
 
     test('debt repayments come from entries', () {
