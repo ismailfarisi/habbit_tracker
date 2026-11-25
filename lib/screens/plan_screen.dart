@@ -26,46 +26,63 @@ class PlanScreen extends StatefulWidget {
   State<PlanScreen> createState() => _PlanScreenState();
 }
 
+enum _CreateChoice { goal, practice, task, voiceTask }
+
 class _PlanScreenState extends State<PlanScreen> {
   AppState get state => widget.state;
 
   void _openCoach() => state.requestedTab.value = HomeScreen.chatTab;
 
+  Future<void> _create() async {
+    final choice = await showModalBottomSheet<_CreateChoice>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(child: ListView(shrinkWrap: true, children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text('Create', style: Theme.of(c).textTheme.titleLarge),
+        ),
+        ListTile(leading: const Icon(Icons.flag_outlined), title: const Text('Goal'),
+          subtitle: const Text('An outcome to work towards, like memorising Al-Mulk.'),
+          onTap: () => Navigator.pop(c, _CreateChoice.goal)),
+        ListTile(leading: const Icon(Icons.repeat), title: const Text('Practice'),
+          subtitle: const Text('Something you repeat, like practising every morning.'),
+          onTap: () => Navigator.pop(c, _CreateChoice.practice)),
+        ListTile(leading: const Icon(Icons.check_box_outlined), title: const Text('Task'),
+          subtitle: const Text('One action, like calling the supplier on Friday.'),
+          trailing: IconButton(key: const Key('voice-task'), tooltip: 'Speak a task', icon: const Icon(Icons.mic),
+            onPressed: () => Navigator.pop(c, _CreateChoice.voiceTask)),
+          onTap: () => Navigator.pop(c, _CreateChoice.task)),
+      ])),
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case _CreateChoice.goal: startPlanGoal(context, state);
+      case _CreateChoice.practice: await showAddHabitSheet(context, state);
+      case _CreateChoice.task || _CreateChoice.voiceTask:
+        await showTaskEditor(context, state, dictate: choice == _CreateChoice.voiceTask);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      floatingActionButton: Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          FloatingActionButton.small(
-            key: const Key('voice-task'),
-            heroTag: 'voice-task',
-            tooltip: 'Speak a task',
-            onPressed: () => showTaskEditor(context, state, dictate: true),
-            child: const Icon(Icons.mic),
-          ),
-          const SizedBox(width: 12),
-          FloatingActionButton.extended(
-            heroTag: 'new-task',
-            tooltip: 'New task',
-            onPressed: () => showTaskEditor(context, state),
-            icon: const Icon(Icons.add),
-            label: const Text('Task'),
-          ),
-        ],
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _create,
+        icon: const Icon(Icons.add),
+        label: const Text('Create'),
       ),
       body: ListenableBuilder(
         listenable: state,
         builder: (context, _) => ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
           children: [
-            _CoachCard(state: state, onOpen: _openCoach),
-            GoalsCard(state: state),
+            GoalsCard(state: state, showCreate: false),
             CalendarEntryCard(state: state),
-            MoneyEntryCard(state: state),
-            _HabitsCard(state: state),
             TaskSections(state: state),
+            _HabitsCard(state: state),
+            MoneyEntryCard(state: state),
+            _CoachCard(state: state, onOpen: _openCoach),
           ],
         ),
       ),
@@ -118,25 +135,12 @@ class _HabitsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Habits${active.isEmpty ? '' : ' · ${active.length}'}',
-                    style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: () => showAddHabitSheet(context, state),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add habit'),
-                ),
-              ],
-            ),
+            Text('Habits${active.isEmpty ? '' : ' · ${active.length}'}',
+              style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
             if (active.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('No habits yet. Add one from the templates or ask the coach.'),
+                child: Text('No habits yet. Choose Create, then Practice.'),
               ),
             for (final h in active) _HabitTile(state: state, habit: h),
             if (archived.isNotEmpty)

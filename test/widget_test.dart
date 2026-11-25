@@ -72,7 +72,12 @@ void main() {
     expect(find.text('Coach'), findsOneWidget);
     expect(find.text('Habits'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('New task'));
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    expect(find.text('Goal'), findsOneWidget);
+    expect(find.text('Practice'), findsOneWidget);
+    expect(find.byTooltip('Speak a task'), findsOneWidget);
+    await tester.tap(find.text('Task'));
     await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextField, 'Title'), 'Read Quran');
     await tester.tap(find.text('Daily'));
@@ -93,6 +98,8 @@ void main() {
     final state = await pumpApp(tester);
     await tester.tap(find.text('Plan').last);
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Coach'), 200, scrollable: find.byType(Scrollable).first);
+    await tester.ensureVisible(find.text('Coach'));
     await tester.tap(find.text('Coach'));
     await tester.pumpAndSettle();
     expect(find.text(AiKeyEmptyState.message), findsOneWidget);
@@ -135,7 +142,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('No habits yet'), findsOneWidget);
 
-    await tester.tap(find.text('Add habit'));
+    expect(find.text('New goal'), findsNothing);
+    expect(find.text('Add habit'), findsNothing);
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Practice'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Drink water'));
     await tester.pumpAndSettle();

@@ -175,6 +175,8 @@ void main() {
     );
     dictationFactory = () async => FakeDictation('Remind me to call mum tomorrow at 5 pm');
     await tester.pumpWidget(MaterialApp(home: PlanScreen(state: state!)));
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('voice-task')));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(TextField, 'Call mum'), findsOneWidget);
