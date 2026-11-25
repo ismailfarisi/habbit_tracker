@@ -102,6 +102,7 @@ class FallbackDictation implements Dictation {
     } on DictationUnavailable catch (e) {
       if (_disposed) return;
       debugPrint('Whisper unavailable, using system dictation: ${e.message}');
+      if (_disposed) return;
       primary.dispose();
       final f = _active = fallback();
       await f.start(onText: onText, onDone: onDone, onError: onError, locale: locale);
@@ -142,6 +143,9 @@ class WhisperDictation implements Dictation {
   bool _finished = false;
   bool _stopping = false;
   String _last = '';
+  Future<void>? _starting;
+  bool _streamOpen = false;
+  bool _disposed = false;
 
   WhisperDictation(this.modelPath);
 
@@ -154,7 +158,10 @@ class WhisperDictation implements Dictation {
     required void Function() onDone,
     required void Function(String message) onError,
     String locale = '',
-  }) async {
+  }) => _starting = _start(onText, onDone, onError, locale);
+
+  Future<void> _start(void Function(String) onText, void Function() onDone,
+      void Function(String) onError, String locale) async {
     _onDone = onDone;
     _onText = onText;
     if (!await _recorder.hasPermission()) {
@@ -169,8 +176,9 @@ class WhisperDictation implements Dictation {
       pcm = await _recorder.startStream(
         const RecordConfig(encoder: AudioEncoder.pcm16bits, sampleRate: 16000, numChannels: 1),
       );
+      _streamOpen = true;
       if (_finished) {
-        await _recorder.stop();
+        await _stopStream();
         return;
       }
       final session = await WhisperController().transcribeLive(
@@ -186,11 +194,12 @@ class WhisperDictation implements Dictation {
       }
       _session = session;
     } catch (e) {
+      await _stopStream().catchError((_) {});
       if (_finished) return;
       _listeningEnded(this);
-      await _recorder.stop().catchError((_) => null);
       throw DictationUnavailable('$e');
     }
+    if (_finished) return;
     _partials = _session!.partials.listen(
       (t) => onText(_last = _clean(t)),
       onError: (Object e) => onError('Whisper: $e'),
@@ -206,7 +215,7 @@ class WhisperDictation implements Dictation {
     final session = _session;
     if (session == null) _finish();
     try {
-      await _recorder.stop();
+      await _stopStream();
       if (session != null) {
         final text = await session.stop().timeout(finalPassWait, onTimeout: () => _last);
         final clean = _clean(text);
@@ -228,8 +237,16 @@ class WhisperDictation implements Dictation {
   static String _clean(String t) =>
       t.replaceAll(RegExp(r'\[[^\]]*\]|\([^)]*\)'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
 
+  Future<void> _stopStream() async {
+    if (!_streamOpen) return;
+    _streamOpen = false;
+    await _recorder.stop();
+  }
+
   @override
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
     _listeningEnded(this);
     _limit?.cancel();
     _partials?.cancel();
@@ -239,14 +256,18 @@ class WhisperDictation implements Dictation {
   }
 
   Future<void> _shutdown(bool running) async {
-    if (_rec == null) return;
-    if (running) {
-      try {
-        await _recorder.stop();
-      } catch (_) {}
-      await _session?.stop();
+    await _stopStream().catchError((_) {});
+    try {
+      await _starting;
+    } catch (_) {
+      // start may have failed after disposal was requested.
     }
-    await _recorder.dispose();
+    if (_rec == null) return;
+    try {
+      if (running) await _session?.stop();
+    } finally {
+      await _recorder.dispose();
+    }
   }
 }
 
@@ -304,7 +325,7 @@ class SystemDictation implements Dictation {
       _finish();
       return;
     }
-    if (_finished) return;
+    if (_finished || _active != this) return;
     _listeningStarted(this, locale);
     try {
       await _stt.listen(

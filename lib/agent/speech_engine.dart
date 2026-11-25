@@ -30,7 +30,8 @@ SpeechEngine Function() speechEngineFactory = PluginSpeechEngine.new;
 /// voice engine (see [speakText]).
 class PluginSpeechEngine implements SpeechEngine {
   Dictation? _dictation;
-  bool _disposed = false;
+  int _listenAttempt = 0;
+  bool _starting = false;
   void Function()? _onStopped;
   void Function(String message)? _onError;
 
@@ -43,28 +44,47 @@ class PluginSpeechEngine implements SpeechEngine {
 
   @override
   Future<void> listen({required void Function(String words) onWords, String? localeId}) async {
+    final attempt = ++_listenAttempt;
     await stopSpeakingAloud();
+    if (attempt != _listenAttempt) return;
     _dictation?.dispose();
     try {
-      final d = _dictation = await dictationFactory();
-      if (_disposed) {
+      _dictation = null;
+      final d = await dictationFactory();
+      if (attempt != _listenAttempt) {
         d.dispose();
         return;
       }
-      await d.start(
-      locale: localeId ?? '',
-      onText: onWords,
-      onDone: () => _onStopped?.call(),
-      onError: (m) => _onError?.call(m),
-      );
+      _dictation = d;
+      _starting = true;
+      try {
+        await d.start(
+          locale: localeId ?? '',
+          onText: onWords,
+          onDone: () => _onStopped?.call(),
+          onError: (m) => _onError?.call(m),
+        );
+      } finally {
+        if (_dictation == d) _starting = false;
+      }
     } catch (e) {
+      if (attempt != _listenAttempt) return;
       _onError?.call('$e');
       _onStopped?.call();
     }
   }
 
   @override
-  Future<void> stop() async => _dictation?.stop();
+  Future<void> stop() async {
+    _listenAttempt++;
+    if (_starting) {
+      _dictation?.dispose();
+      _dictation = null;
+      _starting = false;
+    } else {
+      await _dictation?.stop();
+    }
+  }
 
   @override
   Future<void> speak(String text, {void Function()? onDone}) async {
@@ -76,8 +96,10 @@ class PluginSpeechEngine implements SpeechEngine {
 
   @override
   void dispose() {
-    _disposed = true;
+    _listenAttempt++;
     _dictation?.dispose();
+    _dictation = null;
+    _starting = false;
     stopSpeakingAloud();
   }
 }

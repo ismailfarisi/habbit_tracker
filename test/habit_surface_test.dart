@@ -135,42 +135,44 @@ void main() {
     Map<String, dynamic>? asked;
     await pump(tester, h, onAskCoach: (_, request) => asked = request);
     expect(surfaceState(tester).usingFallback, isFalse);
-    expect(find.text('Warm-up (2 min)'), findsOneWidget);
-    expect(find.textContaining('Red lorry, yellow lorry.'), findsOneWidget);
-    expect(find.text('Practice time'), findsOneWidget);
-    expect(find.text('Pace'), findsOneWidget);
     expect(find.text('110 words/min'), findsOneWidget, reason: 'MetricTrend shows the last logged value');
-
+    expect(find.text('Record'), findsNothing);
+    await tester.tap(find.text('Start 15-minute practice'));
+    await tester.pumpAndSettle();
+    expect(find.text('Warm-up (2 min)'), findsOneWidget);
+    await tester.tap(find.text('Continue to reading'));
+    await tester.pump();
+    expect(find.textContaining('Red lorry, yellow lorry.'), findsOneWidget);
+    expect(find.text('Record'), findsNothing);
     await tester.tap(find.text('Hear it'));
     await tester.pump();
     expect(engine.spoken, contains('Red lorry'));
 
+    await tester.tap(find.text('Continue to recording'));
+    await tester.pump();
     await tester.tap(find.text('Record'));
     await tester.pump();
     expect(engine.listening, isTrue);
     await tester.tap(find.text('Stop'));
     await tester.pump();
+    expect(find.text('fillers'), findsOneWidget);
+    expect(find.text('target words'), findsOneWidget);
+    expect(entry(h).sessions, isEmpty);
+
+    await tester.tap(find.text('Ask coach for feedback'));
+    await tester.pump();
+    expect(asked!['transcript'], contains('seashells'));
+    expect(asked!['habit'], 'Articulation practice');
+    await tester.tap(find.text('Finish & log'));
+    await tester.pumpAndSettle();
 
     final e = entry(h);
     expect(e.metrics['fillers'], 1);
     expect(e.metrics['accuracy'], greaterThan(40));
     expect(e.sessions.single.transcript, contains('seashells'));
     expect(e.sessions.single.metrics['fillers'], 1);
-    expect(find.text('fillers'), findsOneWidget);
-    expect(find.text('target words'), findsOneWidget);
     expect(metricHistory(state.logs, h, 'fillers', days: 3, end: day), [4, null, 1]);
-
-    await tester.tap(find.text('Ask coach for feedback'));
-    await tester.pump();
-    expect(asked!['transcript'], contains('seashells'));
-    expect(asked!['habit'], 'Articulation practice');
-
-    await tester.tap(find.text('Start'));
-    await tester.pump(const Duration(seconds: 1));
-    await tester.tap(find.text('Finish & log'));
-    await tester.pump();
-    expect(entry(h).minutes, 1);
-    expect(entry(h).sessions, hasLength(2));
+    expect(e.minutes, 1);
     expect(tester.takeException(), isNull);
   });
 
@@ -178,9 +180,17 @@ void main() {
     speechEngineFactory = () => FakeSpeechEngine('');
     final h = await add(articulationTemplate);
     await pump(tester, h);
+    await tester.tap(find.text('Start 15-minute practice'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue to reading'));
+    await tester.pump();
+    await tester.tap(find.text('Continue to recording'));
+    await tester.pump();
     await tester.enterText(find.widgetWithText(TextField, 'Transcript'), 'three thin thieves like um');
     await tester.tap(find.byTooltip('Save result'));
     await tester.pump();
+    await tester.tap(find.text('Finish & log'));
+    await tester.pumpAndSettle();
     expect(entry(h).metrics['fillers'], 2);
     expect(entry(h).metrics.containsKey('wpm'), isFalse, reason: 'no duration, so no pace');
   });

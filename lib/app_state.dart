@@ -33,7 +33,6 @@ import 'finance/finance.dart';
 ///
 /// Every mutation notifies listeners, saves, and reschedules reminders.
 class AppState extends ChangeNotifier implements TaskBackend {
-  int dataGeneration = 0;
   final Storage storage;
   final NotificationService notifications;
 
@@ -213,6 +212,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
     final i = habits.indexWhere((h) => h.id == habit.id);
     var stored = habit;
     if (i >= 0) {
+      habit.rememberScreen(habits[i]);
       habits[i] = habit;
     } else {
       if (habit.seq == 0) {
@@ -240,10 +240,10 @@ class AppState extends ChangeNotifier implements TaskBackend {
   }
 
   /// Replaces what is logged for [habitId] on [day].
-  Future<void> logHabit(DateTime day, String habitId, HabitEntry entry) async {
+  Future<void> logHabit(DateTime day, String habitId, HabitEntry entry, {bool reschedule = true}) async {
     final log = _mutableDay(day);
     entry.isEmpty ? log.habits.remove(habitId) : log.habits[habitId] = entry;
-    await _commit();
+    await _commit(reschedule: reschedule);
   }
 
   Future<void> saveQuranPractice(DateTime day, String passageKey, QuranPracticeLog practice, {DateTime? today}) async {

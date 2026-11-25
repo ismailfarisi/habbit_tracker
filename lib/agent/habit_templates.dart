@@ -80,13 +80,13 @@ const _articulationComponents = <Map<String, dynamic>>[
   {
     'id': 'root',
     'component': 'Column',
-    'children': ['warmup', 'drill', 'timer', 'pace', 'fillers'],
+    'children': ['practice', 'pace', 'fillers'],
   },
   {
-    'id': 'warmup',
-    'component': 'PromptCard',
+    'id': 'practice',
+    'component': 'SpeakingPractice',
     'catalogId': habitCatalogId,
-    'title': 'Warm-up (2 min)',
+    'warmupTitle': 'Warm-up (2 min)',
     'steps': [
       'Lip trills: blow air through relaxed lips ("brrr") for 15 seconds, sliding pitch up and down.',
       'Tongue stretch: tongue out and down, then up toward your nose, then side to side. 5 reps each.',
@@ -94,11 +94,6 @@ const _articulationComponents = <Map<String, dynamic>>[
       'Over-articulate: "pa-ta-ka" 10 times slowly, then 10 times quickly but crisply.',
       'Breath: inhale 4 s into your belly, then exhale on a steady "sss" for as long as you can.',
     ],
-  },
-  {
-    'id': 'drill',
-    'component': 'ReadAloudDrill',
-    'catalogId': habitCatalogId,
     'title': 'Read aloud',
     'text': 'Red lorry, yellow lorry.\n'
         'She sells seashells by the seashore.\n'
@@ -106,14 +101,6 @@ const _articulationComponents = <Map<String, dynamic>>[
         'A proper copper coffee pot.',
     'targetWords': ['lorry', 'seashells', 'thieves', 'thousand', 'copper'],
     'listen': true,
-  },
-  {
-    'id': 'timer',
-    'component': 'PracticeTimer',
-    'catalogId': habitCatalogId,
-    'label': 'Practice time',
-    'minutes': {_path: '/minutes'},
-    'targetMinutes': {_path: '/habit/target'},
   },
   {
     'id': 'pace',

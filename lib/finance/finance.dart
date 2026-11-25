@@ -93,6 +93,7 @@ class MoneyEntry {
   EntryKind kind;
   /// For a payment logged from the calculator against a specific anniversary.
   final int? zakatYear;
+  final String? habitId;
 
   MoneyEntry({
     String? id,
@@ -103,6 +104,7 @@ class MoneyEntry {
     this.note = '',
     this.potId,
     this.debtId,
+    this.habitId,
     EntryKind? kind,
     this.zakatYear,
   }) : kind = kind ?? (potId != null || category == 'Savings' ? EntryKind.savings
@@ -121,6 +123,7 @@ class MoneyEntry {
     if (note.isNotEmpty) 'note': note,
     if (potId != null) 'potId': potId,
     if (debtId != null) 'debtId': debtId,
+    if (habitId != null) 'habitId': habitId,
   };
 
   factory MoneyEntry.fromJson(Map<String, dynamic> j) => MoneyEntry(
@@ -134,6 +137,7 @@ class MoneyEntry {
     note: j['note'] as String? ?? '',
     potId: j['potId'] as String?,
     debtId: j['debtId'] as String?,
+    habitId: j['habitId'] as String?,
   );
 }
 
