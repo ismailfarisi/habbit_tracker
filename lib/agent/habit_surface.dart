@@ -59,6 +59,8 @@ class HabitSurfaceState extends State<HabitSurface> {
 
   /// True when the stored surface could not be used and [HabitFallback] is
   /// shown.
+  Map<String, dynamic>? get _selectedSurface => widget.habit.usePlainTracker ? null : widget.habit.uiSurface;
+
   bool get usingFallback => _surface == null;
 
   /// The entry currently shown.
@@ -81,7 +83,7 @@ class HabitSurfaceState extends State<HabitSurface> {
     }
     if (old.habit.id != widget.habit.id ||
         dayKey(old.day) != dayKey(widget.day) ||
-        jsonEncode(widget.habit.uiSurface) != _surfaceJson) {
+        jsonEncode(_selectedSurface) != _surfaceJson) {
       _close();
       _open();
     } else {
@@ -103,8 +105,8 @@ class HabitSurfaceState extends State<HabitSurface> {
       };
 
   void _open() {
-    _surfaceJson = jsonEncode(widget.habit.uiSurface);
-    final stored = widget.habit.uiSurface;
+    _surfaceJson = jsonEncode(_selectedSurface);
+    final stored = _selectedSurface;
     if (stored == null) return;
     final processor = MessageProcessor<ComponentImplementation>(
       catalogs: habitCatalogs(),
@@ -202,6 +204,7 @@ class HabitSurfaceState extends State<HabitSurface> {
       case finishSessionAction:
         _save(applyFinishSession(entry, c, DateTime.now()));
       case askCoachAction:
+        if (!widget.persist && widget.onAskCoach == null) return;
         final request = {...c, 'habit': widget.habit.title, 'day': dayKey(widget.day)};
         if (widget.onAskCoach != null) {
           widget.onAskCoach!(widget.habit, request);
@@ -227,9 +230,14 @@ class HabitSurfaceState extends State<HabitSurface> {
       addMoney: widget.persist ? widget.state.addMoney : null,
       history: (metric, days) =>
           metricHistory(widget.state.logs, widget.habit, metric, days: days, end: widget.day),
-      child: surface == null
-          ? HabitFallback(habit: widget.habit, entry: entry, onChanged: _save)
-          : A2uiSurface(key: ObjectKey(surface), surface: surface),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        if (surface == null)
+          HabitFallback(habit: widget.habit, entry: entry, onChanged: _save)
+        else
+          A2uiSurface(key: ObjectKey(surface), surface: surface),
+        for (final (i, step) in widget.habit.screenSteps.indexed)
+          Padding(padding: const EdgeInsets.only(top: 8), child: Text('${i + 1}. $step')),
+      ]),
     );
   }
 }
@@ -311,6 +319,21 @@ class HabitFallback extends StatelessWidget {
           ),
           IconButton.filled(tooltip: 'More', onPressed: () => bump(step), icon: const Icon(Icons.add)),
         ]),
+      if (timed)
+        OutlinedButton.icon(
+          icon: const Icon(Icons.timer_outlined),
+          label: const Text('Log session'),
+          onPressed: () async {
+            final minutes = await showDialog<int>(
+              context: context,
+              builder: (_) => _LogSessionDialog(target: habit.target),
+            );
+            if (minutes == null || !context.mounted) return;
+            // Use the current entry if another surface updated it while the dialog was open.
+            final current = context.findAncestorStateOfType<HabitSurfaceState>()?.entry ?? entry;
+            onChanged(applyFinishSession(current, {'durationSec': minutes * 60, 'addMinutes': minutes}, DateTime.now()));
+          },
+        ),
       CheckboxListTile.adaptive(
         contentPadding: EdgeInsets.zero,
         controlAffinity: ListTileControlAffinity.leading,
@@ -320,4 +343,36 @@ class HabitFallback extends StatelessWidget {
       ),
     ]);
   }
+}
+
+class _LogSessionDialog extends StatefulWidget {
+  final num target;
+  const _LogSessionDialog({required this.target});
+
+  @override
+  State<_LogSessionDialog> createState() => _LogSessionDialogState();
+}
+
+class _LogSessionDialogState extends State<_LogSessionDialog> {
+  late int? minutes = widget.target.round().clamp(1, 1440);
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Log session'),
+        content: TextFormField(
+          initialValue: minutes.toString(),
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Minutes', helperText: '1 to 1440'),
+          onChanged: (text) => setState(() => minutes = int.tryParse(text.trim())),
+        ),
+        actions: [
+          TextButton(onPressed: Navigator.of(context).pop, child: const Text('Cancel')),
+          FilledButton(
+            onPressed: minutes != null && minutes! > 0 && minutes! <= 1440
+                ? () => Navigator.pop(context, minutes)
+                : null,
+            child: const Text('Save session'),
+          ),
+        ],
+      );
 }

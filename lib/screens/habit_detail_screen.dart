@@ -7,6 +7,7 @@ import '../habits/habit.dart';
 import '../logic/stats.dart';
 import '../models.dart';
 import '../widgets/charts.dart';
+import 'habit_screen_editor.dart';
 import 'progress_screen.dart' show ruleLabel;
 import '../widgets/ask_chat.dart';
 
@@ -57,10 +58,17 @@ class HabitDetailScreen extends StatelessWidget {
               PopupMenuButton<String>(
                 onSelected: (v) async {
                   final nav = Navigator.of(context);
+                  if (v == 'edit') {
+                    await nav.push(MaterialPageRoute<void>(
+                      builder: (_) => HabitScreenEditor(state: state, habit: habit, day: d),
+                    ));
+                    return;
+                  }
                   await state.archiveHabit(habit.id, archived: !habit.archived);
                   if (v == 'archive') nav.pop();
                 },
                 itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'edit', child: Text('Edit habit screen')),
                   PopupMenuItem(
                     value: habit.archived ? 'restore' : 'archive',
                     child: Text(habit.archived ? 'Restore habit' : 'Archive habit'),

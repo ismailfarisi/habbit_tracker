@@ -13,6 +13,8 @@
 /// rules live in `lib/logic/stats.dart`.
 library;
 
+import 'dart:convert';
+
 import '../models.dart';
 
 enum HabitKind { check, count, duration, metric, practice }
@@ -177,6 +179,10 @@ class HabitDef {
   /// validated by `normalizeHabitSurface` in lib/agent/habit_catalog.dart.
   /// Null means the built-in fallback UI for [kind].
   Map<String, dynamic>? uiSurface;
+  /// The plain tracker is a display preference; the generated surface remains available.
+  bool usePlainTracker;
+  List<String> screenSteps;
+  Map<String, dynamic>? previousScreen;
   List<MetricField> metricFields;
 
   /// Id of the seed template this habit was created from, if any.
@@ -200,6 +206,9 @@ class HabitDef {
     DateTime? createdAt,
     this.archived = false,
     this.uiSurface,
+    this.usePlainTracker = false,
+    this.screenSteps = const [],
+    this.previousScreen,
     List<MetricField>? metricFields,
     this.templateId,
     this.guide,
@@ -239,6 +248,9 @@ class HabitDef {
         'createdAt': createdAt.toIso8601String(),
         'archived': archived,
         'uiSurface': uiSurface,
+        if (usePlainTracker) 'usePlainTracker': true,
+        if (screenSteps.isNotEmpty) 'screenSteps': screenSteps,
+        if (previousScreen != null) 'previousScreen': previousScreen,
         'metricFields': metricFields.map((m) => m.toJson()).toList(),
         if (templateId != null) 'templateId': templateId,
         if (guide != null) 'guide': guide!.toJson(),
@@ -263,6 +275,9 @@ class HabitDef {
         createdAt: DateTime.tryParse(j['createdAt']?.toString() ?? ''),
         archived: j['archived'] == true,
         uiSurface: (j['uiSurface'] as Map?)?.cast<String, dynamic>(),
+        usePlainTracker: j['usePlainTracker'] == true,
+        screenSteps: [if (j['screenSteps'] is List) ...(j['screenSteps'] as List).whereType<String>()],
+        previousScreen: (j['previousScreen'] as Map?)?.cast<String, dynamic>(),
         metricFields: [
           if (j['metricFields'] is List)
             for (final m in j['metricFields'] as List)
@@ -271,6 +286,28 @@ class HabitDef {
         templateId: j['templateId'] as String?,
         guide: j['guide'] is Map ? TaskGuide.fromJson((j['guide'] as Map).cast<String, dynamic>()) : null,
       );
+
+  /// Only screen configuration is versioned. Identity, schedule and measurements
+  /// stay with the habit even when a prior screen is restored.
+  Map<String, dynamic> get screenVersion => {
+        'target': target,
+        'uiSurface': uiSurface,
+        'usePlainTracker': usePlainTracker,
+        'screenSteps': screenSteps,
+      };
+
+  void rememberScreen(HabitDef before) {
+    final previous = jsonEncode(before.screenVersion);
+    if (previous != jsonEncode(screenVersion)) previousScreen = jsonDecode(previous) as Map<String, dynamic>;
+  }
+
+  void applyScreen(Map<String, dynamic> version) {
+    final restored = HabitDef.fromJson({'id': id, ...version});
+    target = restored.target;
+    uiSurface = restored.uiSurface;
+    usePlainTracker = restored.usePlainTracker;
+    screenSteps = restored.screenSteps;
+  }
 
   HabitDef copy() => HabitDef.fromJson(toJson());
 }

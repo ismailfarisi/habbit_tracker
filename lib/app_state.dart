@@ -182,6 +182,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
     final i = habits.indexWhere((h) => h.id == habit.id);
     var stored = habit;
     if (i >= 0) {
+      habit.rememberScreen(habits[i]);
       habits[i] = habit;
     } else {
       if (habit.seq == 0) {
