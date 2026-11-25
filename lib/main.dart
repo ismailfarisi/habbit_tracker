@@ -12,10 +12,8 @@ import 'services/storage.dart';
 import 'services/tts.dart' show speakingEngine, stopSpeaking, voiceNotice;
 import 'services/voice_input.dart' show confirmPhoneFallback, finishDictation, listeningEngine;
 
-final _navigator = GlobalKey<NavigatorState>();
-
-Future<bool> _confirmFallback() async {
-  final context = _navigator.currentContext;
+Future<bool> _confirmFallback(GlobalKey<NavigatorState> navigator) async {
+  final context = navigator.currentState?.overlay?.context;
   if (context == null) return false;
   return await showDialog<bool>(
     context: context,
@@ -48,7 +46,6 @@ void routeNotification(AppState state, String payload, String? actionId) {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  confirmPhoneFallback = _confirmFallback;
   final notifications = NotificationService.instance;
   await notifications.init();
   final state = await AppState.load(await Storage.open(), notifications);
@@ -77,8 +74,30 @@ class DailyDisciplineApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: state,
-      builder: (context, _) => MaterialApp(
-        key: ValueKey(state.dataGeneration),
+      builder: (context, _) => _AppGeneration(key: ValueKey((state, state.dataGeneration)), state: state),
+    );
+  }
+}
+
+class _AppGeneration extends StatefulWidget {
+  final AppState state;
+  const _AppGeneration({super.key, required this.state});
+  @override
+  State<_AppGeneration> createState() => _AppGenerationState();
+}
+
+class _AppGenerationState extends State<_AppGeneration> {
+  final _navigator = GlobalKey<NavigatorState>();
+  @override
+  void initState() {
+    super.initState();
+    confirmPhoneFallback = () => _confirmFallback(_navigator);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = widget.state;
+    return MaterialApp(
         title: 'Daily Discipline',
         navigatorKey: _navigator,
         builder: (_, navigator) => _VoiceActivity(child: navigator!),
@@ -91,7 +110,6 @@ class DailyDisciplineApp extends StatelessWidget {
           _ => ThemeMode.system,
         },
         home: needsOnboarding(state) ? OnboardingScreen(state: state) : HomeScreen(state: state),
-      ),
     );
   }
 }

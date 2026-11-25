@@ -83,6 +83,7 @@ class FallbackDictation implements Dictation {
   final Dictation primary;
   final Dictation Function() fallback;
   Dictation? _active;
+  bool _disposed = false;
   FallbackDictation(this.primary, this.fallback);
 
   @override
@@ -99,6 +100,7 @@ class FallbackDictation implements Dictation {
       _active = primary;
       await primary.start(onText: onText, onDone: onDone, onError: onError, locale: locale);
     } on DictationUnavailable catch (e) {
+      if (_disposed) return;
       debugPrint('Whisper unavailable, using system dictation: ${e.message}');
       primary.dispose();
       final f = _active = fallback();
@@ -110,7 +112,10 @@ class FallbackDictation implements Dictation {
   Future<void> stop() async => _active?.stop();
 
   @override
-  void dispose() => _active?.dispose();
+  void dispose() {
+    _disposed = true;
+    _active?.dispose();
+  }
 }
 
 /// Thrown by [Dictation.start] when the engine can't run at all, so a
@@ -135,6 +140,7 @@ class WhisperDictation implements Dictation {
   void Function()? _onDone;
   void Function(String)? _onText;
   bool _finished = false;
+  bool _stopping = false;
   String _last = '';
 
   WhisperDictation(this.modelPath);
@@ -163,14 +169,24 @@ class WhisperDictation implements Dictation {
       pcm = await _recorder.startStream(
         const RecordConfig(encoder: AudioEncoder.pcm16bits, sampleRate: 16000, numChannels: 1),
       );
-      _session = await WhisperController().transcribeLive(
+      if (_finished) {
+        await _recorder.stop();
+        return;
+      }
+      final session = await WhisperController().transcribeLive(
         modelPath: modelPath,
         pcm16Stream: pcm,
         lang: whisperLang(locale),
         suppressNonSpeechTokens: true,
         keepModelLoaded: true,
       );
+      if (_finished) {
+        await session.stop();
+        return;
+      }
+      _session = session;
     } catch (e) {
+      if (_finished) return;
       _listeningEnded(this);
       await _recorder.stop().catchError((_) => null);
       throw DictationUnavailable('$e');
@@ -184,15 +200,21 @@ class WhisperDictation implements Dictation {
 
   @override
   Future<void> stop() async {
-    if (_finished || _session == null) return;
+    if (_finished || _stopping) return;
+    _stopping = true;
     _limit?.cancel();
-    await _recorder.stop();
-    // The live text is already on screen; take whisper's final pass only if
-    // it arrives quickly, so stopping feels instant.
-    final text = await _session!.stop().timeout(finalPassWait, onTimeout: () => _last);
-    final clean = _clean(text);
-    if (!_finished && clean.isNotEmpty) _onText?.call(clean);
-    _finish();
+    final session = _session;
+    if (session == null) _finish();
+    try {
+      await _recorder.stop();
+      if (session != null) {
+        final text = await session.stop().timeout(finalPassWait, onTimeout: () => _last);
+        final clean = _clean(text);
+        if (!_finished && clean.isNotEmpty) _onText?.call(clean);
+      }
+    } finally {
+      _finish();
+    }
   }
 
   void _finish() {

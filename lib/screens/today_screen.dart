@@ -236,12 +236,7 @@ class _TodayScreenState extends State<TodayScreen> {
     child: TaskTile(state: widget.state, task: task, day: now),
   ));
 
-  void _openPrayerSetup() {
-    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => Scaffold(
-      appBar: AppBar(title: Text(SettingsSection.prayers.label)),
-      body: SafeArea(child: SettingsScreen(state: widget.state, section: SettingsSection.prayers)),
-    )));
-  }
+  void _openPrayerSetup() => openSettings(context, widget.state, section: SettingsSection.prayers);
 
   Widget _setup(String id, String message, String action, VoidCallback onTap) => ListTile(
     title: Text(message),

@@ -1013,15 +1013,19 @@ class _AiKeySectionState extends State<AiKeySection> {
     setState(() { _testing = true; _status = test ? 'Testing with a sample message…' : ''; });
     final client = OpenRouterClient(apiKey: key, model: model);
     try {
-      if (test) await client.complete([const ChatMessage('user', 'Reply with: Ready.')], temperature: 0)
-          .timeout(const Duration(seconds: 20));
+      if (test) {
+        await client.complete([const ChatMessage('user', 'Reply with: Ready.')], temperature: 0)
+            .timeout(const Duration(seconds: 20));
+      }
       if (!mounted) return;
       await state.setApiKey(key);
       await state.updateSettings((x) => x.model = model);
       if (mounted) setState(() => _status = test ? 'Connection verified. Key saved.' : 'Key saved. Connection not tested.');
     } catch (e) {
-      if (mounted) setState(() => _status = e is OpenRouterException
-          ? e.message.split('\n').first : 'Could not connect. Check your connection and try again.');
+      if (mounted) {
+        setState(() => _status = e is OpenRouterException
+            ? e.message.split('\n').first : 'Could not connect. Check your connection and try again.');
+      }
     } finally {
       client.close();
       if (mounted) setState(() => _testing = false);

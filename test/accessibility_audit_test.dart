@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:habit_tracker/main.dart';
 import 'package:habit_tracker/screens/home_screen.dart';
+import 'package:habit_tracker/screens/calendar_screen.dart';
 import 'package:habit_tracker/screens/settings_screen.dart';
 import 'package:habit_tracker/widgets/charts.dart';
 import 'support.dart';
@@ -45,5 +47,34 @@ void main() {
     await t.pumpAndSettle();
     expect(find.byType(NavigationRail), findsNothing);
     expect(find.byType(NavigationBar), findsOneWidget);
+  });
+
+  testWidgets('restore discards routes that still reference the previous data', (t) async {
+    final state = await loadState();
+    await state.updateSettings((s) => s.onboarded = true);
+    await t.pumpWidget(DailyDisciplineApp(state: state));
+    await t.pumpAndSettle();
+    await t.tap(find.byTooltip('Settings'));
+    await t.pumpAndSettle();
+    expect(find.text('Find a setting'), findsOneWidget);
+    final before = t.state<NavigatorState>(find.byType(Navigator).first);
+    await state.importBackup(state.storage.exportJson());
+    await t.pumpAndSettle();
+    expect(find.byType(SettingsScreen), findsNothing);
+    expect(before.mounted, isFalse);
+  });
+
+  testWidgets('compact RTL calendar remains navigable with double-size text', (t) async {
+    final state = await loadState();
+    t.view.devicePixelRatio = 1;
+    t.view.physicalSize = const Size(320, 640);
+    addTearDown(t.view.reset);
+    await t.pumpWidget(MaterialApp(builder: (context, child) => Directionality(
+      textDirection: TextDirection.rtl,
+      child: MediaQuery(data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(2)), child: child!),
+    ), home: CalendarScreen(state: state, clock: () => DateTime(2026, 11, 25))));
+    await t.pumpAndSettle();
+    expect(t.takeException(), isNull);
+    expect(find.textContaining('Nov 25'), findsWidgets);
   });
 }
