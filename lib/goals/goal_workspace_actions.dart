@@ -53,7 +53,9 @@ Future<void> attachGoalWork(BuildContext context, AppState state, Goal goal) asy
   final items = <(String, String, _LinkKind)>[
     for (final h in state.activeHabits.where((h) => !linked(h.id))) (h.id, h.title, _LinkKind.habit),
     for (final t in state.tasks.where((t) => !linked(t.id))) (t.id, t.title, _LinkKind.task),
-    for (final p in state.finance.pots.where((p) => p.goalId == null && !p.archived)) (p.id, p.name, _LinkKind.pot),
+    for (final ledger in state.finance.ledgers)
+      for (final p in ledger.pots.where((p) => p.goalId == null && !p.archived))
+        ('${ledger.currency}:${p.id}', '${p.name} · ${ledger.currency}', _LinkKind.pot),
   ];
   final picked = await showModalBottomSheet<(String, String, _LinkKind)>(
     context: context,
@@ -73,9 +75,10 @@ Future<void> attachGoalWork(BuildContext context, AppState state, Goal goal) asy
   final current = state.goalById(goal.id);
   if (current == null || current.archived) return;
   if (picked.$3 == _LinkKind.pot) {
-    final pot = state.finance.pot(picked.$1);
+    final currency = picked.$1.split(':').first;
+    final pot = state.finance.ledgers.where((l) => l.currency == currency).firstOrNull?.pot(picked.$1.substring(currency.length + 1));
     if (pot == null || pot.goalId != null || pot.archived) return;
-    await state.upsertPot(SavingsPot.fromJson(pot.toJson())..goalId = current.id);
+    await state.upsertPot(SavingsPot.fromJson(pot.toJson())..goalId = current.id, currency: currency);
     return;
   }
   if (linked(picked.$1)) return;

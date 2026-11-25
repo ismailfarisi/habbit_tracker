@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../app_state.dart';
+import '../finance/finance_agenda.dart';
 import '../goals/goal.dart';
 import '../goals/goals_card.dart';
 import '../habits/habit.dart';
@@ -26,9 +27,9 @@ class CalendarDay {
 CalendarDay calendarDay(AppState s, DateTime day, DateTime today) {
   final d = dateOnly(day);
   final past = !d.isAfter(dateOnly(today));
-  final tasks = tasksForDay(s.tasks, d, today: today);
-  final habits = s.activeHabits.where((h) => h.isScheduledOn(d)).toList();
-  final score = past ? dayScore(d, s.settings, s.logs, habits: habits, tasks: tasks) : const DayScore(0, 0);
+  final tasks = tasksForDay(s.trackedTasks, d, today: today);
+  final habits = s.trackedHabits.where((h) => h.isScheduledOn(d)).toList();
+  final score = past ? dayScore(d, s.settings, s.logs, habits: habits, tasks: tasks, goals: s.goals) : const DayScore(0, 0);
   // The shared habit score covers repeating tasks. The calendar also shows
   // completion for dated one-offs on the selected day.
   final oneOffs = past ? tasks.where((t) => !t.isRepeating) : const <Task>[];
@@ -256,8 +257,10 @@ class _DayDetails extends StatelessWidget {
     final info = calendarDay(state, day, today);
     final past = !day.isAfter(today);
     final log = state.logs[dayKey(day)];
-    final tasks = tasksForDay(state.tasks, day, today: today);
-    final habits = state.habits.where((h) => !h.archived && h.isScheduledOn(day)).toList();
+    final tasks = tasksForDay(state.trackedTasks, day, today: today);
+    final habits = state.trackedHabits.where((h) => h.isScheduledOn(day)).toList();
+    final finances = financeAgenda(state.finance, day, hijriOffsetDays: state.settings.hijriOffsetDays);
+    final wake = state.settings.tracksOn('wake', day), prayers = state.settings.tracksOn('prayers', day);
     Widget heading(String s) => Padding(
       padding: const EdgeInsets.only(top: 12, bottom: 2),
       child: Text(s, style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
@@ -309,13 +312,17 @@ class _DayDetails extends StatelessWidget {
               heading(g?.title ?? (groups.length == 1 ? 'Schedule' : 'Other plans')),
               ...groups[g]!,
             ],
-            if (groups.isEmpty) Text(past ? 'No tasks or habits scheduled.' : 'Nothing planned yet.', style: muted),
-            if (past) ...[
-              heading('Wake-up and prayers'),
+            if (finances.isNotEmpty) heading('Personal reminders'),
+            for (final item in finances) ListTile(
+              contentPadding: EdgeInsets.zero, leading: const Icon(Icons.event_note), title: Text(item.detail),
+            ),
+            if (groups.isEmpty && finances.isEmpty) Text(past ? 'No tasks or habits scheduled.' : 'Nothing planned yet.', style: muted),
+            if (past && (wake || prayers)) ...[
+              heading(wake && prayers ? 'Wake-up and prayers' : wake ? 'Wake-up' : 'Prayers'),
               Text(
                 [
-                  log?.wakeAt == null ? 'Wake-up not logged' : 'Up at ${DateFormat.jm().format(log!.wakeAt!)}',
-                  '${prayerNames.where((p) => log?.prayers.contains(p) ?? false).length} of ${prayerNames.length} prayers',
+                  if (wake) log?.wakeAt == null ? 'Wake-up not logged' : 'Up at ${DateFormat.jm().format(log!.wakeAt!)}',
+                  if (prayers) '${prayerNames.where((p) => log?.prayers.contains(p) ?? false).length} of ${prayerNames.length} prayers',
                 ].join(' · '),
               ),
             ],

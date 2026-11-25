@@ -4,9 +4,31 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:habit_tracker/finance/finance.dart';
 import 'package:habit_tracker/finance/finance_agenda.dart';
 import 'package:habit_tracker/logic/hijri.dart';
+import 'package:habit_tracker/models.dart';
+import 'package:habit_tracker/services/reminders.dart';
 
 void main() {
   final jan = DateTime(2027, 1, 1);
+
+  test('the OS plan contains a generic stable reminder and removes it on payment', () {
+    final d = Debt(person: 'Example lender', amount: 3400, due: jan);
+    final f = Finance(currency: 'AED', debts: [d]);
+    d.reminder.setEnabled(true, jan);
+    final s = Settings();
+    List<PlannedReminder> personal() => planReminders(s, {}, jan, finance: f)
+        .take(maxPending).where((r) => r.kind == ReminderKind.personal).toList();
+    final first = personal().single;
+    expect(first.when, DateTime(2027, 1, 1, 9));
+    expect(first.privateDetail, contains(d.person));
+    expect(first.title, 'Personal reminder');
+    expect(first.body, 'Open the app to review your plan.');
+    expect(first.payload, 'personal|${first.id}');
+    f.openLedger('KWD');
+    expect(personal().single.id, first.id);
+    f.openLedger('AED');
+    f.entries.add(MoneyEntry(at: jan, amount: 3400, category: 'Debt', debtId: d.id));
+    expect(personal(), isEmpty);
+  });
 
   test('private debt reminders survive ledger switching, snooze and repayment', () {
     final d = Debt(person: 'Example lender', amount: 3400, due: DateTime(2027, 1, 5));

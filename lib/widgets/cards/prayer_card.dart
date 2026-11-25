@@ -75,6 +75,7 @@ class PrayerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = state.settings;
     final day = prayerTimesFor(s, now);
+    final timed = prayerTimesConfirmed(s);
     final next = nextPrayer(s, now);
     final mins = next.value.difference(now).inMinutes;
     final inText = mins >= 60 ? '${mins ~/ 60} h ${mins % 60} min' : '$mins min';
@@ -99,8 +100,8 @@ class PrayerCard extends StatelessWidget {
       title: summary ? 'Five daily prayers' : 'Prayer',
       trailing: !summary ? null : CountBadge(done > 0 && onTime < done ? '$done/5 · $onTime on time' : '$done/5'),
       children: [
-        if (summary) Text('Next: ${prayerLabel(next.key, next.value)} in $inText', style: TextStyle(color: c.onSurfaceVariant)),
-        if (summary && ramadan)
+        if (summary && timed) Text('Next: ${prayerLabel(next.key, next.value)} in $inText', style: TextStyle(color: c.onSurfaceVariant)),
+        if (summary && ramadan && timed)
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
@@ -114,15 +115,15 @@ class PrayerCard extends StatelessWidget {
           if (show(p)) _PrayerRow(
             name: p,
             label: prayerLabel(p, now),
-            time: !summary && !s.hasLocation && !s.useManualPrayer ? '' : hm(day.times[p]!),
+            time: timed ? hm(day.times[p]!) : '',
             status: prayerStatusOf(log, p),
-            isNext: next.key == p && dateOnly(next.value) == dateOnly(now),
+            isNext: timed && next.key == p && dateOnly(next.value) == dateOnly(now),
             tag: ramadan && p == 'Maghrib'
                 ? 'Iftar'
                 : ramadan && p == 'Fajr'
                     ? 'Suhoor ends'
                     : null,
-            onTap: () => !summary && !s.hasLocation && !s.useManualPrayer ? _choose(context, p) : _tap(context, p),
+            onTap: () => timed ? _tap(context, p) : _choose(context, p),
             onLongPress: () => _choose(context, p),
           ),
           for (final o in optional)
@@ -140,10 +141,8 @@ class PrayerCard extends StatelessWidget {
                     : null,
               ),
         ],
-        if (summary) Text(
-          day.calculated
-              ? 'Calculated for ${s.locationName.isEmpty ? 'your location' : s.locationName} · ${calcMethodLabels[s.calcMethod]}'
-              : 'Using manual times',
+        Text(
+          prayerTimeSource(s),
           style: small,
         ),
         Text('Tap to mark · long-press for on time, late or qada', style: small),

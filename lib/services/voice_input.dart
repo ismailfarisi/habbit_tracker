@@ -84,6 +84,7 @@ class FallbackDictation implements Dictation {
   final Dictation Function() fallback;
   Dictation? _active;
   bool _disposed = false;
+  bool _stopped = false;
   FallbackDictation(this.primary, this.fallback);
 
   @override
@@ -99,10 +100,8 @@ class FallbackDictation implements Dictation {
     try {
       _active = primary;
       await primary.start(onText: onText, onDone: onDone, onError: onError, locale: locale);
-    } on DictationUnavailable catch (e) {
-      if (_disposed) return;
-      debugPrint('Whisper unavailable, using system dictation: ${e.message}');
-      if (_disposed) return;
+    } on DictationUnavailable {
+      if (_disposed || _stopped) return;
       primary.dispose();
       final f = _active = fallback();
       await f.start(onText: onText, onDone: onDone, onError: onError, locale: locale);
@@ -110,7 +109,10 @@ class FallbackDictation implements Dictation {
   }
 
   @override
-  Future<void> stop() async => _active?.stop();
+  Future<void> stop() async {
+    _stopped = true;
+    await _active?.stop();
+  }
 
   @override
   void dispose() {
@@ -164,12 +166,13 @@ class WhisperDictation implements Dictation {
       void Function(String) onError, String locale) async {
     _onDone = onDone;
     _onText = onText;
-    if (!await _recorder.hasPermission()) {
+    final allowed = await _recorder.hasPermission();
+    if (_finished) return;
+    if (!allowed) {
       onError('Microphone permission is needed for voice input.');
       _finish();
       return;
     }
-    if (_finished) return;
     _listeningStarted(this, locale);
     final Stream<Uint8List> pcm;
     try {
@@ -319,17 +322,20 @@ class SystemDictation implements Dictation {
     }
     if (_finished) return;
     _active = this;
-    if (!await _init()) {
+    final ready = await _init();
+    if (_finished || _active != this) return;
+    if (!ready) {
       _available = null;
       onError('Speech recognition is not available on this device.');
       _finish();
       return;
     }
-    if (_finished || _active != this) return;
     _listeningStarted(this, locale);
     try {
       await _stt.listen(
-      onResult: (r) => onText(r.recognizedWords),
+      onResult: (r) {
+        if (!_finished && _active == this) onText(r.recognizedWords);
+      },
       listenOptions: SpeechListenOptions(
         listenFor: const Duration(minutes: 3),
         pauseFor: const Duration(seconds: 5),

@@ -49,7 +49,9 @@ void main() {
       expect(find.widgetWithText(AppBar, 'Progress'), findsOneWidget);
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      expect(find.text('Appearance & streaks'), findsOneWidget);
+      expect(find.text('Find a setting'), findsOneWidget);
+      await tester.enterText(find.byType(TextField).first, 'reminders');
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Reminders'));
       await tester.pumpAndSettle();
       expect(find.byType(Switch), findsWidgets);

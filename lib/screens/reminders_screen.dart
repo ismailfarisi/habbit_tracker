@@ -22,6 +22,7 @@ class RemindersScreen extends StatefulWidget {
         ReminderKind.habit => Icons.repeat,
         ReminderKind.task => Icons.task_alt,
         ReminderKind.bedtime => Icons.bedtime_outlined,
+        ReminderKind.personal => Icons.event_note,
       };
 
   @override
@@ -185,7 +186,7 @@ class _RemindersScreenState extends State<RemindersScreen> with WidgetsBindingOb
                       subtitle: Text('${DateFormat.jm().format(r.when)}${data!.muted.contains(r.id) ? ' · muted' : ''}'),
                       expandedCrossAxisAlignment: CrossAxisAlignment.start,
                       childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                      children: [Align(alignment: AlignmentDirectional.centerStart, child: Text(r.body))],
+                      children: [Align(alignment: AlignmentDirectional.centerStart, child: Text(r.privateDetail ?? r.body))],
                     ),
                 ],
               ],

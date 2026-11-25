@@ -37,6 +37,8 @@ class _DelayedGoalStore extends Fake implements Storage {
   }
 
   @override
+  Future<void> recoverInterruptedRestore() => base.recoverInterruptedRestore();
+  @override
   Settings loadSettings() => base.loadSettings();
   @override
   Map<String, DayLog> loadLogs() => base.loadLogs();
@@ -249,7 +251,7 @@ void main() {
     );
     await tester.tap(find.text('Attach existing work'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Stall deposit'));
+    await tester.tap(find.text('Stall deposit · ${s.finance.currency}'));
     await tester.pumpAndSettle();
     expect(s.finance.pot('shop-deposit')!.goalId, g.id);
     await tester.tap(find.textContaining('Stall deposit ·'));

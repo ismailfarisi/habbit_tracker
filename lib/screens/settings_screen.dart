@@ -15,7 +15,6 @@ import '../services/openrouter_models.dart';
 import '../services/focus_guard.dart';
 import '../services/prayer_service.dart';
 import '../widgets/wake_permission_tile.dart';
-import 'onboarding_screen.dart' show City, cities;
 import 'reminders_screen.dart';
 import 'wake_challenge_screen.dart';
 import '../services/storage.dart';
@@ -378,7 +377,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   );
 
   List<Widget> _overview() {
-    final place = s.latitude == null ? 'Location not set' : (s.locationName.isEmpty ? 'Location set' : s.locationName);
     const keywords = {
       SettingsSection.prayers: 'city location coordinates times calculation',
       SettingsSection.reminders: 'notification permission alerts alarms',
@@ -414,7 +412,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ] else ...[
       _header('Your day'),
       _entry(SettingsSection.wake, 'Up at ${_fmt(s.wakeTime)} · sleep goal ${fmtSleepHours(s.sleepHours)}'),
-      _entry(SettingsSection.prayers, '$place · ${calcMethodLabels[s.calcMethod] ?? s.calcMethod}'),
+      _entry(SettingsSection.prayers, prayerTimeSource(s)),
       _entry(SettingsSection.islamic, "Hijri date, Ramadan, Jumu'ah, Duha and Witr"),
       _entry(
         SettingsSection.reminders,
@@ -533,12 +531,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle: Text(prayerTimeSource(s)),
               trailing: const Icon(Icons.chevron_right),
               onTap: () async {
-                final city = await showDialog<City>(context: context, builder: (c) => SimpleDialog(
-                  title: const Text('Choose a city'),
-                  children: [for (final city in cities) SimpleDialogOption(
-                    onPressed: () => Navigator.pop(c, city), child: Text('${city.name}, ${city.country}'),
-                  )],
-                ));
+                final city = await pickPrayerCity(context);
                 if (city == null || !mounted) return;
                 _locName.text = city.name;
                 _lat.text = city.lat.toString();
@@ -559,19 +552,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   : const Icon(Icons.my_location),
               label: const Text('Use my current location'),
             ),
-            TextButton(onPressed: () async {
-              final city = await pickPrayerCity(context);
-              if (city == null || !mounted) return;
-              _locName.text = city.name;
-              _lat.text = city.lat.toString();
-              _lng.text = city.lng.toString();
-              await state.updateSettings((s) {
-                s.locationName = city.name;
-                s.latitude = city.lat;
-                s.longitude = city.lng;
-                s.calcMethod = city.calcMethod;
-              });
-            }, child: const Text('Choose my city')),
             const SizedBox(height: 12),
             TextField(
               controller: _locName,

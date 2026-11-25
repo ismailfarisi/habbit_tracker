@@ -10,7 +10,8 @@ class GoalOutcome {
   final String label;
   final double? fraction;
   final SavingsPot? pot;
-  const GoalOutcome(this.label, [this.fraction, this.pot]);
+  final Finance? ledger;
+  const GoalOutcome(this.label, [this.fraction, this.pot, this.ledger]);
 }
 
 List<GoalOutcome> goalOutcomes(AppState state, Goal goal, DateTime at, {bool includeSavings = false}) {
@@ -49,16 +50,19 @@ List<GoalOutcome> goalOutcomes(AppState state, Goal goal, DateTime at, {bool inc
       task.doneDates.where((day) => day.compareTo(dayKey(at)) <= 0).length,
     );
   }
-  for (final pot in state.finance.pots.where((p) => includeSavings && p.goalId == goal.id && !p.archived)) {
-    final saved = state.finance.potSaved(pot.id);
-    final fmt = state.finance.fmt;
+  for (final ledger in state.finance.ledgers.where((_) => includeSavings)) {
+    for (final pot in ledger.pots.where((p) => p.goalId == goal.id && !p.archived)) {
+    final saved = ledger.potSaved(pot.id);
+    final fmt = ledger.fmt;
     outcomes.add(
       GoalOutcome(
         '${pot.name} · ${fmt(saved)} of ${fmt(pot.target)} saved',
         pot.target <= 0 ? null : (saved / pot.target).clamp(0, 1),
         pot,
+        ledger,
       ),
     );
+    }
   }
   final oneOff = tasks.where((t) => !t.isRepeating);
   if (oneOff.isNotEmpty) {

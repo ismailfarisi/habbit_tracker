@@ -427,9 +427,8 @@ class GoalTools {
         final addedMilestones = _milestones(a['add_milestones']);
         g.milestones.addAll(addedMilestones);
         final note = '${a['add_note'] ?? ''}'.trim();
-        if (note.isNotEmpty) {
-          g.noteEntries.add(GoalNote(note, shared: true, changedOn: dayKey(clock())));
-        }
+        final addedNote = note.isEmpty ? null : GoalNote(note, shared: true, changedOn: dayKey(clock()));
+        if (addedNote != null) g.noteEntries.add(addedNote);
         for (final id in ((a['milestones_done'] as List?) ?? const []).cast<String>()) {
           for (final m in g.milestones.where((m) => m.id == id)) {
             m.done = true;
@@ -458,7 +457,7 @@ class GoalTools {
           if (current.why == applied.why) current.why = before.why;
           if (current.end == applied.end) current.end = before.end;
           if (current.cadence == applied.cadence) current.cadence = before.cadence;
-          if (current.notes == applied.notes) current.notes = before.notes;
+          if (addedNote != null && addedNote.shared && addedNote.text == note) current.noteEntries.remove(addedNote);
           current.taskIds.removeWhere(linkedTasks.contains);
           current.habitIds.removeWhere(linkedHabits.contains);
           for (final m in current.milestones) {

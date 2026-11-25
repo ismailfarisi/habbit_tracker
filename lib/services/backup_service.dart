@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import '../quran/recitation_cache.dart';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/widgets.dart';
@@ -168,6 +169,7 @@ class BackupService {
         await entry.delete(recursive: true);
       }
     }
+    await RecitationCache.cancelDownloads();
     final audio = Directory('${(await _support()).path}/quran-audio');
     if (await audio.exists()) await audio.delete(recursive: true);
     if (Platform.isIOS) await FilePicker.clearTemporaryFiles();

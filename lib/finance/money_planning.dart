@@ -215,7 +215,7 @@ class _FinanceReminders extends StatelessWidget {
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const Text('Choose which dates appear in your daily plan. Notifications use “Personal reminder”.'),
+            const Text('Choose which dates appear in your calendar. With reminders enabled, your phone shows “Personal reminder” at 9:00 AM local time. Amounts and names stay inside the app.'),
             if (plans.isEmpty)
               const ListTile(title: Text('Add a dated debt, savings pot or zakat anniversary to get started.')),
             for (final plan in plans) ...[

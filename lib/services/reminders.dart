@@ -1,4 +1,6 @@
 import '../habits/habit.dart';
+import '../finance/finance.dart';
+import '../finance/finance_agenda.dart';
 import '../hadith/hadith.dart';
 import '../logic/sleep.dart';
 import '../logic/prayer_status.dart';
@@ -7,7 +9,7 @@ import '../logic/tasks.dart';
 import '../models.dart';
 import 'prayer_service.dart';
 
-enum ReminderKind { wake, prayer, habit, task, bedtime }
+enum ReminderKind { wake, prayer, habit, task, bedtime, personal }
 
 class PlannedReminder {
   final int id;
@@ -15,6 +17,8 @@ class PlannedReminder {
   final ReminderKind kind;
   final String title;
   final String body;
+  /// In-app only; never forwarded to the notification plugin.
+  final String? privateDetail;
 
   /// "wake|2026-11-08", "prayer:Fajr|2026-11-08", "habit:ID|2026-11-08",
   /// "task:ID|2026-11-08", "bed|2026-11-08" (the night of that day)
@@ -26,6 +30,7 @@ class PlannedReminder {
     required this.kind,
     required this.title,
     required this.body,
+    this.privateDetail,
     required this.payload,
   });
 }
@@ -70,12 +75,30 @@ List<PlannedReminder> planReminders(
   int days = scheduleDays,
   List<Task> tasks = const [],
   List<HabitDef> habits = const [],
+  Finance? finance,
 }) {
   final out = <PlannedReminder>[];
+  final usedPersonalIds = <int>{};
   for (var d = 0; d < days; d++) {
     final date = DateTime(now.year, now.month, now.day + d);
     final key = dayKey(date);
     final log = logs[key];
+    if (finance != null) {
+      for (final item in financeAgenda(finance, date, hijriOffsetDays: s.hijriOffsetDays)) {
+        var hash = 0;
+        for (final unit in item.id.codeUnits) {
+          hash = (hash * 31 + unit) & 0xfffffff;
+        }
+        var id = 1400000000 + hash;
+        while (!usedPersonalIds.add(id)) { id++; }
+        out.add(PlannedReminder(
+          id: id, when: DateTime(date.year, date.month, date.day, 9),
+          kind: ReminderKind.personal, title: item.privateTitle,
+          body: 'Open the app to review your plan.', payload: 'personal|$id',
+          privateDetail: item.detail,
+        ));
+      }
+    }
 
     if (s.tracks('wake') && log?.wakeAt == null) {
       out.add(PlannedReminder(

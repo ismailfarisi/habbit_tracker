@@ -159,7 +159,7 @@ void main() {
       );
       await tester.tap(find.text('Choose a city'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Dubai, UAE'));
+      await tester.tap(find.text('Dubai'));
       await tester.pumpAndSettle();
       expect(find.text('Dubai · Dubai / Gulf'), findsOneWidget);
       expect(state.storage.loadSettings().latitude, 25.2048);

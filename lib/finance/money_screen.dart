@@ -386,8 +386,9 @@ class _PotsCard extends StatelessWidget {
   }
 }
 
-Future<void> editPot(BuildContext context, AppState state, {SavingsPot? pot}) async {
-  final f = state.finance;
+Future<void> editPot(BuildContext context, AppState state, {SavingsPot? pot, Finance? ledger}) async {
+  final f = ledger ?? state.finance.activeLedger;
+  final generation = state.dataGeneration;
   final name = TextEditingController(text: pot?.name ?? '');
   final target = TextEditingController(text: pot == null ? '' : '${toMajor(pot.target, f.currency)}');
   var by = pot?.by;
@@ -447,7 +448,8 @@ Future<void> editPot(BuildContext context, AppState state, {SavingsPot? pot}) as
       ),
     ),
   );
-  if (res == 'delete' && pot != null) return state.deletePot(pot.id);
+  if (generation != state.dataGeneration) return;
+  if (res == 'delete' && pot != null) return state.deletePot(pot.id, currency: f.currency);
   final amount = parseMoney(target.text, f.currency);
   if (res != 'save' || name.text.trim().isEmpty || amount == null) return;
   await state.upsertPot(
@@ -456,6 +458,7 @@ Future<void> editPot(BuildContext context, AppState state, {SavingsPot? pot}) as
       ..target = amount
       ..by = by
       ..goalId = goalId,
+    currency: f.currency,
   );
 }
 

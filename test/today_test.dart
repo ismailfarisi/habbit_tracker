@@ -110,6 +110,7 @@ void main() {
     });
 
     test('next due first, untimed after timed, done last', () async {
+      state.settings.useManualPrayer = true;
       final water = await add(waterTemplate);
       final quran = await add(quranTemplate, reminder: '07:00');
       final exercise = await add(exerciseTemplate, reminder: '20:00');
@@ -155,6 +156,7 @@ void main() {
 
   group('Today screen', () {
     testWidgets('cards follow the time of day, done ones collapse, no reminders card', (tester) async {
+      state.settings.useManualPrayer = true;
       final quran = await add(quranTemplate, reminder: '07:00');
       await add(waterTemplate);
       await pumpToday(tester, now);
@@ -229,7 +231,7 @@ void main() {
       await tester.tap(find.text('Set up'));
       await tester.pumpAndSettle();
       expect(find.widgetWithText(AppBar, 'Prayer times'), findsOneWidget);
-      await tester.tap(find.text('Choose my city'));
+      await tester.tap(find.text('Choose a city'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Dubai'));
       await tester.pumpAndSettle();

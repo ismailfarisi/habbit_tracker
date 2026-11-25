@@ -39,9 +39,10 @@ class WidgetSlot {
 
   /// The prayer has started and is not done yet, so "Done" is offered.
   final bool due;
+  final String? setup;
   final DayScore score;
 
-  const WidgetSlot({required this.from, required this.prayer, required this.at, required this.due, required this.score});
+  const WidgetSlot({required this.from, required this.prayer, required this.at, required this.due, required this.score, this.setup});
 
   bool get tomorrow => dateOnly(at).isAfter(dateOnly(from));
 
@@ -50,9 +51,9 @@ class WidgetSlot {
 
   Map<String, dynamic> toJson() => {
         'from': from.millisecondsSinceEpoch,
-        'label': due ? 'Pray now' : (tomorrow ? 'Next prayer, tomorrow' : 'Next prayer'),
-        'prayer': prayerLabel(prayer, at),
-        'time': '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}',
+        'label': setup == null ? (due ? 'Pray now' : (tomorrow ? 'Next prayer, tomorrow' : 'Next prayer')) : 'Daily Discipline',
+        'prayer': setup ?? prayerLabel(prayer, at),
+        'time': setup == null ? '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}' : '',
         'score': 'Today $score',
         if (payload != null) 'payload': payload,
       };
@@ -71,6 +72,10 @@ WidgetSlot widgetSlotAt(
 }) {
   final day = dateOnly(at);
   final score = dayScore(day, s, logs, habits: habits, tasks: tasks, goals: goals);
+  if (!s.tracks('prayers') || !prayerTimesConfirmed(s)) {
+    return WidgetSlot(from: at, prayer: '', at: at, due: false, score: score,
+      setup: !s.tracks('prayers') ? 'Prayer tracking is off' : 'Set your prayer times');
+  }
   final done = logs[dayKey(day)]?.prayers ?? const <String>{};
   final times = prayerTimesFor(s, day).times.entries.toList();
   final started = times.where((e) => !e.value.isAfter(at)).toList();
@@ -100,9 +105,9 @@ List<WidgetSlot> widgetSlots(
   final today = dateOnly(now), tomorrow = DateTime(now.year, now.month, now.day + 1);
   final starts = <DateTime>{
     now,
-    ...prayerTimesFor(s, today).times.values,
+    if (s.tracks('prayers') && prayerTimesConfirmed(s)) ...prayerTimesFor(s, today).times.values,
     tomorrow,
-    ...prayerTimesFor(s, tomorrow).times.values,
+    if (s.tracks('prayers') && prayerTimesConfirmed(s)) ...prayerTimesFor(s, tomorrow).times.values,
   }.where((t) => !t.isBefore(now)).toList()
     ..sort();
   return [for (final t in starts) widgetSlotAt(s, logs, t, habits: habits, tasks: tasks, goals: goals)];

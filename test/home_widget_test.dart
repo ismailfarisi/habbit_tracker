@@ -14,7 +14,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final day = DateTime(2026, 11, 16);
   DateTime at(int h, int m, [int plusDays = 0]) => DateTime(day.year, day.month, day.day + plusDays, h, m);
-  final s = Settings(); // manual times: Fajr 05:00, Dhuhr 12:30, Asr 15:45 ...
+  final s = Settings()..useManualPrayer = true;
 
   late List<MethodCall> calls;
   setUp(() {
@@ -38,6 +38,15 @@ void main() {
   }
 
   group('widgetSlotAt', () {
+    test('no time or Done action before a timetable is selected', () {
+      final slots = widgetSlots(Settings(), {}, at(8, 0));
+      expect(slots, hasLength(2));
+      for (final slot in slots) {
+        expect(slot.toJson()['prayer'], 'Set your prayer times');
+        expect(slot.toJson()['time'], '');
+        expect(slot.payload, isNull);
+      }
+    });
     test('before Fajr shows the next prayer without Done', () {
       final slot = widgetSlotAt(s, {}, at(4, 0));
       expect(slot.prayer, 'Fajr');
@@ -134,6 +143,7 @@ void main() {
 
   test('AppState commits publish the widget', () async {
     final state = await loadState();
+    await state.updateSettings((s) => s.useManualPrayer = true);
     calls.clear();
     final now = DateTime.now();
     final shown = widgetSlotAt(state.settings, state.logs, now).prayer;

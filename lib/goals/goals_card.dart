@@ -339,7 +339,7 @@ class GoalScreen extends StatelessWidget {
                         contentPadding: EdgeInsets.zero,
                         title: Text(outcome.label),
                         trailing: const Icon(Icons.chevron_right),
-                        onTap: () => editPot(context, state, pot: pot),
+                        onTap: () => editPot(context, state, pot: pot, ledger: outcome.ledger),
                       )
                     else
                       Text(outcome.label),

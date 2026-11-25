@@ -46,6 +46,16 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(mockPlugins);
 
+  test('an inactive ledger never grants access to its named people', () async {
+    final s = await seeded();
+    s.finance.openLedger('KWD');
+    for (final scope in CoachMoney.values) {
+      final access = CoachAccess(s, money: scope);
+      expect(access.redactPeople('Ask Fictional Lender.'), 'Ask [person].');
+      expect(access.toolResult('{"note":"Fictional Lender"}'), '{"note":"[person]"}');
+    }
+  });
+
   test('the selected goal scopes both the outgoing prompt and provider tool calls', () async {
     final s = await seeded();
     final asks = <Map<String, dynamic>>[];

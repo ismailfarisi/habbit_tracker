@@ -38,8 +38,8 @@ class CoachAccess {
   }
 
   String redactPeople(String text) {
-    if (money == CoachMoney.details) return text;
-    for (final debt in state.finance.debts) {
+    for (final debt in state.finance.ledgers.where((ledger) =>
+        money != CoachMoney.details || ledger.currency != state.finance.currency).expand((ledger) => ledger.debts)) {
       final name = debt.person.trim();
       if (name.isNotEmpty) text = text.replaceAll(RegExp(RegExp.escape(name), caseSensitive: false), '[person]');
     }
@@ -47,11 +47,10 @@ class CoachAccess {
   }
 
   String toolResult(String result) {
-    if (money == CoachMoney.details || state.finance.debts.isEmpty) return result;
     Object? redact(Object? value) => switch (value) {
       String s => redactPeople(s),
       List list => list.map(redact).toList(),
-      Map map => {for (final e in map.entries) e.key: redact(e.value)},
+      Map map => {for (final e in map.entries) redactPeople(e.key as String): redact(e.value)},
       _ => value,
     };
     return jsonEncode(redact(jsonDecode(result)));

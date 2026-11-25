@@ -117,7 +117,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
   }
 
   Future<void> _applyReminderState() async {
-    await notifications.reschedule(settings, logs, tasks, habits: habits);
+    await notifications.reschedule(settings, logs, trackedTasks, habits: trackedHabits, finance: finance);
     await HomeWidgetService.publish(settings, logs, habits: habits, tasks: tasks, goals: goals);
     try {
       await FocusGuard.instance.configure(settings);
@@ -531,6 +531,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
     change(finance);
     notifyListeners();
     await storage.saveFinance(finance);
+    await _reschedule();
   }
 
   Future<MoneyEntry> addMoney(MoneyEntry e) async {
@@ -543,12 +544,14 @@ class AppState extends ChangeNotifier implements TaskBackend {
   Future<void> setBudget(String category, int? limit) =>
       updateFinance((f) => limit == null || limit <= 0 ? f.budgets.remove(category) : f.budgets[category] = limit);
 
-  Future<void> upsertPot(SavingsPot p) => updateFinance((f) {
+  Future<void> upsertPot(SavingsPot p, {String? currency}) => updateFinance((book) {
+    final f = currency == null ? book : book.ledgers.firstWhere((l) => l.currency == currency);
     final i = f.pots.indexWhere((x) => x.id == p.id);
     i < 0 ? f.pots.add(p) : f.pots[i] = p;
   });
 
-  Future<void> deletePot(String id) => updateFinance((f) {
+  Future<void> deletePot(String id, {String? currency}) => updateFinance((book) {
+    final f = currency == null ? book : book.ledgers.firstWhere((l) => l.currency == currency);
     f.pots.removeWhere((p) => p.id == id);
     for (final e in f.entries.where((e) => e.potId == id)) {
       e.potId = null;

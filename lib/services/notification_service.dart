@@ -9,6 +9,7 @@ import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../habits/habit.dart';
+import '../finance/finance.dart';
 import '../hadith/hadith.dart';
 import '../models.dart';
 import 'diagnostics.dart';
@@ -42,6 +43,7 @@ enum ReminderAction {
       ReminderKind.habit => habit,
       ReminderKind.task => task,
       ReminderKind.bedtime => bedtime,
+      ReminderKind.personal => null,
     };
   }
 
@@ -231,6 +233,7 @@ class NotificationService {
       ReminderKind.habit => ('habits', 'Habit reminders'),
       ReminderKind.task => ('tasks', 'Task reminders'),
       ReminderKind.bedtime => ('bedtime', 'Bedtime reminder'),
+      ReminderKind.personal => ('personal', 'Personal reminders'),
     };
     return NotificationDetails(
       android: AndroidNotificationDetails(
@@ -252,13 +255,14 @@ class NotificationService {
     Map<String, DayLog> logs,
     List<Task> tasks, {
     List<HabitDef> habits = const [],
+    Finance? finance,
   }) async {
     if (!_ready) return;
     // A resume and a settings edit can request replacements concurrently.
     // Keep cancellation, insertion and queue verification in the same order.
     _work = (_work ?? Future<void>.value()).then((_) async {
       try {
-        await _replace(s, logs, tasks, habits);
+        await _replace(s, logs, tasks, habits, finance);
         _scheduleReadable = true;
       } catch (e) {
         _scheduleReadable = false;
@@ -270,14 +274,14 @@ class NotificationService {
     await _work;
   }
 
-  Future<void> _replace(Settings s, Map<String, DayLog> logs, List<Task> tasks, List<HabitDef> habits) async {
+  Future<void> _replace(Settings s, Map<String, DayLog> logs, List<Task> tasks, List<HabitDef> habits, Finance? finance) async {
     await _plugin.cancelAllPendingNotifications();
     _accepted.clear();
     _channelIds.clear();
     _lastPlan = const [];
     if (!s.remindersEnabled || !await enabled()) return;
     await _updateTimezone();
-    _lastPlan = planReminders(s, logs, DateTime.now(), tasks: tasks, habits: habits);
+    _lastPlan = planReminders(s, logs, DateTime.now(), tasks: tasks, habits: habits, finance: finance);
     final exact = _android == null || (await _android!.canScheduleExactNotifications() ?? false);
     var scheduled = 0, failed = 0;
     for (final r in _lastPlan.take(maxPending)) {

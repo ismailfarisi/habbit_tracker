@@ -65,7 +65,7 @@ List<TodayItem> todayItems(AppState state, DateTime now) {
     ),
     TodayItem(
       TodayKind.prayers,
-      due: nextPrayer == null ? times[prayerNames.last] : times[nextPrayer],
+      due: !prayerTimesConfirmed(s) ? null : times[nextPrayer ?? prayerNames.last],
       done: nextPrayer == null && optionalPrayersOn(s, now).every((p) => log.habits[p.id]?.done ?? false),
     ),
     for (final g in state.goals.where((g) => !g.archived))
