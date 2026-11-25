@@ -29,6 +29,7 @@ import 'package:json_schema_builder/json_schema_builder.dart';
 
 import '../finance/finance.dart' show spendCategories, incomeCategories;
 import 'habit_components.dart';
+import 'speaking_practice.dart';
 import 'habit_templates.dart';
 
 export 'habit_templates.dart' show habitCatalogId, basicCatalogId, surfaceMessage;
@@ -107,6 +108,20 @@ final CatalogImplementation _habitCatalog = CatalogImplementation(
         'targetMinutes': CommonSchemasV1.dynamicNumber,
       },
       buildPracticeTimer,
+    ),
+    _c(
+      'SpeakingPractice',
+      'A guided warm-up, reading and recording session with a timer and saved progress.',
+      {
+        'warmupTitle': CommonSchemasV1.dynamicString,
+        'steps': _strings('Warm-up instructions.'),
+        'title': CommonSchemasV1.dynamicString,
+        'text': CommonSchemasV1.dynamicString,
+        'targetWords': _strings('Words to practise in the reading passage.'),
+        'listen': Schema.boolean(),
+      },
+      buildSpeakingPractice,
+      required: ['text'],
     ),
     _c(
       'ReadAloudDrill',

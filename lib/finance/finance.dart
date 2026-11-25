@@ -87,6 +87,7 @@ class MoneyEntry {
   String note;
   String? potId;
   String? debtId;
+  final String? habitId;
 
   MoneyEntry({
     String? id,
@@ -97,6 +98,7 @@ class MoneyEntry {
     this.note = '',
     this.potId,
     this.debtId,
+    this.habitId,
   }) : id = id ?? 'm${_id()}';
 
   Map<String, dynamic> toJson() => {
@@ -108,6 +110,7 @@ class MoneyEntry {
     if (note.isNotEmpty) 'note': note,
     if (potId != null) 'potId': potId,
     if (debtId != null) 'debtId': debtId,
+    if (habitId != null) 'habitId': habitId,
   };
 
   factory MoneyEntry.fromJson(Map<String, dynamic> j) => MoneyEntry(
@@ -119,6 +122,7 @@ class MoneyEntry {
     note: j['note'] as String? ?? '',
     potId: j['potId'] as String?,
     debtId: j['debtId'] as String?,
+    habitId: j['habitId'] as String?,
   );
 }
 

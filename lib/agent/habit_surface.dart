@@ -28,6 +28,7 @@ import '../habits/habit.dart';
 import '../logic/stats.dart';
 import 'habit_catalog.dart';
 import 'habit_components.dart';
+import 'habit_screen_layout.dart';
 import '../services/coach_prompts.dart';
 import '../widgets/ask_chat.dart';
 
@@ -57,10 +58,9 @@ class HabitSurfaceState extends State<HabitSurface> {
   String _surfaceJson = '';
   bool _syncing = false;
 
-  /// True when the stored surface could not be used and [HabitFallback] is
-  /// shown.
   Map<String, dynamic>? get _selectedSurface => widget.habit.usePlainTracker ? null : widget.habit.uiSurface;
 
+  /// True when the plain tracker is selected or the stored surface could not be used.
   bool get usingFallback => _surface == null;
 
   /// The entry currently shown.
@@ -113,7 +113,7 @@ class HabitSurfaceState extends State<HabitSurface> {
       defaultVersion: A2uiProtocolVersion.v1_0,
     );
     try {
-      final message = normalizeHabitSurface(stored);
+      final message = editableHabitSurface(widget.habit);
       final id = 'habit-${widget.habit.id}-${_nextId++}';
       (message['createSurface'] as Map)
         ..['surfaceId'] = id
@@ -154,7 +154,7 @@ class HabitSurfaceState extends State<HabitSurface> {
   void _onState() {
     if (!mounted) return;
     _pushToSurface();
-    if (_surface == null) setState(() {});
+    setState(() {});
   }
 
   /// Copies the stored entry (and habit facts) into the data model when it
@@ -222,8 +222,18 @@ class HabitSurfaceState extends State<HabitSurface> {
   @override
   Widget build(BuildContext context) {
     final surface = _surface;
+    final state = widget.state, day = widget.day, id = widget.habit.id;
+    final persist = widget.persist;
     return HabitScope(
-      habit: widget.habit,
+      readEntry: persist ? () => state.habitEntry(day, id) : () => _preview,
+      savePractice: (e, {required bool finished}) {
+        if (!persist) {
+          if (mounted) setState(() => _preview = e);
+        } else if (state.habitById(id) != null) {
+          unawaited(state.logHabit(day, id, e, reschedule: finished));
+        }
+      },
+      preview: !persist,      habit: widget.habit,
       day: widget.day,
       speechLocale: widget.state.settings.speechLocale,
       finance: widget.state.finance,

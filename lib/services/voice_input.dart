@@ -64,6 +64,7 @@ class FallbackDictation implements Dictation {
   final Dictation primary;
   final Dictation Function() fallback;
   Dictation? _active;
+  bool _disposed = false;
   FallbackDictation(this.primary, this.fallback);
 
   @override
@@ -81,6 +82,7 @@ class FallbackDictation implements Dictation {
       await primary.start(onText: onText, onDone: onDone, onError: onError, locale: locale);
     } on DictationUnavailable catch (e) {
       debugPrint('Whisper unavailable, using system dictation: ${e.message}');
+      if (_disposed) return;
       primary.dispose();
       final f = _active = fallback();
       await f.start(onText: onText, onDone: onDone, onError: onError, locale: locale);
@@ -91,7 +93,10 @@ class FallbackDictation implements Dictation {
   Future<void> stop() async => _active?.stop();
 
   @override
-  void dispose() => _active?.dispose();
+  void dispose() {
+    _disposed = true;
+    _active?.dispose();
+  }
 }
 
 /// Thrown by [Dictation.start] when the engine can't run at all, so a
@@ -117,6 +122,9 @@ class WhisperDictation implements Dictation {
   void Function(String)? _onText;
   bool _finished = false;
   String _last = '';
+  Future<void>? _starting;
+  bool _streamOpen = false;
+  bool _disposed = false;
 
   WhisperDictation(this.modelPath);
 
@@ -129,7 +137,10 @@ class WhisperDictation implements Dictation {
     required void Function() onDone,
     required void Function(String message) onError,
     String locale = '',
-  }) async {
+  }) => _starting = _start(onText, onDone, onError, locale);
+
+  Future<void> _start(void Function(String) onText, void Function() onDone,
+      void Function(String) onError, String locale) async {
     _onDone = onDone;
     _onText = onText;
     if (!await _recorder.hasPermission()) {
@@ -137,11 +148,17 @@ class WhisperDictation implements Dictation {
       _finish();
       return;
     }
+    if (_finished) return;
     final Stream<Uint8List> pcm;
     try {
       pcm = await _recorder.startStream(
         const RecordConfig(encoder: AudioEncoder.pcm16bits, sampleRate: 16000, numChannels: 1),
       );
+      _streamOpen = true;
+      if (_finished) {
+        await _stopStream();
+        return;
+      }
       _session = await WhisperController().transcribeLive(
         modelPath: modelPath,
         pcm16Stream: pcm,
@@ -150,9 +167,10 @@ class WhisperDictation implements Dictation {
         keepModelLoaded: true,
       );
     } catch (e) {
-      await _recorder.stop().catchError((_) => null);
+      await _stopStream().catchError((_) {});
       throw DictationUnavailable('$e');
     }
+    if (_finished) return;
     _partials = _session!.partials.listen(
       (t) => onText(_last = _clean(t)),
       onError: (Object e) => onError('Whisper: $e'),
@@ -164,7 +182,7 @@ class WhisperDictation implements Dictation {
   Future<void> stop() async {
     if (_finished || _session == null) return;
     _limit?.cancel();
-    await _recorder.stop();
+    await _stopStream();
     // The live text is already on screen; take whisper's final pass only if
     // it arrives quickly, so stopping feels instant.
     final text = await _session!.stop().timeout(finalPassWait, onTimeout: () => _last);
@@ -183,8 +201,16 @@ class WhisperDictation implements Dictation {
   static String _clean(String t) =>
       t.replaceAll(RegExp(r'\[[^\]]*\]|\([^)]*\)'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
 
+  Future<void> _stopStream() async {
+    if (!_streamOpen) return;
+    _streamOpen = false;
+    await _recorder.stop();
+  }
+
   @override
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
     _limit?.cancel();
     _partials?.cancel();
     final running = !_finished;
@@ -193,14 +219,18 @@ class WhisperDictation implements Dictation {
   }
 
   Future<void> _shutdown(bool running) async {
-    if (_rec == null) return;
-    if (running) {
-      try {
-        await _recorder.stop();
-      } catch (_) {}
-      await _session?.stop();
+    await _stopStream().catchError((_) {});
+    try {
+      await _starting;
+    } catch (_) {
+      // start may have failed after disposal was requested.
     }
-    await _recorder.dispose();
+    if (_rec == null) return;
+    try {
+      if (running) await _session?.stop();
+    } finally {
+      await _recorder.dispose();
+    }
   }
 }
 
@@ -247,6 +277,7 @@ class SystemDictation implements Dictation {
       _finish();
       return;
     }
+    if (_finished || _active != this) return;
     await _stt.listen(
       onResult: (r) => onText(r.recognizedWords),
       listenOptions: SpeechListenOptions(

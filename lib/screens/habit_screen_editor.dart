@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../agent/habit_catalog.dart';
+import '../agent/habit_screen_layout.dart';
 import '../agent/habit_surface.dart';
 import '../app_state.dart';
 import '../habits/habit.dart';
@@ -34,7 +35,7 @@ class _HabitScreenEditorState extends State<HabitScreenEditor> {
 
   void _readSurface() {
     try {
-      _normalized = normalizeHabitSurface(_draft.uiSurface);
+      _normalized = editableHabitSurface(_draft);
     } on HabitSurfaceError {
       _normalized = null;
     }
@@ -50,16 +51,23 @@ class _HabitScreenEditorState extends State<HabitScreenEditor> {
 
   void _preview() {
     if (!_form.currentState!.validate()) return;
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => Scaffold(
-        appBar: AppBar(title: const Text('Screen preview')),
-        body: SafeArea(child: ListView(padding: const EdgeInsets.all(16), children: [
-          const Text('Try this screen. Preview entries stay here.'),
-          const SizedBox(height: 12),
-          HabitSurface(widget.state, _draft, widget.day, persist: false),
-        ])),
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => Scaffold(
+          appBar: AppBar(title: const Text('Screen preview')),
+          body: SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                const Text('Try this screen. Preview entries stay here.'),
+                const SizedBox(height: 12),
+                HabitSurface(widget.state, _draft, widget.day, persist: false),
+              ],
+            ),
+          ),
+        ),
       ),
-    ));
+    );
   }
 
   Future<void> _save() async {
@@ -75,8 +83,7 @@ class _HabitScreenEditorState extends State<HabitScreenEditor> {
     }
   }
 
-  static List<String> _lines(String text) =>
-      text.split('\n').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+  static List<String> _lines(String text) => text.split('\n').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
 
   Widget _field(Map<String, dynamic> node, String key, String label, {bool lines = false}) {
     final raw = node[key];

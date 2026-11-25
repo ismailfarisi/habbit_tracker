@@ -24,6 +24,9 @@ class HabitScope extends InheritedWidget {
   final HabitDef habit;
   final DateTime day;
   final String speechLocale;
+  final HabitEntry Function() readEntry;
+  final void Function(HabitEntry entry, {required bool finished}) savePractice;
+  final bool preview;
 
   /// Values of [metric] (a metrics key, `minutes` or `value`) for the last
   /// [days] days ending at [day], oldest first; null where nothing was logged.
@@ -40,6 +43,9 @@ class HabitScope extends InheritedWidget {
     required this.habit,
     required this.day,
     required this.history,
+    required this.readEntry,
+    required this.savePractice,
+    required this.preview,
     this.speechLocale = '',
     this.finance,
     this.addMoney,
@@ -286,6 +292,7 @@ Widget buildReadAloudDrill(
     targetWords: [for (final w in props.list('targetWords')) if (w != null) '$w'],
     listen: props.value('listen') != false,
     speechLocale: HabitScope.maybeOf(context)?.speechLocale ?? '',
+    allowAudio: !(HabitScope.maybeOf(context)?.preview ?? false),
     onResult: (metrics, duration, transcript) {
       final data = <String, num>{
         'wpm': ?metrics.wordsPerMinute?.round(),
@@ -321,6 +328,11 @@ class ReadAloudDrillView extends StatefulWidget {
   final List<String> targetWords;
   final bool listen;
   final String speechLocale;
+  final bool readingOnly;
+  final bool allowAudio;
+  final String initialTranscript;
+  final Duration initialSampleDuration;
+  final void Function(String transcript, Duration duration)? onTranscript;
   final void Function(SpeechMetrics metrics, Duration duration, String transcript) onResult;
   final void Function(SpeechMetrics metrics, String transcript, String text)? onAskCoach;
 
@@ -332,16 +344,25 @@ class ReadAloudDrillView extends StatefulWidget {
     this.listen = true,
     this.speechLocale = '',
     required this.onResult,
+    this.readingOnly = false,
+    this.allowAudio = true,
+    this.initialTranscript = '',
+    this.initialSampleDuration = Duration.zero,
+    this.onTranscript,
     this.onAskCoach,
   });
 
   @override
-  State<ReadAloudDrillView> createState() => _ReadAloudDrillViewState();
+  State<ReadAloudDrillView> createState() => ReadAloudDrillState();
 }
 
-class _ReadAloudDrillViewState extends State<ReadAloudDrillView> {
-  late final SpeechEngine _engine = speechEngineFactory();
-  final _transcript = TextEditingController();
+class ReadAloudDrillState extends State<ReadAloudDrillView> {
+  SpeechEngine? _activeEngine;
+  SpeechEngine get _engine => _activeEngine ??= speechEngineFactory();
+  late final _transcript = TextEditingController(text: widget.initialTranscript);
+  late Duration _sampleDuration = widget.initialSampleDuration;
+  bool _preparing = false;
+  int _attempt = 0;
   final _watch = Stopwatch();
   bool _ready = false;
   bool _recording = false;
@@ -350,34 +371,59 @@ class _ReadAloudDrillViewState extends State<ReadAloudDrillView> {
   SpeechMetrics? _metrics;
   double? _hitRate;
 
+  /// Stop audio immediately when the route is covered or the app is hidden,
+  /// including while the OS permission prompt is still resolving.
+  void interrupt() {
+    _attempt++;
+    _ready = _preparing = _recording = _speaking = false;
+    _watch.stop();
+    _activeEngine?.dispose();
+    _activeEngine = null;
+  }
+
+  Future<void> stopRecording() async {
+    if (!_recording) return;
+    try {
+      await _engine.stop();
+    } catch (_) {
+      _activeEngine?.dispose();
+      _activeEngine = null;
+      _ready = false;
+    }
+    _stopped();
+  }
+
   @override
   void dispose() {
-    _engine.dispose();
+    interrupt();
     _transcript.dispose();
     super.dispose();
   }
 
   Future<void> _toggle() async {
     if (_recording) {
-      await _engine.stop();
-      _stopped();
+      await stopRecording();
       return;
     }
+    if (_preparing || !widget.allowAudio) return;
     if (!_ready) {
-      _ready = await _engine.init(
+      final attempt = _attempt;
+      setState(() => _preparing = true);
+      final ready = await _engine.init(
         onStopped: () {
-          if (_recording) _stopped();
+          if (_recording && attempt == _attempt) _stopped();
         },
         onError: (m) {
-          if (!mounted) return;
+          if (!mounted || attempt != _attempt) return;
           setState(() => _status = 'Mic error: $m');
-          if (_recording) _stopped();
+          if (_recording && attempt == _attempt) _stopped();
         },
       );
+      if (!mounted || attempt != _attempt) return;
+      _ready = ready;
+      setState(() => _preparing = false);
       if (!_ready) {
-        if (mounted) {
-          setState(() => _status = 'Speech recognition is unavailable. Type what you said, then tap Save result.');
-        }
+        setState(() => _status = 'Speech recognition is unavailable. Type what you said, then tap Save result.');
         return;
       }
     }
@@ -390,17 +436,30 @@ class _ReadAloudDrillViewState extends State<ReadAloudDrillView> {
       _metrics = null;
       _transcript.clear();
     });
-    await _engine.listen(
-      onWords: (w) {
-        if (mounted) setState(() => _transcript.text = w);
-      },
-      localeId: widget.speechLocale,
-    );
+    try {
+      await _engine.listen(
+        onWords: (w) {
+          if (!mounted || !_recording) return;
+          setState(() => _transcript.text = w);
+          widget.onTranscript?.call(w, _watch.elapsed);
+        },
+        localeId: widget.speechLocale,
+      );
+    } catch (_) {
+      if (!mounted || !_recording) return;
+      _watch.stop();
+      setState(() {
+        _recording = false;
+        _status = 'Microphone unavailable. Type your transcript to continue.';
+      });
+    }
   }
 
   void _stopped() {
     if (!mounted || !_recording) return;
     _watch.stop();
+    _sampleDuration = _watch.elapsed;
+    widget.onTranscript?.call(_transcript.text, _sampleDuration);
     setState(() {
       _recording = false;
       _status = 'Recorded ${_watch.elapsed.inSeconds} s.';
@@ -413,14 +472,14 @@ class _ReadAloudDrillViewState extends State<ReadAloudDrillView> {
   void _score() {
     final said = _transcript.text.trim();
     if (said.isEmpty) return;
-    final m = analyzeSpeech(said, _watch.elapsed, target: widget.text);
+    final m = analyzeSpeech(said, _sampleDuration, target: widget.text);
     final heard = tokenize(said).toSet();
     final targets = widget.targetWords.expand(tokenize).toSet();
     setState(() {
       _metrics = m;
       _hitRate = targets.isEmpty ? null : targets.where(heard.contains).length / targets.length;
     });
-    widget.onResult(m, _watch.elapsed, said);
+    widget.onResult(m, _sampleDuration, said);
   }
 
   Future<void> _speak() async {
@@ -470,13 +529,13 @@ class _ReadAloudDrillViewState extends State<ReadAloudDrillView> {
         ],
         const SizedBox(height: 8),
         Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          FilledButton.icon(
+          if (!widget.readingOnly && widget.allowAudio) FilledButton.icon(
             style: _recording ? compactButton.merge(FilledButton.styleFrom(backgroundColor: t.colorScheme.error)) : compactButton,
-            onPressed: _toggle,
+            onPressed: _preparing ? null : _toggle,
             icon: Icon(_recording ? Icons.stop : Icons.mic),
             label: Text(_recording ? 'Stop' : 'Record'),
           ),
-          if (widget.listen)
+          if (widget.listen && widget.allowAudio)
             OutlinedButton.icon(
               style: compactButton,
               onPressed: widget.text.trim().isEmpty ? null : _speak,
@@ -487,8 +546,13 @@ class _ReadAloudDrillViewState extends State<ReadAloudDrillView> {
         if (_status.isNotEmpty)
           Padding(padding: const EdgeInsets.only(top: 4), child: Text(_status, style: t.textTheme.bodySmall)),
         const SizedBox(height: 8),
-        TextField(
+        if (!widget.readingOnly) TextField(
           controller: _transcript,
+          onChanged: (v) {
+            _sampleDuration = Duration.zero;
+            widget.onTranscript?.call(v, _sampleDuration);
+            if (_metrics != null) setState(() => _metrics = null);
+          },
           minLines: 1,
           maxLines: 6,
           decoration: InputDecoration(
@@ -502,7 +566,7 @@ class _ReadAloudDrillViewState extends State<ReadAloudDrillView> {
             ),
           ),
         ),
-        if (m != null) ...[
+        if (m != null && !widget.readingOnly) ...[
           const SizedBox(height: 8),
           Wrap(spacing: 8, runSpacing: 8, children: [
             _MetricTile(label: 'words', value: '${m.wordCount}'),
@@ -756,9 +820,8 @@ Widget buildMoneyLog(
   label: props.string('label') ?? '',
   category: props.string('category') ?? 'Other',
   income: props.value('income') == true,
-  value: props.number('value') ?? 0,
-  onLogged: (major) {
-    _write(context, props.writable('value'), _tidy((props.number('value') ?? 0) + major));
+  onLogged: (total) {
+    _write(context, props.writable('value'), _tidy(total));
     _write(context, props.writable('done'), true);
     unawaited(props.action('onChanged')?.call());
   },
@@ -769,14 +832,12 @@ Widget buildMoneyLog(
 class MoneyLogView extends StatefulWidget {
   final String label, category;
   final bool income;
-  final num value;
-  final void Function(num major) onLogged;
+  final void Function(num total) onLogged;
   const MoneyLogView({
     super.key,
     required this.label,
     required this.category,
     required this.income,
-    required this.value,
     required this.onLogged,
   });
 
@@ -793,22 +854,42 @@ class _MoneyLogViewState extends State<MoneyLogView> {
     super.dispose();
   }
 
+  bool _saving = false;
+
+  String get _category {
+    final cats = widget.income ? incomeCategories : spendCategories;
+    return cats.contains(widget.category) ? widget.category : cats.last;
+  }
+
+  int _ledgerTotal(HabitScope scope, Finance f) => f.entries
+      .where((e) => DateUtils.isSameDay(scope.day, e.at) && e.income == widget.income &&
+          e.category == _category && (e.habitId == null ? e.note == scope.habit.title : e.habitId == scope.habit.id))
+      .fold(0, (sum, e) => sum + e.amount);
+
   Future<void> _add(HabitScope scope, Finance f) async {
+    if (_saving) return;
     final minor = parseMoney(_ctl.text, f.currency);
     if (minor == null || minor <= 0) return;
     final day = scope.day, now = DateTime.now();
-    final cats = widget.income ? incomeCategories : spendCategories;
-    await scope.addMoney!(
-      MoneyEntry(
-        at: DateTime(day.year, day.month, day.day, now.hour, now.minute),
-        amount: minor,
-        income: widget.income,
-        category: cats.contains(widget.category) ? widget.category : cats.last,
-        note: scope.habit.title,
-      ),
-    );
-    _ctl.clear();
-    widget.onLogged(toMajor(minor, f.currency));
+    setState(() => _saving = true);
+    final total = _ledgerTotal(scope, f) + minor;
+    try {
+      final saved = scope.addMoney!(
+        MoneyEntry(
+          at: DateTime(day.year, day.month, day.day, now.hour, now.minute),
+          amount: minor,
+          income: widget.income,
+          category: _category,
+          note: scope.habit.title,
+          habitId: scope.habit.id,
+        ),
+      );
+      widget.onLogged(toMajor(total, f.currency));
+      await saved;
+      if (mounted) _ctl.clear();
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -816,7 +897,8 @@ class _MoneyLogViewState extends State<MoneyLogView> {
     final scope = HabitScope.maybeOf(context);
     final f = scope?.finance;
     final t = Theme.of(context);
-    final canSave = f != null && scope?.addMoney != null;
+    final canSave = !_saving && f != null && scope?.addMoney != null;
+    final total = scope == null || f == null ? 0 : _ledgerTotal(scope, f);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(
@@ -834,9 +916,9 @@ class _MoneyLogViewState extends State<MoneyLogView> {
                   decoration: InputDecoration(
                     hintText: '0',
                     suffixText: f?.currency ?? '',
-                    helperText: widget.value > 0 && f != null
-                        ? '${f.fmt(toMinor(widget.value, f.currency))} today · ${widget.category}'
-                        : widget.category,
+                    helperText: total > 0 && f != null
+                        ? '${f.fmt(total)} today · $_category'
+                        : _category,
                   ),
                   onSubmitted: canSave ? (_) => _add(scope!, f) : null,
                 ),
