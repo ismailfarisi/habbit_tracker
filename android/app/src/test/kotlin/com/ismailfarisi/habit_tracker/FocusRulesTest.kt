@@ -37,6 +37,12 @@ class FocusRulesTest {
     }
 
     @Test
+    fun switchingToStrictImmediatelyEndsAnExistingExtension() {
+        assertEquals(PauseReason.LIMIT, FocusRules.reason(cfg.copy(strict = true), yt, 12 * 60, 30 * 60_000L, true))
+        assertEquals(PauseReason.SLEEP, FocusRules.reason(cfg.copy(strict = true), yt, 0, 0, true))
+    }
+
+    @Test
     fun extraMinutesOtherAppsAndOffAreNeverPaused() {
         assertNull(FocusRules.reason(cfg, yt, 23 * 60, 90 * 60_000L, true))
         assertNull(FocusRules.reason(cfg, "com.other", 23 * 60, 90 * 60_000L, false))

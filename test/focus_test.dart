@@ -12,7 +12,8 @@ import 'package:intl/intl.dart';
 import 'support.dart';
 
 class FakeFocusGuard implements FocusGuard {
-  bool enabled = false;
+  bool enabled = false, running = false;
+  String? testedPackage;
   int settingsOpened = 0, appInfoOpened = 0;
   Map<String, dynamic>? config;
   Map<String, AppUsage> today = {};
@@ -21,7 +22,14 @@ class FakeFocusGuard implements FocusGuard {
   bool get supported => true;
 
   @override
-  Future<bool> isEnabled() async => enabled;
+  Future<FocusReadiness> readiness() async => FocusReadiness(enabled, running,
+      Set<String>.from((config?['apps'] as Map? ?? {}).keys));
+
+  @override
+  Future<bool> testPause(String package) async {
+    testedPackage = package;
+    return true;
+  }
 
   @override
   Future<void> openAccessibilitySettings() async => settingsOpened++;
@@ -88,7 +96,7 @@ void main() {
     guard.today = {'com.instagram.android': const AppUsage(Duration(minutes: 12), 4)};
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: SettingsScreen(state: state))));
     await tester.pumpAndSettle();
-    expect(find.text('Pause apps after a daily limit and at sleep time'), findsOneWidget);
+    expect(find.text('Choose apps and set their limits'), findsOneWidget);
     await tester.tap(find.text('Focus & screen time'));
     await tester.pumpAndSettle();
 
@@ -152,9 +160,42 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Screen time today'), findsOneWidget);
     expect(find.text('31 min / 30 min'), findsOneWidget);
-    expect(find.text('Opened 6 times · limit reached, paused for today'), findsOneWidget);
+    expect(find.text('Opened 6 times · daily limit reached'), findsOneWidget);
     expect(find.text('3 min'), findsOneWidget);
     expect(find.text('Opened 1 time'), findsOneWidget);
+  });
+
+  testWidgets('Focus status follows a stopped service and an external revocation', (tester) async {
+    tester.view.physicalSize = const Size(420, 2600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await state.updateSettings((s) {
+      s.focusEnabled = true;
+      s.focusApps = [const FocusApp('com.instagram.android', 'Instagram')];
+    });
+    guard.enabled = true;
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: SettingsScreen(state: state))));
+    await tester.pumpAndSettle();
+    expect(find.text('1 app selected · service stopped'), findsOneWidget);
+    guard.running = true;
+    await tester.tap(find.text('Focus & screen time'));
+    await tester.pumpAndSettle();
+    expect(find.text('1 app selected · protection active'), findsOneWidget);
+    await tester.tap(find.text('Test pause'));
+    expect(guard.testedPackage, 'com.instagram.android');
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    guard.enabled = false;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(find.text('1 app selected · permission needed'), findsOneWidget);
+    expect(find.text('Test pause'), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('1 app selected · permission needed'), findsOneWidget);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ProgressScreen(state: state))));
+    await tester.pumpAndSettle();
+    expect(find.text('1 app selected · permission needed'), findsOneWidget);
   });
 
   test('fmtUsage', () {

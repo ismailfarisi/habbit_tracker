@@ -1,3 +1,4 @@
+import 'package:app_settings/app_settings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
@@ -11,6 +12,10 @@ import '../services/backup_service.dart';
 import '../services/diagnostics.dart';
 import '../services/openrouter.dart';
 import '../services/openrouter_models.dart';
+import '../services/focus_guard.dart';
+import '../services/prayer_service.dart';
+import '../widgets/wake_permission_tile.dart';
+import 'onboarding_screen.dart' show City, cities;
 import 'reminders_screen.dart';
 import 'wake_challenge_screen.dart';
 import '../services/storage.dart';
@@ -116,7 +121,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveLocation() async {
     final lat = double.tryParse(_lat.text.trim());
     final lng = double.tryParse(_lng.text.trim());
-    if (lat == null || lng == null || lat.abs() > 90 || lng.abs() > 180) {
+    if (lat == null || lng == null || !lat.isFinite || !lng.isFinite || lat.abs() > 90 || lng.abs() > 180) {
       _snack('Enter a valid latitude (-90 to 90) and longitude (-180 to 180).');
       return;
     }
@@ -124,6 +129,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       x.latitude = lat;
       x.longitude = lng;
       x.locationName = _locName.text.trim();
+      x.useManualPrayer = false;
     });
     _snack('Location saved. Prayer times updated.');
   }
@@ -413,16 +419,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _entry(
         SettingsSection.reminders,
         s.remindersEnabled
-            ? 'On · prayers ${s.prayerOffsetMin == 0 ? 'at prayer time' : '${s.prayerOffsetMin} min before'}'
+            ? (prayerTimesConfirmed(s) ? 'On · prayers ${s.prayerOffsetMin == 0 ? 'at prayer time' : '${s.prayerOffsetMin} min before'}' : 'On · prayer times need setup')
             : 'Off',
       ),
       if (Theme.of(context).platform == TargetPlatform.android)
-        _entry(
-          SettingsSection.focus,
-          s.focusEnabled && s.focusApps.isNotEmpty
-              ? 'Pausing ${s.focusApps.length} ${s.focusApps.length == 1 ? 'app' : 'apps'}${s.focusSleep ? ' · also at sleep time' : ''}'
-              : 'Pause apps after a daily limit and at sleep time',
-        ),
+        FocusDeviceStatus(builder: (device) => _entry(SettingsSection.focus, focusStatus(s, device)))
+      else
+        _entry(SettingsSection.focus, 'Set app limits and sleep hours with Screen Time'),
       _entry(SettingsSection.money, 'Currency ${state.finance.currency} · budgets, savings and zakat'),
       _header('App'),
       _entry(SettingsSection.general, 'Theme: ${s.themeMode[0].toUpperCase()}${s.themeMode.substring(1)} · ${s.freezesPerMonth} streak freezes a month'),
@@ -501,13 +504,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (v != null) await state.updateSettings((x) => x.wakeGraceMin = v);
         },
       ),
-      SwitchListTile.adaptive(
-        secondary: const Icon(Icons.volume_up_outlined),
-        title: const Text('Loud alarm'),
-        subtitle: const Text('Full-screen alarm that keeps ringing until you tap "I\'m up"'),
-        value: s.wakeAlarmLoud,
-        onChanged: (v) => state.updateSettings((x) => x.wakeAlarmLoud = v),
-      ),
+      if (Theme.of(context).platform == TargetPlatform.android) ...[
+        SwitchListTile.adaptive(
+          secondary: const Icon(Icons.volume_up_outlined),
+          title: const Text('Loud alarm'),
+          subtitle: const Text('Ring until dismissed. Full-screen access lets the alarm appear on the lock screen.'),
+          value: s.wakeAlarmLoud,
+          onChanged: (v) => state.updateSettings((x) => x.wakeAlarmLoud = v),
+        ),
+        if (s.wakeAlarmLoud) WakePermissionTile(notifications: state.notifications),
+      ] else
+        const ListTile(
+          leading: Icon(Icons.notifications_outlined),
+          title: Text('Wake notification'),
+          subtitle: Text('iPhone delivers a time-sensitive notification. Use Clock for a ringing alarm.'),
+        ),
       ..._wakeChallengeAndSleep(),
     ],
     SettingsSection.prayers => [
@@ -516,6 +527,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            ListTile(
+              leading: const Icon(Icons.location_city_outlined),
+              title: const Text('Choose a city'),
+              subtitle: Text(prayerTimeSource(s)),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () async {
+                final city = await showDialog<City>(context: context, builder: (c) => SimpleDialog(
+                  title: const Text('Choose a city'),
+                  children: [for (final city in cities) SimpleDialogOption(
+                    onPressed: () => Navigator.pop(c, city), child: Text('${city.name}, ${city.country}'),
+                  )],
+                ));
+                if (city == null || !mounted) return;
+                _locName.text = city.name;
+                _lat.text = city.lat.toString();
+                _lng.text = city.lng.toString();
+                await state.updateSettings((x) {
+                  x.latitude = city.lat;
+                  x.longitude = city.lng;
+                  x.locationName = city.name;
+                  x.calcMethod = city.calcMethod;
+                  x.useManualPrayer = false;
+                });
+              },
+            ),
             FilledButton.tonalIcon(
               onPressed: _locating ? null : _useMyLocation,
               icon: _locating
@@ -615,12 +651,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: const Text('Reminders'),
         subtitle: const Text('Wake-up alarm, each prayer, habits and tasks'),
         value: s.remindersEnabled,
-        onChanged: (v) => state.updateSettings((x) => x.remindersEnabled = v),
+        onChanged: (v) async {
+          if (v) await state.notifications.requestPermissions();
+          await state.updateSettings((x) => x.remindersEnabled = v);
+        },
       ),
       ListTile(
         leading: const Icon(Icons.schedule),
         title: const Text('Upcoming reminders'),
-        subtitle: const Text('Everything planned for the next days'),
+        subtitle: const Text('Scheduled alerts, delivery permissions and queue coverage'),
         trailing: const Icon(Icons.chevron_right),
         onTap: () =>
             Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => RemindersScreen(state: state))),
@@ -628,8 +667,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ListTile(
         leading: const Icon(Icons.more_time),
         title: const Text('Prayer reminder'),
-        subtitle: Text(s.prayerOffsetMin == 0 ? 'At prayer time' : '${s.prayerOffsetMin} min before prayer time'),
+        subtitle: Text(prayerTimesConfirmed(s) ? '${prayerTimeSource(s)} · '
+            '${s.prayerOffsetMin == 0 ? 'At prayer time' : '${s.prayerOffsetMin} min before prayer time'}'
+            : 'Set a city or manual timetable to receive prayer alerts'),
         onTap: () async {
+          if (!prayerTimesConfirmed(s)) {
+            _open(SettingsSection.prayers);
+            return;
+          }
           final v = await _pickNumber('Remind me before prayer', s.prayerOffsetMin, 0, 30);
           if (v != null) await state.updateSettings((x) => x.prayerOffsetMin = v);
         },
@@ -651,11 +696,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: () async {
                 final ok = await state.notifications.requestPermissions();
                 await state.rescheduleNow();
-                _snack(
-                  ok ? 'Notifications allowed.' : 'Notifications are blocked. Enable them in system settings.',
-                );
+                if (!mounted) return;
+                if (ok) {
+                  _snack('Notifications allowed.');
+                } else {
+                  await AppSettings.openAppSettings(type: AppSettingsType.notification);
+                }
               },
-              child: const Text('Grant permissions'),
+              child: const Text('Allow notifications'),
             ),
             OutlinedButton(
               style: compactButton,

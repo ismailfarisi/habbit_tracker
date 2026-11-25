@@ -83,12 +83,14 @@ List<PlannedReminder> planReminders(
         when: DateTime(date.year, date.month, date.day, s.wakeTime.hour, s.wakeTime.minute),
         kind: ReminderKind.wake,
         title: '☀️ Time to wake up',
-        body: 'Rise and shine! Tap "I\'m up" to log it.',
+        body: s.wakeChallenge == WakeChallenge.off
+            ? 'Tap "I\'m up" to log your wake-up.'
+            : 'Open your wake challenge to check in.',
         payload: 'wake|$key',
       ));
     }
 
-    if (s.tracks('prayers')) {
+    if (s.tracks('prayers') && prayerTimesConfirmed(s)) {
       final times = prayerTimesFor(s, date).times;
       final hadith = s.prayerHadith ? weeklyPrayerHadith(date) : const <String, Hadith>{};
       for (var i = 0; i < prayerNames.length; i++) {

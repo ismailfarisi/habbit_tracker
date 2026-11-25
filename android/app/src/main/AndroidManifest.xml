@@ -102,6 +102,15 @@
             android:value="2" />
     </application>
     <queries>
+        <!-- Resolve core phone and recovery functions even with package visibility filtering. -->
+        <intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.HOME"/></intent>
+        <intent><action android:name="android.intent.action.DIAL"/></intent>
+        <intent><action android:name="android.intent.action.DIAL_EMERGENCY"/></intent>
+        <intent><action android:name="android.content.pm.action.REQUEST_PERMISSIONS"/></intent>
+        <intent><action android:name="android.settings.SETTINGS"/></intent>
+        <intent><action android:name="android.settings.ACCESSIBILITY_SETTINGS"/></intent>
+        <intent><action android:name="android.telephony.action.EMERGENCY_ASSISTANCE"/></intent>
+        <intent><action android:name="android.telecom.InCallService"/></intent>
         <!-- Focus: list launchable apps to choose from -->
         <intent>
             <action android:name="android.intent.action.MAIN" />
