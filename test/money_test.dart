@@ -116,13 +116,38 @@ void main() {
       expect(s.finance.zakat.cash, 1000000);
     });
 
+    test('positive unpriced holding prevents a final coach estimate', () async {
+      final r = jsonDecode(await tools.execute(call('update_zakat',
+        {'cash': 10000, 'silver_price_per_gram': 3, 'gold_grams': 100})));
+      expect(r['zakat_due'], isNull);
+      expect(r['missing_prices'], ['gold']);
+      expect(r['asset_values']['Gold (100.0 g)'], 'Unpriced');
+      expect(s.finance.summary(now), contains('estimate incomplete'));
+      final priced = jsonDecode(await tools.execute(call('update_zakat', {'gold_price_per_gram': 50})));
+      expect(priced['zakat_due'], 'AED 375');
+      expect(priced['valuation_date'], '2026-11-25');
+    });
+
+    test('Undo targets its original ledger after a switch', () async {
+      await tools.execute(call('set_budget', {'category': 'Food', 'amount': 500}));
+      await s.updateFinance((f) => f.openLedger('KWD'));
+      await s.setBudget('Food', 1000);
+      await acts.last.undo!();
+      expect(s.finance.budgets['Food'], 1000);
+      await s.updateFinance((f) => f.openLedger('AED'));
+      expect(s.finance.budgets, isEmpty);
+      expect(jsonDecode(await tools.execute(call('log_money',
+        {'amount': 12, 'category': 'Food', 'currency': 'KWD'})))['error'], contains('AED'));
+      expect(s.finance.entries, isEmpty);
+    });
+
     test('money_summary and set_currency', () async {
       await tools.execute(call('log_money', {'amount': 20, 'category': 'Sadaqah'}));
       final r = jsonDecode(await tools.execute(call('money_summary', {})));
       expect(r['by_category'], {'Sadaqah': 'AED 20'});
       expect((r['recent'] as List).single, contains('Sadaqah'));
-      expect(jsonDecode(await tools.execute(call('set_currency', {'code': 'eur'})))['ok'], isTrue);
-      expect(s.finance.currency, 'EUR');
+      expect(jsonDecode(await tools.execute(call('set_currency', {'code': 'eur'})))['error'], contains('separate ledger'));
+      expect(s.finance.currency, 'AED');
       expect(jsonDecode(await tools.execute(call('set_currency', {'code': 'euro'})))['error'], isNotNull);
     });
 
@@ -265,6 +290,39 @@ void main() {
       expect(find.byKey(const Key('money-habit-no-spend')), findsNothing);
     });
 
+    testWidgets('correct the 31st entry from the ledger without changing its ID', (tester) async {
+      final s = (await tester.runAsync(state))!;
+      await s.updateFinance((f) {
+        f.currency = 'AED';
+        for (var i = 0; i < 31; i++) {
+          f.entries.add(MoneyEntry(at: DateTime(2025, 1, i + 1), amount: 100, category: 'Food', note: 'Receipt ${i + 1}'));
+        }
+      });
+      final id = s.finance.entries.first.id;
+      await pump(tester, LedgerScreen(state: s));
+      await tester.scrollUntilVisible(find.text('Receipt 1'), 350);
+      await tester.tap(find.text('Receipt 1'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('money-amount')), '2.50');
+      await tester.tap(find.byKey(const Key('money-save')));
+      await tester.pumpAndSettle();
+      expect(s.finance.entries, hasLength(31));
+      expect(s.finance.entries.first.id, id);
+      expect(s.finance.month(DateTime(2025, 1)).spent, 3250);
+    });
+
+    testWidgets('unpriced gold hides the paid shortcut even with silver nisab priced', (tester) async {
+      final s = (await tester.runAsync(state))!;
+      await s.updateFinance((f) => f.zakat = ZakatInfo(cash: 1000000, goldGrams: 100, silverPricePerGram: 300));
+      await pump(tester, ZakatScreen(state: s));
+      expect(find.text('Estimate incomplete'), findsOneWidget);
+      expect(find.textContaining('Missing price per gram: gold'), findsOneWidget);
+      expect(find.textContaining('I paid'), findsNothing);
+      await tester.enterText(find.byKey(const Key('zakat-gold-price')), '50');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('I paid'), findsOneWidget);
+    });
+
     testWidgets('Today shows the Money card once money is logged', (tester) async {
       final s = (await tester.runAsync(state))!;
       expect(todayItems(s, now).any((i) => i.kind == TodayKind.money), isFalse);
@@ -306,6 +364,32 @@ void main() {
       await tester.pumpAndSettle();
       expect(s.finance.zakat.cash, 1000000);
       expect(calculateZakat(s.finance.zakat).due, 25000);
+    });
+
+    testWidgets('the currency picker requires a separate ledger for a populated currency', (tester) async {
+      final s = (await tester.runAsync(state))!;
+      await s.updateFinance((f) => f.currency = 'AED');
+      await s.addMoney(MoneyEntry(at: now, amount: 1250, category: 'Food'));
+      await pump(tester, Scaffold(body: Builder(builder: (c) =>
+        TextButton(onPressed: () => pickCurrency(c, s), child: const Text('Choose ledger')))));
+      Future<void> select() async {
+        await tester.tap(find.text('Choose ledger'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('KWD'));
+        await tester.pumpAndSettle();
+      }
+      await select();
+      expect(s.finance.currency, 'AED');
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(s.finance.ledgerCurrencies, {'AED'});
+      await select();
+      await tester.tap(find.text('Create ledger'));
+      await tester.pumpAndSettle();
+      expect(s.finance.currency, 'KWD');
+      expect(s.finance.entries, isEmpty);
+      await s.updateFinance((f) => f.openLedger('AED'));
+      expect(s.finance.fmt(s.finance.entries.single.amount), 'AED 12.50');
     });
 
     testWidgets('Settings → Money changes the currency', (tester) async {

@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -9,7 +13,12 @@ import '../widgets/ask_chat.dart';
 import '../widgets/cards/section_card.dart';
 import '../widgets/document_viewer.dart';
 import 'finance.dart';
+import 'finance_agenda.dart';
 import 'money_resources.dart';
+import 'ledger_csv.dart';
+
+part 'ledger_screen.dart';
+part 'money_planning.dart';
 
 void openMoney(BuildContext context, AppState state) =>
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => MoneyScreen(state: state)));
@@ -172,8 +181,17 @@ class MoneyScreen extends StatelessWidget {
                   askChat(state, 'Help me plan my money this month: a budget, savings and sadaqah.', context: context),
             ),
             PopupMenuButton<String>(
-              onSelected: (v) => v == 'currency' ? pickCurrency(context, state) : null,
-              itemBuilder: (_) => [PopupMenuItem(value: 'currency', child: Text('Currency · ${f.currency}'))],
+              onSelected: (v) {
+                if (v == 'currency') {
+                  pickCurrency(context, state);
+                } else {
+                  Navigator.push(context, MaterialPageRoute<void>(builder: (_) => _FinanceReminders(state: state)));
+                }
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem(value: 'currency', child: Text('Currency · ${f.currency}')),
+                const PopupMenuItem(value: 'reminders', child: Text('Personal reminders')),
+              ],
             ),
           ],
         ),
@@ -224,11 +242,11 @@ class _MonthCard extends StatelessWidget {
       title: DateFormat.yMMMM().format(now),
       icon: Icons.calendar_view_month_outlined,
       children: [
-        Row(children: [stat('In', m.income), stat('Spent', m.spent), stat('Saved', m.saved)]),
+        Row(children: [stat('In', m.income), stat('Spent', m.spent), stat('To savings', m.saved)]),
         const SizedBox(height: 8),
         Text(
           'Today ${f.fmt(f.spentOn(now))} · Sadaqah this week ${f.fmt(f.sadaqahInWeek(now))}'
-          '${m.income > 0 ? ' · ${f.fmt(m.left)} unplanned' : ''}',
+          ' · Net cash flow ${f.fmt(m.left, sign: true)}',
           style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant),
         ),
       ],
@@ -250,6 +268,10 @@ class _BudgetsCard extends StatelessWidget {
       icon: Icons.pie_chart_outline,
       trailing: TextButton(style: compactButton, onPressed: () => _editBudget(context), child: const Text('Set')),
       children: [
+        TextButton.icon(
+          onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => _MonthlyPlan(state: state))),
+          icon: const Icon(Icons.calendar_month_outlined), label: const Text('Plan this month'),
+        ),
         if (f.budgets.isEmpty)
           const _Hint('Give a category a monthly limit, e.g. Food 1,200. A bar shows what is left.'),
         for (final e in f.budgets.entries)
@@ -258,7 +280,7 @@ class _BudgetsCard extends StatelessWidget {
             child: InkWell(
               onTap: () => _editBudget(context, category: e.key),
               child: BudgetBar(
-                spent: m.byCategory[e.key] ?? 0,
+                spent: m.usedFor(e.key),
                 limit: e.value,
                 label: '${categoryEmoji[e.key] ?? ''} ${e.key}',
                 f: f,
@@ -271,7 +293,7 @@ class _BudgetsCard extends StatelessWidget {
 
   Future<void> _editBudget(BuildContext context, {String? category}) async {
     final f = state.finance;
-    var cat = category ?? spendCategories.firstWhere((c) => !f.budgets.containsKey(c), orElse: () => 'Food');
+    var cat = category ?? f.expenseCategories.firstWhere((c) => !f.budgets.containsKey(c), orElse: () => 'Food');
     final ctl = TextEditingController(text: f.budgets[cat] == null ? '' : '${toMajor(f.budgets[cat]!, f.currency)}');
     final res = await showDialog<int>(
       context: context,
@@ -283,7 +305,7 @@ class _BudgetsCard extends StatelessWidget {
             children: [
               DropdownButtonFormField<String>(
                 initialValue: cat,
-                items: [for (final c in spendCategories) DropdownMenuItem(value: c, child: Text(c))],
+                items: [for (final c in {...f.expenseCategories, cat}) DropdownMenuItem(value: c, child: Text(c))],
                 onChanged: (v) => set(() => cat = v ?? cat),
               ),
               TextField(
@@ -360,8 +382,7 @@ class _PotsCard extends StatelessWidget {
     final left = p.target - f.potSaved(p.id);
     if (p.by == null || left <= 0) return left <= 0 ? ' · reached 🎉' : '';
     final now = DateTime.now();
-    final months = (p.by!.year - now.year) * 12 + p.by!.month - now.month;
-    return months <= 0 ? '' : ' · ${f.fmt((left / months).ceil())}/month';
+    return ' · ${f.fmt(f.monthlyContribution(p, now))}/month';
   }
 }
 
@@ -370,10 +391,12 @@ Future<void> editPot(BuildContext context, AppState state, {SavingsPot? pot}) as
   final name = TextEditingController(text: pot?.name ?? '');
   final target = TextEditingController(text: pot == null ? '' : '${toMajor(pot.target, f.currency)}');
   var by = pot?.by;
+  var goalId = pot?.goalId;
   final res = await showDialog<String>(
     context: context,
     builder: (c) => StatefulBuilder(
       builder: (c, set) => AlertDialog(
+        scrollable: true,
         title: Text(pot == null ? 'New savings pot' : 'Edit pot'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -395,13 +418,25 @@ Future<void> editPot(BuildContext context, AppState state, {SavingsPot? pot}) as
               onTap: () async {
                 final d = await showDatePicker(
                   context: c,
-                  firstDate: DateTime.now(),
+                  firstDate: by != null && by!.isBefore(DateTime.now()) ? by! : DateTime.now(),
                   lastDate: DateTime(DateTime.now().year + 30),
                   initialDate: by ?? DateTime.now().add(const Duration(days: 365)),
                 );
                 if (d != null) set(() => by = d);
               },
             ),
+            if (state.goals.isNotEmpty || goalId != null)
+              DropdownButtonFormField<String>(
+                initialValue: goalId, isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Linked goal'),
+                items: [
+                  const DropdownMenuItem(child: Text('No goal')),
+                  for (final g in state.goals) DropdownMenuItem(value: g.id, child: Text(g.title)),
+                  if (goalId != null && state.goalById(goalId!) == null)
+                    DropdownMenuItem(value: goalId, child: const Text('Previous goal')),
+                ],
+                onChanged: (v) => set(() => goalId = v),
+              ),
           ],
         ),
         actions: [
@@ -419,7 +454,8 @@ Future<void> editPot(BuildContext context, AppState state, {SavingsPot? pot}) as
     (pot ?? SavingsPot(name: '', target: 0))
       ..name = name.text.trim()
       ..target = amount
-      ..by = by,
+      ..by = by
+      ..goalId = goalId,
   );
 }
 
@@ -579,10 +615,10 @@ class _ZakatCard extends StatelessWidget {
       ),
       children: [
         Text(
-          !z.hasNisab
-              ? 'Enter your wealth and today\'s ${info.nisabBasis} price to see if zakat is due.'
+          !z.complete
+              ? 'Estimate incomplete · enter the ${z.missingPrices.join(' and ')} price per gram.'
               : z.aboveNisab
-              ? 'Zakat due: ${f.fmt(z.due)} (2.5% of ${f.fmt(z.net)})'
+              ? 'Zakat due: ${f.fmt(z.due!)} (2.5% of ${f.fmt(z.net)})'
               : 'Below the nisab (${f.fmt(z.nisab)}): no zakat due.',
         ),
         if (next != null)
@@ -618,14 +654,21 @@ class _ZakatScreenState extends State<ZakatScreen> {
     initialValue: value == 0 ? '' : '${toMajor(value, cur)}'.replaceFirst(RegExp(r'\.0+$'), ''),
     keyboardType: const TextInputType.numberWithOptions(decimal: true),
     decoration: InputDecoration(labelText: label, suffixText: cur, helperText: help),
-    onChanged: (s) => setState(() => set(parseMoney(s, cur) ?? 0)),
+    onChanged: (s) => setState(() {
+      set(parseMoney(s, cur) ?? 0);
+      z.valuedOn = DateTime.now();
+    }),
   );
 
   Widget _grams(String label, double value, void Function(double v) set) => TextFormField(
     initialValue: value == 0 ? '' : '$value',
     keyboardType: const TextInputType.numberWithOptions(decimal: true),
     decoration: InputDecoration(labelText: label, suffixText: 'g'),
-    onChanged: (s) => setState(() => set(double.tryParse(s.trim()) ?? 0)),
+    onChanged: (s) => setState(() {
+      final grams = double.tryParse(s.trim());
+      set(grams != null && grams.isFinite && grams >= 0 ? grams : 0);
+      z.valuedOn = DateTime.now();
+    }),
   );
 
   @override
@@ -633,6 +676,8 @@ class _ZakatScreenState extends State<ZakatScreen> {
     final t = Theme.of(context);
     final f = widget.state.finance;
     final r = calculateZakat(z, potSavings: f.totalSaved);
+    final today = hijriOf(DateTime.now(), offsetDays: widget.state.settings.hijriOffsetDays);
+    final year = z.hijriMonth == null ? null : today.year + (z.hijriMonth! < today.month ? 1 : 0);
     const gap = SizedBox(height: 8);
     final goldPrice = _money(
       'Gold price per gram today',
@@ -663,14 +708,21 @@ class _ZakatScreenState extends State<ZakatScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      !r.hasNisab
-                          ? 'Enter today\'s ${z.nisabBasis} price'
-                          : (r.aboveNisab ? 'Zakat due ${f.fmt(r.due)}' : 'No zakat due'),
+                      !r.complete
+                          ? 'Estimate incomplete'
+                          : (r.aboveNisab ? 'Zakat due ${f.fmt(r.due!)}' : 'No zakat due'),
                       key: const Key('zakat-result'),
                       style: t.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 4),
-                    Text('Net zakatable wealth ${f.fmt(r.net)}${r.hasNisab ? ' · nisab ${f.fmt(r.nisab)}' : ''}'),
+                    if (!r.complete)
+                      Text('Missing price per gram: ${r.missingPrices.join(' and ')}.'),
+                    for (final a in r.breakdown.entries.where((a) => a.value != 0))
+                      Text('${a.key} · ${a.value == null ? 'Unpriced' : f.fmt(a.value!)}'),
+                    if (r.liabilities > 0) Text('Debts due · −${f.fmt(r.liabilities)}'),
+                    if (r.complete) Text('Net zakatable wealth ${f.fmt(r.net)}${r.hasNisab ? ' · nisab ${f.fmt(r.nisab)}' : ''}'),
+                    Text('Valuation date: ${z.valuedOn == null ? 'not recorded' : DateFormat.yMMMd().format(z.valuedOn!)}. '
+                        'Estimate assumes a full lunar year above the ${z.nisabBasis} nisab.'),
                   ],
                 ),
               ),
@@ -722,17 +774,20 @@ class _ZakatScreenState extends State<ZakatScreen> {
             ),
             gap,
             FilledButton(key: const Key('zakat-save'), onPressed: _save, child: const Text('Save')),
-            if (r.due > 0)
+            if ((r.due ?? 0) > 0)
               TextButton(
                 onPressed: () async {
-                  await _save(pop: false);
-                  await widget.state.addMoney(
-                    MoneyEntry(at: DateTime.now(), amount: r.due, category: 'Zakat', note: 'Zakat'),
-                  );
-                  await widget.state.updateFinance((f) => f.zakat.lastPaid = DateTime.now());
+                  if (_saved) return;
+                  _saved = true;
+                  final entry = MoneyEntry(at: DateTime.now(), amount: r.due!, category: 'Zakat', note: 'Zakat',
+                    zakatYear: year);
+                  await widget.state.updateFinance((f) {
+                    f.zakat = ZakatInfo.fromJson(z.toJson());
+                    f.entries.add(entry);
+                  });
                   if (context.mounted) Navigator.pop(context);
                 },
-                child: Text('I paid ${f.fmt(r.due)}: log it'),
+                child: Text('I paid ${f.fmt(r.due!)}${year == null ? '' : ' for $year AH'}: log it'),
               ),
             gap,
             Text(moneyDisclaimer, style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
@@ -808,34 +863,13 @@ class _RecentCard extends StatelessWidget {
       title: 'Recent',
       icon: Icons.receipt_long_outlined,
       children: [
-        if (recent.isEmpty) const _Hint('Tap Log to add what you spent or earned. A minute a day is enough.'),
-        for (final e in recent.take(30))
-          Dismissible(
-            key: ValueKey(e.id),
-            direction: DismissDirection.endToStart,
-            background: Container(
-              alignment: Alignment.centerRight,
-              padding: const EdgeInsets.only(right: 16),
-              child: const Icon(Icons.delete_outline),
-            ),
-            onDismissed: (_) {
-              state.removeMoney(e.id);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: const Text('Entry deleted'),
-                  action: SnackBarAction(label: 'Undo', onPressed: () => state.addMoney(e)),
-                ),
-              );
-            },
-            child: ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: Text(categoryEmoji[e.category] ?? '•', style: const TextStyle(fontSize: 20)),
-              title: Text(e.note.isEmpty ? _label(f, e) : e.note),
-              subtitle: Text('${e.note.isEmpty ? '' : '${_label(f, e)} · '}${DateFormat.MMMd().add_jm().format(e.at)}'),
-              trailing: Text(e.amount == 0 ? '—' : f.fmt(e.income ? e.amount : -e.amount, sign: true)),
-            ),
-          ),
+        if (recent.isEmpty) const _Hint('Tap Log to add what you spent or earned.'),
+        for (final e in recent.take(5)) _LedgerRow(state: state, entry: e),
+        TextButton.icon(
+          onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => LedgerScreen(state: state))),
+          icon: const Icon(Icons.receipt_long_outlined),
+          label: const Text('View full ledger'),
+        ),
       ],
     );
   }
@@ -931,12 +965,14 @@ Future<void> showMoneySheet(
   String? category,
   String? potId,
   String? debtId,
+  MoneyEntry? entry,
 }) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (c) => _MoneySheet(state: state, income: income, category: category, potId: potId, debtId: debtId),
+    builder: (c) => _MoneySheet(state: state, income: entry?.income ?? income, category: entry?.category ?? category,
+      potId: entry?.potId ?? potId, debtId: entry?.debtId ?? debtId, entry: entry),
   );
 }
 
@@ -944,7 +980,8 @@ class _MoneySheet extends StatefulWidget {
   final AppState state;
   final bool income;
   final String? category, potId, debtId;
-  const _MoneySheet({required this.state, required this.income, this.category, this.potId, this.debtId});
+  final MoneyEntry? entry;
+  const _MoneySheet({required this.state, required this.income, this.category, this.potId, this.debtId, this.entry});
 
   @override
   State<_MoneySheet> createState() => _MoneySheetState();
@@ -953,8 +990,18 @@ class _MoneySheet extends StatefulWidget {
 class _MoneySheetState extends State<_MoneySheet> {
   late bool income = widget.income;
   late String category = widget.category ?? (widget.income ? incomeCategories.first : spendCategories.first);
-  final amount = TextEditingController();
-  final note = TextEditingController();
+  late DateTime at = widget.entry?.at ?? DateTime.now();
+  late final amount = TextEditingController(text: widget.entry == null ? '' :
+      toMajor(widget.entry!.amount, widget.state.finance.currency).toString());
+  late final note = TextEditingController(text: widget.entry?.note ?? '');
+  var saving = false;
+
+  @override
+  void dispose() {
+    amount.dispose();
+    note.dispose();
+    super.dispose();
+  }
   String? error;
 
   bool get fixed => widget.potId != null || widget.debtId != null;
@@ -962,20 +1009,28 @@ class _MoneySheetState extends State<_MoneySheet> {
   @override
   Widget build(BuildContext context) {
     final f = widget.state.finance;
-    final cats = income ? incomeCategories : spendCategories;
+    final cats = income ? incomeCategories : f.expenseCategories;
     final title = widget.potId != null
-        ? 'Add to ${f.pot(widget.potId!)?.name ?? 'savings'}'
+        ? f.pot(widget.potId!)?.name ?? 'Savings transfer'
         : widget.debtId != null
         ? (income ? 'Repayment received' : 'Repayment')
         : null;
-    return Padding(
+    return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + MediaQuery.viewInsetsOf(context).bottom),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (title != null)
-            Text(title, style: Theme.of(context).textTheme.titleMedium)
+          if (title != null) ...[
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            if (widget.potId != null)
+              SegmentedButton<bool>(
+                segments: const [ButtonSegment(value: false, label: Text('Add to pot')),
+                  ButtonSegment(value: true, label: Text('Withdraw'))],
+                selected: {income},
+                onSelectionChanged: (v) => setState(() => income = v.first),
+              ),
+          ]
           else
             SegmentedButton<bool>(
               segments: const [
@@ -1019,28 +1074,53 @@ class _MoneySheetState extends State<_MoneySheet> {
             decoration: const InputDecoration(labelText: 'Note (optional)'),
             onSubmitted: (_) => _save(),
           ),
+          ListTile(
+            title: Text(DateFormat.yMMMd().format(at)),
+            leading: const Icon(Icons.event_outlined),
+            onTap: () async {
+              final picked = await showDatePicker(context: context, initialDate: at,
+                firstDate: DateTime(at.year < 1900 ? at.year : 1900), lastDate: DateTime(at.year > 2200 ? at.year : 2200, 12, 31));
+              if (picked != null) setState(() => at = DateTime(picked.year, picked.month, picked.day, at.hour, at.minute));
+            },
+          ),
           const SizedBox(height: 12),
-          FilledButton(key: const Key('money-save'), onPressed: _save, child: const Text('Save')),
+          FilledButton(key: const Key('money-save'), onPressed: saving ? null : _save, child: const Text('Save')),
         ],
       ),
     );
   }
 
   Future<void> _save() async {
-    final a = parseMoney(amount.text, widget.state.finance.currency);
+    if (saving) return;
+    final f = widget.state.finance;
+    final original = widget.entry;
+    final a = original?.amount == 0 && double.tryParse(amount.text) == 0 ? 0 : parseMoney(amount.text, f.currency);
     if (a == null) return setState(() => error = 'Enter an amount');
-    final nav = Navigator.of(context);
-    await widget.state.addMoney(
-      MoneyEntry(
-        at: DateTime.now(),
-        amount: a,
-        income: income,
-        category: category,
-        note: note.text.trim(),
-        potId: widget.potId,
-        debtId: widget.debtId,
-      ),
+    final e = MoneyEntry(
+      id: original?.id,
+      at: at, amount: a, income: income, category: category, note: note.text.trim(),
+      potId: widget.potId, debtId: widget.debtId,
+      kind: original?.category == category && original?.income == income ? original?.kind : null,
     );
+    final problem = f.transferError(e, replacing: original);
+    if (problem != null) return setState(() => error = problem);
+    final nav = Navigator.of(context);
+    setState(() => saving = true);
+    await widget.state.updateFinance((f) {
+      if (original == null) {
+        f.entries.add(e);
+      } else {
+        final stored = f.entries.where((x) => x.id == original.id).firstOrNull;
+        if (stored == null) return;
+        stored
+          ..at = e.at
+          ..amount = e.amount
+          ..category = e.category
+          ..income = e.income
+          ..note = e.note
+          ..kind = e.kind;
+      }
+    });
     nav.pop();
   }
 }
@@ -1052,9 +1132,17 @@ Future<void> pickCurrency(BuildContext context, AppState state) async {
       child: ListView(
         shrinkWrap: true,
         children: [
-          for (final code in commonCurrencies)
+          if (state.finance.currencyLocked || state.finance.ledgerCurrencies.length > 1)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('Each ledger keeps its own currency. Your ${state.finance.currency} records stay in that ledger.'),
+            ),
+          for (final code in {...commonCurrencies, ...state.finance.ledgerCurrencies})
             ListTile(
               title: Text(code),
+              subtitle: state.finance.currencyLocked || state.finance.ledgerCurrencies.length > 1
+                  ? Text(state.finance.ledgerCurrencies.contains(code) ? 'Existing ledger' : 'Create separate ledger')
+                  : null,
               trailing: code == state.finance.currency ? const Icon(Icons.check) : null,
               onTap: () => Navigator.pop(c, code),
             ),
@@ -1062,5 +1150,17 @@ Future<void> pickCurrency(BuildContext context, AppState state) async {
       ),
     ),
   );
-  if (c != null) await state.updateFinance((f) => f.currency = c);
+  if (c == null || c == state.finance.currency || !context.mounted) return;
+  final f = state.finance;
+  if (f.currencyLocked || f.ledgerCurrencies.length > 1) {
+    final exists = f.ledgerCurrencies.contains(c);
+    final ok = await confirmDialog(context,
+      title: exists ? 'Open $c ledger?' : 'Create $c ledger?',
+      message: 'Your ${f.currency} amounts stay in the ${f.currency} ledger. You can switch back at any time.',
+      confirm: exists ? 'Open ledger' : 'Create ledger',
+    );
+    if (ok) await state.updateFinance((f) => f.openLedger(c));
+  } else {
+    await state.updateFinance((f) => f.currency = c);
+  }
 }

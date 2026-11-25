@@ -15,7 +15,11 @@ Map<String, dynamic> _fn(String name, String description, Map<String, dynamic> p
   'function': {
     'name': name,
     'description': description,
-    'parameters': {'type': 'object', 'properties': props, 'required': required},
+    'parameters': {'type': 'object', 'properties': {
+      ...props,
+      if (const {'log_money', 'set_budget', 'create_savings_pot', 'add_debt', 'update_zakat'}.contains(name))
+        'currency': {'type': 'string', 'description': 'If the user specifies a currency, pass its ISO code. It must match the active ledger.'},
+    }, 'required': required},
   },
 };
 
@@ -67,7 +71,7 @@ final financeToolDefinitions = <Map<String, dynamic>>[
     'set_budget',
     'Set or remove (amount 0) a monthly limit for a spending category.',
     {
-      'category': {'type': 'string', 'enum': spendCategories},
+      'category': {'type': 'string', 'description': 'A spending category in the current ledger'},
       'amount': _amount,
     },
     ['category', 'amount'],
@@ -167,49 +171,57 @@ class FinanceTools {
 
   Future<String> execute(ToolCall call) async {
     final a = call.arguments.trim().isEmpty ? <String, dynamic>{} : jsonDecode(call.arguments) as Map<String, dynamic>;
+    final ledger = f.activeLedger;
+    if (const {'log_money', 'update_zakat', 'set_budget', 'add_debt', 'create_savings_pot'}.contains(call.name) &&
+        a['currency'] is String && (a['currency'] as String).toUpperCase() != f.currency) {
+      return _err('This ledger uses ${f.currency}. Choose the matching ledger in Money.');
+    }
     switch (call.name) {
       case 'log_money':
         final amount = _minor(a['amount']);
         if (amount == null || amount == 0) return _err('amount must be a positive number');
         final income = a['income'] == true;
-        final cats = income ? incomeCategories : spendCategories;
+        final cats = income ? incomeCategories : f.expenseCategories;
         final cat = cats.firstWhere(
           (c) => c.toLowerCase() == '${a['category']}'.toLowerCase(),
-          orElse: () => cats.last,
+          orElse: () => income ? 'Other income' : 'Other',
         );
         final potId = a['pot_id'] as String?, debtId = a['debt_id'] as String?;
         if (potId != null && f.pot(potId) == null) return _err('no pot $potId; see money_summary');
         if (debtId != null && f.debt(debtId) == null) return _err('no debt $debtId; see money_summary');
         final d = _day(a['date']);
         final now = clock();
-        final e = await state.addMoney(
-          MoneyEntry(
-            at: d == null ? now : DateTime(d.year, d.month, d.day, now.hour, now.minute),
-            amount: amount,
-            income: income,
-            category: potId != null && !income ? 'Savings' : cat,
-            note: (a['note'] as String? ?? '').trim(),
-            potId: potId,
-            debtId: debtId,
-          ),
+        final e = MoneyEntry(
+          at: d == null ? now : DateTime(d.year, d.month, d.day, now.hour, now.minute),
+          amount: amount,
+          income: debtId != null ? !f.debt(debtId)!.iOwe : income,
+          category: potId != null ? 'Savings' : debtId != null ? 'Debt' : cat,
+          note: (a['note'] as String? ?? '').trim(),
+          potId: potId,
+          debtId: debtId,
         );
+        final transferError = f.transferError(e);
+        if (transferError != null) return _err(transferError);
+        await state.addMoney(e);
         onActivity?.call(
           ToolActivity(
-            '${income ? 'Received' : 'Spent'} ${f.fmt(amount)} · ${potId != null ? f.pot(potId)!.name : e.category}',
-            undo: () => state.removeMoney(e.id),
+            '${e.kind == EntryKind.savings ? 'Transferred' : e.income ? 'Received' : 'Spent'} ${f.fmt(amount)} · ${potId != null ? f.pot(potId)!.name : e.category}',
+            undo: () => state.updateFinance((_) => ledger.entries.removeWhere((x) => x.id == e.id)),
           ),
         );
         return jsonEncode({'ok': true, 'id': e.id, 'spent_today': f.fmt(f.spentOn(now))});
       case 'set_budget':
         final cat = a['category'] as String?;
         final amount = _minor(a['amount']);
-        if (!spendCategories.contains(cat) || amount == null) return _err('category and amount are required');
+        if (!f.expenseCategories.contains(cat) || amount == null) return _err('category and amount are required');
         final prev = f.budgets[cat];
         await state.setBudget(cat!, amount);
         onActivity?.call(
           ToolActivity(
             amount == 0 ? 'Removed the $cat budget' : '$cat budget ${f.fmt(amount)}/month',
-            undo: () => state.setBudget(cat, prev),
+            undo: () => state.updateFinance((_) {
+              if (prev == null) { ledger.budgets.remove(cat); } else { ledger.budgets[cat] = prev; }
+            }),
           ),
         );
         return jsonEncode({'ok': true});
@@ -227,7 +239,10 @@ class FinanceTools {
           goalId: goalId,
         );
         await state.upsertPot(p);
-        onActivity?.call(ToolActivity('Savings pot "${p.name}" · ${f.fmt(target)}', undo: () => state.deletePot(p.id)));
+        onActivity?.call(ToolActivity('Savings pot "${p.name}" · ${f.fmt(target)}', undo: () => state.updateFinance((_) {
+          ledger.pots.removeWhere((x) => x.id == p.id);
+          for (final e in ledger.entries.where((e) => e.potId == p.id)) { e.potId = null; }
+        })));
         return jsonEncode({'ok': true, 'id': p.id});
       case 'add_debt':
         final amount = _minor(a['amount']);
@@ -244,7 +259,10 @@ class FinanceTools {
         onActivity?.call(
           ToolActivity(
             d.iOwe ? 'Debt to $person · ${f.fmt(amount)}' : '$person owes you ${f.fmt(amount)}',
-            undo: () => state.deleteDebt(d.id),
+            undo: () => state.updateFinance((_) {
+              ledger.debts.removeWhere((x) => x.id == d.id);
+              for (final e in ledger.entries.where((e) => e.debtId == d.id)) { e.debtId = null; }
+            }),
           ),
         );
         return jsonEncode({'ok': true, 'id': d.id});
@@ -270,18 +288,28 @@ class FinanceTools {
           z.hijriMonth = m;
           z.hijriDay = (a['hijri_day'] as num?)?.toInt().clamp(1, 30) ?? 1;
         }
+        const valuationKeys = {'gold_price_per_gram', 'silver_price_per_gram', 'gold_grams', 'silver_grams',
+          'cash', 'investments', 'business_stock', 'receivables', 'debts_due'};
+        if (a.keys.any(valuationKeys.contains)) z.valuedOn = clock();
         await state.updateFinance((x) => x.zakat = z);
         final r = f.zakatResult();
         onActivity?.call(
           ToolActivity(
-            r.hasNisab ? 'Zakat: ${r.aboveNisab ? '${f.fmt(r.due)} due' : 'below the nisab'}' : 'Saved zakat details',
-            undo: () => state.updateFinance((x) => x.zakat = prev),
+            r.complete ? 'Zakat: ${r.aboveNisab ? '${f.fmt(r.due!)} due' : 'below the nisab'}' : 'Zakat estimate incomplete',
+            undo: () => state.updateFinance((_) => ledger.zakat = prev),
           ),
         );
         return jsonEncode({
-          'net_wealth': f.fmt(r.net),
+          'status': r.complete ? 'Estimate complete' : 'Estimate incomplete',
+          if (r.complete) 'net_wealth': f.fmt(r.net),
+          'missing_prices': r.missingPrices,
+          'asset_values': {for (final a in r.breakdown.entries) a.key: a.value == null ? 'Unpriced' : f.fmt(a.value!)},
+          'debts_due': f.fmt(r.liabilities),
+          'basis': z.nisabBasis,
+          'valuation_date': z.valuedOn == null ? null : ymd(z.valuedOn!),
+          'assumption': 'A full lunar year above nisab',
           'nisab': r.hasNisab ? f.fmt(r.nisab) : 'unknown: ask for today\'s ${z.nisabBasis} price per gram',
-          'zakat_due': f.fmt(r.due),
+          if (r.complete) 'zakat_due': f.fmt(r.due!),
           'includes_savings_pots': z.includePots ? f.fmt(f.totalSaved) : 'no',
         });
       case 'money_summary':
@@ -298,9 +326,15 @@ class FinanceTools {
       case 'set_currency':
         final code = '${a['code'] ?? ''}'.trim().toUpperCase();
         if (!RegExp(r'^[A-Z]{3}$').hasMatch(code)) return _err('use a 3-letter ISO code');
+        if (code == f.currency) return jsonEncode({'ok': true});
+        if (f.currencyLocked || f.ledgerCurrencies.contains(code)) {
+          return _err('Amounts are kept in ${f.currency}. Open a separate ledger in Money to use $code.');
+        }
         final prev = f.currency;
         await state.updateFinance((x) => x.currency = code);
-        onActivity?.call(ToolActivity('Currency $code', undo: () => state.updateFinance((x) => x.currency = prev)));
+        onActivity?.call(ToolActivity('Currency $code', undo: () => state.updateFinance((x) {
+          if (x.currency == code && !x.currencyLocked && !x.ledgerCurrencies.contains(prev)) x.currency = prev;
+        })));
         return jsonEncode({'ok': true});
       case 'update_settings':
         final changes = a['changes'];

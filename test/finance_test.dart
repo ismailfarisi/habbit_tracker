@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:habit_tracker/app_state.dart';
 import 'package:habit_tracker/finance/finance.dart';
 import 'package:habit_tracker/finance/money_resources.dart';
+import 'package:habit_tracker/finance/ledger_csv.dart';
 import 'package:habit_tracker/logic/hijri.dart';
 
 import 'support.dart';
@@ -27,6 +28,36 @@ void main() {
       expect(formatMoney(120000, 'USD'), 'USD 1,200');
       expect(formatMoney(-500, 'USD'), '−USD 5');
       expect(toMinor(19.99, 'USD'), 1999);
+    });
+
+    test('ledger selection keeps every amount and its minor units together in backups', () async {
+      final s = await state();
+      await s.updateFinance((f) => f.currency = 'AED');
+      await s.addMoney(MoneyEntry(at: now, amount: 1250, category: 'Food'));
+      await s.setBudget('Food', 7500);
+      await s.updateFinance((f) => f.openLedger('KWD'));
+      await s.addMoney(MoneyEntry(at: now, amount: 1250, category: 'Rent & bills'));
+      final backup = s.storage.exportJson();
+      await s.importBackup(backup);
+      expect(s.finance.fmt(s.finance.entries.single.amount), 'KWD 1.250');
+      expect(s.finance.budgets, isEmpty);
+      await s.updateFinance((f) => f.openLedger('AED'));
+      expect(s.finance.fmt(s.finance.entries.single.amount), 'AED 12.50');
+      expect(s.finance.budgets['Food'], 7500);
+      expect(() => s.finance.currency = 'KWD', throwsStateError);
+    });
+
+    test('all stored balance types guard against a currency change', () {
+      for (final f in [
+        Finance(budgets: {'Food': 1}),
+        Finance(pots: [SavingsPot(name: 'Example', target: 1)]),
+        Finance(debts: [Debt(person: 'Example', amount: 1)]),
+        Finance(zakat: ZakatInfo(debtsDue: 1)), Finance(zakat: ZakatInfo(goldGrams: 1)),
+        Finance(zakat: ZakatInfo(businessStock: 1)), Finance(zakat: ZakatInfo(silverPricePerGram: 1)),
+      ]) {
+        expect(() => f.currency = 'KWD', throwsStateError);
+        expect(f.currency, 'USD');
+      }
     });
 
     test('currency guess from locale', () {
@@ -53,7 +84,7 @@ void main() {
       expect(calculateZakat(gold).due, 0);
       final noPrice = calculateZakat(ZakatInfo(cash: 9999999));
       expect(noPrice.hasNisab, isFalse);
-      expect(noPrice.due, 0);
+      expect(noPrice.due, isNull);
     });
 
     test('gold and silver held are valued by weight; pots can be left out', () {
@@ -100,6 +131,34 @@ void main() {
       expect(f.potSaved(pot.id), 90000);
       expect(f.spentOn(now), 7000);
       expect(f.sadaqahInWeek(now), 2000);
+    });
+
+    test('ledger reconciles spending, debt and two-way transfers', () {
+      final p = SavingsPot(name: 'Hajj', target: 30000, goalId: 'g');
+      final f = Finance(currency: 'KWD', pots: [p], entries: [
+        MoneyEntry(at: now, amount: 10000, category: 'Salary', income: true),
+        MoneyEntry(at: now, amount: 2000, category: 'Savings', potId: p.id),
+        MoneyEntry(at: now, amount: 500, category: 'Savings', potId: p.id, income: true),
+        MoneyEntry(at: now, amount: 250, category: 'Debt', debtId: 'd'),
+        MoneyEntry(at: now, amount: 125, category: 'Debt', debtId: 'd2', income: true),
+        MoneyEntry(at: DateTime(2020), amount: 1, category: 'Food'),
+      ]);
+      expect(f.month(now).left, 8375);
+      expect(f.month(now).spent, 0);
+      expect(f.ledgerEntries(month: now, goalId: 'g', category: 'Savings'), hasLength(2));
+      expect(f.transferError(MoneyEntry(at: now, amount: 1501, category: 'Savings', income: true, potId: p.id)), isNotNull);
+      f.entries[4].debtId = null;
+      expect(Finance.fromJson(f.toJson()).entries[4].kind, EntryKind.debt);
+    });
+
+    test('CSV exports only selected rows and protects optional private text', () {
+      final f = Finance(currency: 'KWD');
+      final e = MoneyEntry(at: now, amount: 1250, category: 'Private category', note: '=SUM(1,2) "my note"');
+      final csv = ledgerCsv(f, [e]);
+      expect(csv, contains('Spending,Out,1.250,"KWD"'));
+      expect(csv, isNot(contains('Private')));
+      expect(csv, isNot(contains('my note')));
+      expect(ledgerCsv(f, [e], includeDetails: true), contains("'=SUM(1,2)"));
     });
 
     test('debt repayments come from entries', () {
