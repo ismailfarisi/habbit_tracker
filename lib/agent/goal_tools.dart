@@ -212,9 +212,10 @@ class GoalTools {
     return d == null ? null : dayKey(d);
   }
 
-  Future<List<Task>> _tasks(Object? raw) async {
+  Future<List<Task>> _tasks(Object? raw, String goalId, void Function() check) async {
     final out = <Task>[];
     for (final m in ((raw as List?) ?? const []).cast<Map>()) {
+      check();
       final title = '${m['title'] ?? ''}'.trim();
       if (title.isEmpty) continue;
       final time = '${m['time'] ?? ''}';
@@ -229,15 +230,23 @@ class GoalTools {
           byAi: true,
         ),
       );
+      check();
+      final task = out.last;
+      onActivity?.call(ToolActivity('Created task “${task.title}”', undo: () async {
+        await state.deleteTask(task);
+        final g = state.goalById(goalId);
+        if (g != null && g.taskIds.remove(task.id)) await state.saveGoals();
+      }));
       final guide = _guide(m);
       if (guide != null) await state.updateTask(out.last, (t) => t.guide = guide);
     }
     return out;
   }
 
-  Future<List<HabitDef>> _habits(Object? raw) async {
+  Future<List<HabitDef>> _habits(Object? raw, String goalId, void Function() check) async {
     final out = <HabitDef>[];
     for (final (i, m) in ((raw as List?) ?? const []).cast<Map>().indexed) {
+      check();
       final title = '${m['title'] ?? ''}'.trim();
       if (title.isEmpty) continue;
       final reminder = '${m['reminder'] ?? ''}';
@@ -257,13 +266,23 @@ class GoalTools {
           ),
         ),
       );
+      check();
+      final habit = out.last;
+      onActivity?.call(ToolActivity('Created habit “${habit.title}”', undo: () async {
+        await state.deleteHabit(habit.id);
+        final g = state.goalById(goalId);
+        if (g != null && g.habitIds.remove(habit.id)) await state.saveGoals();
+      }));
     }
     return out;
   }
 
-  Future<void> _removeHabits(List<HabitDef> habits) async {
-    for (final h in habits) {
-      await state.deleteHabit(h.id);
+  void _milestoneReceipts(Goal g, Iterable<Milestone> added) {
+    for (final m in added) {
+      onActivity?.call(ToolActivity('Added milestone “${m.title}”', undo: () async {
+        state.goalById(g.id)?.milestones.removeWhere((item) => item.id == m.id);
+        await state.saveGoals();
+      }));
     }
   }
 
@@ -334,8 +353,31 @@ class GoalTools {
     };
   }
 
+  // A plan can contain many records. Check every supplied field before
+  // creating the first record so malformed later items cannot leave orphans.
+  bool _matches(Object? value, Map schema) {
+    return switch (schema['type']) {
+      'object' => value is Map &&
+          (!(schema['required'] as List? ?? const []).contains('title') || '${value['title'] ?? ''}'.trim().isNotEmpty) &&
+          (schema['properties'] as Map).entries.every(
+        (e) => !value.containsKey(e.key) || _matches(value[e.key], e.value as Map)),
+      'array' => value is List && value.every((v) => _matches(v, schema['items'] as Map)),
+      'string' => value is String,
+      'integer' => value is int,
+      _ => true,
+    };
+  }
+
   Future<String> execute(ToolCall call) async {
+    final generation = state.dataGeneration;
+    void check() {
+      if (state.dataGeneration != generation) throw StateError('The local records have changed.');
+    }
     final a = call.arguments.trim().isEmpty ? <String, dynamic>{} : jsonDecode(call.arguments) as Map<String, dynamic>;
+    if (call.name == 'create_goal' || call.name == 'update_goal') {
+      final schema = goalToolDefinitions.firstWhere((t) => t['function']['name'] == call.name)['function']['parameters'] as Map;
+      if (!_matches(a, schema)) return jsonEncode({'error': 'Invalid plan fields. No items were changed.'});
+    }
     switch (call.name) {
       case 'create_goal':
         final title = '${a['title'] ?? ''}'.trim();
@@ -343,10 +385,11 @@ class GoalTools {
         if (title.isEmpty || end == null) return jsonEncode({'error': 'title and end_date (YYYY-MM-DD) are needed'});
         final start = dayKey(clock());
         final days = DateTime.parse(end).difference(DateTime.parse(start)).inDays;
-        final tasks = await _tasks(a['tasks']);
-        final habits = await _habits(a['habits']);
+        final id = _id('g');
+        final tasks = await _tasks(a['tasks'], id, check);
+        final habits = await _habits(a['habits'], id, check);
         final g = Goal(
-          id: _id('g'),
+          id: id,
           title: title,
           why: '${a['why'] ?? ''}'.trim(),
           emoji: '${a['emoji'] ?? ''}'.trim().isEmpty ? '🎯' : '${a['emoji']}'.trim(),
@@ -357,20 +400,10 @@ class GoalTools {
           taskIds: [for (final t in tasks) t.id],
           habitIds: [for (final h in habits) h.id],
         );
+        check();
         await state.upsertGoal(g);
-        onActivity?.call(
-          ToolActivity(
-            'Goal "${g.title}": ${g.milestones.length} milestones, ${habits.length} habits, ${tasks.length} tasks, '
-            'reviewed ${g.cadence.name}',
-            undo: () async {
-              for (final t in tasks) {
-                await state.deleteTask(t);
-              }
-              await _removeHabits(habits);
-              await state.deleteGoal(g.id);
-            },
-          ),
-        );
+        _milestoneReceipts(g, g.milestones);
+        onActivity?.call(ToolActivity('Created goal “${g.title}”', undo: () => state.deleteGoal(g.id)));
         return jsonEncode({'ok': true, 'goal': describe(g)});
       case 'list_goals':
         return jsonEncode({
@@ -380,6 +413,7 @@ class GoalTools {
         final g = state.goalById('${a['id']}');
         if (g == null) return jsonEncode({'error': 'unknown goal id; call list_goals first'});
         final before = g.copy();
+        final previousTaskIds = {...g.taskIds}, previousHabitIds = {...g.habitIds};
         if (a['title'] is String) g.title = a['title'] as String;
         if (a['why'] is String) g.why = a['why'] as String;
         final end = _date(a['end_date']);
@@ -387,7 +421,8 @@ class GoalTools {
         if (a['review'] is String) {
           g.cadence = ReviewCadence.values.firstWhere((c) => c.name == a['review'], orElse: () => g.cadence);
         }
-        g.milestones.addAll(_milestones(a['add_milestones']));
+        final addedMilestones = _milestones(a['add_milestones']);
+        g.milestones.addAll(addedMilestones);
         final note = '${a['add_note'] ?? ''}'.trim();
         if (note.isNotEmpty) {
           g.notes = '${g.notes.trimRight()}${g.notes.trim().isEmpty ? '' : '\n'}- ${dayKey(clock())}: $note';
@@ -397,9 +432,9 @@ class GoalTools {
             m.done = true;
           }
         }
-        final tasks = await _tasks(a['add_tasks']);
+        final tasks = await _tasks(a['add_tasks'], g.id, check);
         g.taskIds.addAll(tasks.map((t) => t.id));
-        final habits = await _habits(a['add_habits']);
+        final habits = await _habits(a['add_habits'], g.id, check);
         g.habitIds.addAll(habits.map((h) => h.id));
         for (final id in ((a['link_task_ids'] as List?) ?? const []).cast<String>()) {
           if (state.taskById(id) != null && !g.taskIds.contains(id)) g.taskIds.add(id);
@@ -407,20 +442,28 @@ class GoalTools {
         for (final id in ((a['link_habit_ids'] as List?) ?? const []).cast<String>()) {
           if (state.habitById(id) != null && !g.habitIds.contains(id)) g.habitIds.add(id);
         }
+        check();
         await state.upsertGoal(g);
-        onActivity?.call(
-          ToolActivity(
-            'Updated goal "${g.title}"${tasks.isEmpty ? '' : ', added ${tasks.length} tasks'}'
-            '${habits.isEmpty ? '' : ', added ${habits.length} habits'}',
-            undo: () async {
-              for (final t in tasks) {
-                await state.deleteTask(t);
-              }
-              await _removeHabits(habits);
-              await state.upsertGoal(before);
-            },
-          ),
-        );
+        _milestoneReceipts(g, addedMilestones);
+        final applied = g.copy();
+        final linkedTasks = applied.taskIds.toSet().difference({...previousTaskIds, ...tasks.map((t) => t.id)});
+        final linkedHabits = applied.habitIds.toSet().difference({...previousHabitIds, ...habits.map((h) => h.id)});
+        onActivity?.call(ToolActivity('Updated goal “${g.title}”', undo: () async {
+          final current = state.goalById(g.id);
+          if (current == null) return;
+          if (current.title == applied.title) current.title = before.title;
+          if (current.why == applied.why) current.why = before.why;
+          if (current.end == applied.end) current.end = before.end;
+          if (current.cadence == applied.cadence) current.cadence = before.cadence;
+          if (current.notes == applied.notes) current.notes = before.notes;
+          current.taskIds.removeWhere(linkedTasks.contains);
+          current.habitIds.removeWhere(linkedHabits.contains);
+          for (final m in current.milestones) {
+            final prev = before.milestones.where((v) => v.id == m.id).firstOrNull;
+            if (prev != null && applied.milestones.any((v) => v.id == m.id && v.done == m.done)) m.done = prev.done;
+          }
+          await state.saveGoals();
+        }));
         return jsonEncode({'ok': true, 'goal': describe(g)});
       case 'save_goal_review':
         final g = state.goalById('${a['id']}');
@@ -431,13 +474,14 @@ class GoalTools {
           suggestions: ((a['suggestions'] as List?) ?? const []).map((e) => '$e'.trim()).where((e) => e.isNotEmpty).toList(),
         );
         g.reviews.add(r);
+        check();
         await state.upsertGoal(g);
         onActivity?.call(
           ToolActivity(
             'Saved review of "${g.title}" with ${r.suggestions.length} suggestions',
             undo: () async {
-              g.reviews.remove(r);
-              await state.upsertGoal(g);
+              state.goalById(g.id)?.reviews.removeWhere((item) => item.at == r.at && item.summary == r.summary);
+              await state.saveGoals();
             },
           ),
         );

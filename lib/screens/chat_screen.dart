@@ -130,7 +130,7 @@ class AgUiChat extends ChangeNotifier {
   int _providerStart = 0;
   bool _disposed = false;
   late CoachAccess access;
-  late final int _generation = state.dataGeneration;
+  final int _generation;
 
   bool get _active => !_disposed && _generation == state.dataGeneration;
   String get scopeTitle => goal?.title ?? (goalId == null ? 'General chat' : 'Archived goal chat');
@@ -147,7 +147,7 @@ class AgUiChat extends ChangeNotifier {
   Goal? get goal => goalId == null ? null : state.goalById(goalId!);
   late final agent = LocalAgUiAgent(state, client: client);
 
-  AgUiChat(this.state, {this.client}) {
+  AgUiChat(this.state, {this.client}) : _generation = state.dataGeneration {
     access = CoachAccess(state);
     _load();
   }
@@ -333,7 +333,7 @@ class AgUiChat extends ChangeNotifier {
             ..proposals = agent.proposals[e.toolCallId] ?? const [];
         }
       } else if (e is agui.RunErrorEvent) {
-        error = e.message;
+        error = e.message.replaceAll(key, '[key]');
       }
       if (e is agui.ToolCallResultEvent) {
         copyNewMessages();
@@ -372,6 +372,7 @@ class AgUiChat extends ChangeNotifier {
 
   Future<void> undo(ChatItem it, ToolActivity a) async {
     if (!_active || busy || !items.contains(it) || !it.actionable || a.undo == null ||
+        !access.allows(ToolCall(it.id, it.toolName ?? '', it.args)) ||
         !it.activities.contains(a) || !it.undone.add(a)) {
       return;
     }
@@ -618,7 +619,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _input.addListener(_draftChanged);
     _chat.addListener(_onChat);
     widget.state.chatPrompt.addListener(_onPrompt);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _onPrompt());
+    WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _onPrompt(); });
   }
 
   void _onPrompt() {
@@ -675,7 +676,7 @@ class _ChatScreenState extends State<ChatScreen> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             for (final call in calls) ...[
               Text(call.name.replaceAll('_', ' '), style: Theme.of(context).textTheme.titleSmall),
-              SelectableText(_describeChange(jsonDecode(call.arguments))),
+              SelectableText(_describeChange(jsonDecode(call.arguments.isEmpty ? '{}' : call.arguments))),
               const SizedBox(height: 12),
             ],
           ]),
@@ -739,9 +740,10 @@ class _ChatScreenState extends State<ChatScreen> {
             CheckboxListTile(value: ids.contains(g.id), title: Text(g.title),
               subtitle: Text(g.id == chat.goalId ? 'Selected goal · plan, notes and progress' : 'Share plan, notes and progress'),
               onChanged: g.id == chat.goalId ? null : (v) => change(() { v == true ? ids.add(g.id) : ids.remove(g.id); })),
-          if (ids.isNotEmpty || money != CoachMoney.none)
+          if (planner || ids.isNotEmpty || money != CoachMoney.none)
             ExpansionTile(title: const Text('Preview selected context'), children: [
-              SelectableText(preview.context(DateTime.now())),
+              if (planner) SelectableText(plannerContext(state.settings, DateTime.now())),
+              if (ids.isNotEmpty || money != CoachMoney.none) SelectableText(preview.context(DateTime.now())),
             ]),
           FilledButton(onPressed: () {
             chat.share(money: money, planner: planner, otherGoals: ids);

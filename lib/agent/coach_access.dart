@@ -46,6 +46,17 @@ class CoachAccess {
     return text;
   }
 
+  String toolResult(String result) {
+    if (money == CoachMoney.details || state.finance.debts.isEmpty) return result;
+    Object? redact(Object? value) => switch (value) {
+      String s => redactPeople(s),
+      List list => list.map(redact).toList(),
+      Map map => {for (final e in map.entries) e.key: redact(e.value)},
+      _ => value,
+    };
+    return jsonEncode(redact(jsonDecode(result)));
+  }
+
   String context(DateTime now) => [
     for (final g in goals) redactPeople(goalOkf(state, g, now)),
     if (money == CoachMoney.totals) totals(now),
@@ -66,6 +77,12 @@ class CoachAccess {
     'set_wake_time' => true,
     _ => false,
   };
+
+  bool _todayCard(String id) {
+    if (id == 'money') return money != CoachMoney.none;
+    if (id.startsWith('goal-')) return goalIds.contains(id.substring(5));
+    return const {'wake', 'prayers', 'tasks'}.contains(id) || (state.habitById(id) != null && habit(id));
+  }
 
   /// Verify even calls the provider made without an advertised definition.
   bool allows(ToolCall call) {
@@ -89,9 +106,9 @@ class CoachAccess {
       'create_savings_pot' => args['goal_id'] == null || goalIds.contains(args['goal_id']),
       'update_task' || 'complete_task' || 'delete_task' => id is String && task(id),
       'update_habit' || 'archive_habit' || 'log_habit' || 'get_habit_history' || 'set_habit_ui' => id is String && habit(id),
-      'customize_today' => ['show', 'hide', 'pin'].every((k) => allowedList(k, (v) =>
-        v == 'money' ? money != CoachMoney.none : v.startsWith('goal-') ? goalIds.contains(v.substring(5)) :
-        const {'wake', 'prayers', 'tasks'}.contains(v) || (state.habitById(v) != null && habit(v)))),
+      // Replacing the entire pin order also unpins omitted cards.
+      'customize_today' => ['show', 'hide', 'pin'].every((k) => allowedList(k, _todayCard)) &&
+          (args['pin'] == null || state.settings.todayPinned.every(_todayCard)),
       _ => true,
     };
   }

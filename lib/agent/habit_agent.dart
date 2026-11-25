@@ -273,7 +273,10 @@ class HabitTools {
 
   String _err(String m) => jsonEncode({'ok': false, 'error': m});
 
-  HabitDef? _find(Map<String, dynamic> a) => a['id'] is String ? state.habitById(a['id'] as String) : null;
+  HabitDef? _find(Map<String, dynamic> a) {
+    final id = a['id'];
+    return id is String && (visible?.call(id) ?? true) ? state.habitById(id) : null;
+  }
 
   /// Applies the shared habit fields of [a] to [h]; returns an error or null.
   String? _apply(HabitDef h, Map<String, dynamic> a) {
@@ -370,6 +373,20 @@ class HabitTools {
     return jsonEncode({'ok': true, 'status': 'created', 'habit': _summary(stored)});
   }
 
+  // Restore only fields written by the original edit that still match its
+  // result. Other sessions may have edited the same habit in the meantime.
+  Future<void> _undoEdit(HabitDef before, HabitDef applied) async {
+    final current = state.habitById(before.id);
+    if (current == null) return;
+    final fields = current.toJson(), previous = before.toJson();
+    for (final e in applied.toJson().entries) {
+      if (jsonEncode(previous[e.key]) != jsonEncode(e.value) && jsonEncode(fields[e.key]) == jsonEncode(e.value)) {
+        fields[e.key] = previous[e.key];
+      }
+    }
+    await state.upsertHabit(HabitDef.fromJson(fields));
+  }
+
   Future<String> _update(Map<String, dynamic> a) async {
     final current = _find(a);
     if (current == null) return _err('No habit with that id. Call list_habits.');
@@ -378,9 +395,10 @@ class HabitTools {
     final problem = _apply(next, a);
     if (problem != null) return _err(problem);
     if (a.containsKey('ui')) next.uiSurface = normalizeHabitSurface(a['ui']);
+    final applied = next.copy();
     await state.upsertHabit(next);
     onActivity?.call(ToolActivity('Updated habit “${next.title}” · ${next.describeSchedule()}',
-        undo: () => state.upsertHabit(before)));
+        undo: () => _undoEdit(before, applied)));
     return jsonEncode({'ok': true, 'habit': _summary(next)});
   }
 
@@ -389,18 +407,20 @@ class HabitTools {
     if (current == null) return _err('No habit with that id. Call list_habits.');
     final before = current.copy();
     final next = current.copy()..uiSurface = normalizeHabitSurface(a['ui']);
+    final applied = next.copy();
     await state.upsertHabit(next);
-    onActivity?.call(ToolActivity('New screen for “${next.title}”', undo: () => state.upsertHabit(before)));
+    onActivity?.call(ToolActivity('New screen for “${next.title}”', undo: () => _undoEdit(before, applied)));
     return jsonEncode({'ok': true, 'habit': _summary(next)});
   }
 
   Future<String> _archive(Map<String, dynamic> a) async {
     final h = _find(a);
     if (h == null) return _err('No habit with that id. Call list_habits.');
+    final previous = h.archived;
     final archived = a['archived'] != false;
     await state.archiveHabit(h.id, archived: archived);
     onActivity?.call(ToolActivity('${archived ? 'Archived' : 'Restored'} habit “${h.title}”',
-        undo: () => state.archiveHabit(h.id, archived: !archived)));
+        undo: previous == archived ? null : () => state.archiveHabit(h.id, archived: previous)));
     return jsonEncode({'ok': true, 'archived': archived, 'id': h.id});
   }
 
@@ -426,9 +446,21 @@ class HabitTools {
       }
     }
     if (a['notes'] is String) next.notes = a['notes'] as String;
+    final applied = next.copy();
     await state.logHabit(day, h.id, next);
-    onActivity?.call(ToolActivity('Logged “${h.title}” for ${dayKey(day)}',
-        undo: () => state.logHabit(day, h.id, before)));
+    onActivity?.call(ToolActivity('Logged “${h.title}” for ${dayKey(day)}', undo: () async {
+      final current = state.habitEntry(day, h.id).copy();
+      if (current.done == applied.done) current.done = before.done;
+      if (current.value == applied.value) current.value = before.value;
+      if (current.minutes == applied.minutes) current.minutes = before.minutes;
+      if (current.notes == applied.notes) current.notes = before.notes;
+      for (final k in applied.metrics.keys) {
+        if (current.metrics[k] != applied.metrics[k]) continue;
+        final previous = before.metrics[k];
+        previous == null ? current.metrics.remove(k) : current.metrics[k] = previous;
+      }
+      await state.logHabit(day, h.id, current);
+    }));
     return jsonEncode({'ok': true, 'date': dayKey(day), 'done': habitDone(next, h), 'entry': _entryJson(next)});
   }
 
@@ -479,27 +511,28 @@ class HabitAgent {
   final OpenRouterClient Function() _client;
   final DateTime Function() clock;
 
-  final CoachAccess? access;
+  final CoachAccess access;
 
-  late final habitTools = HabitTools(state, visible: access?.habit, onActivity: onActivity, onProposal: onProposal, clock: clock);
-  late final taskTools = TaskTools(state, visible: access?.task, onActivity: onActivity, clock: clock);
-  late final appTools = AppTools(state, onActivity: onActivity, clock: clock);
+  late final habitTools = HabitTools(state, visible: access.habit, onActivity: onActivity, onProposal: onProposal, clock: clock);
+  late final taskTools = TaskTools(state, visible: access.task, onActivity: onActivity, clock: clock);
+  late final appTools = AppTools(state, visibleHabit: access.habit, onActivity: onActivity, clock: clock);
   late final goalTools = GoalTools(state, onActivity: onActivity, clock: clock);
   late final financeTools = FinanceTools(state, onActivity: onActivity, clock: clock);
 
   HabitAgent(
     this.state, {
-    this.access,
+    CoachAccess? access,
     this.onActivity,
     this.onProposal,
     OpenRouterClient Function()? client,
     DateTime Function()? clock,
-  })  : clock = clock ?? DateTime.now,
+  })  : access = access ?? CoachAccess(state),
+        clock = clock ?? DateTime.now,
         _client = client ?? (() => OpenRouterClient(apiKey: state.apiKey, model: state.settings.model));
 
   List<Map<String, dynamic>> get tools => [...taskToolDefinitions, ...habitToolDefinitions, ...appToolDefinitions, ...goalToolDefinitions, ...financeToolDefinitions];
 
-  Future<String> execute(ToolCall call) => habitToolNames.contains(call.name)
+  Future<String> _dispatch(ToolCall call) => habitToolNames.contains(call.name)
       ? habitTools.execute(call)
       : appToolNames.contains(call.name)
       ? appTools.execute(call)
@@ -524,18 +557,18 @@ class HabitAgent {
     bool replyOnly = false,
   }) async {
     final client = _client();
-    final scope = access;
+    bool needsReview(ToolCall call) => access.needsReview(call) || (call.name == 'create_habit' && onProposal == null);
     var approved = <ToolCall>{};
     try {
       return await client.runAgent(
         history,
         system: '$system\n\n${habitAgentPrompt()}',
-        tools: [for (final tool in tools) if (!replyOnly && (scope?.advertises(tool['function']['name'] as String) ?? true)) tool],
+        tools: [for (final tool in tools) if (!replyOnly && access.advertises(tool['function']['name'] as String)) tool],
         checkActive: checkActive,
-        beforeCalls: scope == null ? null : (calls) async {
+        beforeCalls: (calls) async {
           approved.clear();
           if (replyOnly) return;
-          final changes = calls.where((c) => scope.allows(c) && scope.needsReview(c)).toList();
+          final changes = calls.where((c) => access.allows(c) && needsReview(c)).toList();
           if (changes.isNotEmpty && await review?.call(List.unmodifiable(changes)) == true) {
             approved = changes.toSet();
           }
@@ -545,23 +578,23 @@ class HabitAgent {
           onToolStart?.call(call);
           String result;
           try {
-            if (replyOnly || (scope != null && !scope.allows(call))) {
+            if (replyOnly || !access.allows(call)) {
               result = jsonEncode({'error': 'Outside the shared context. No change made.'});
-            } else if (scope != null && scope.needsReview(call) && !approved.remove(call)) {
+            } else if (needsReview(call) && !approved.remove(call)) {
               result = jsonEncode({'error': 'Change was not approved.'});
-            } else if (scope != null && call.name == 'list_goals') {
-              result = jsonEncode({'goals': scope.goals.map(goalTools.describe).toList()});
-            } else if (scope?.money == CoachMoney.totals && call.name == 'money_summary') {
-              result = jsonEncode({'summary': scope!.totals(clock())});
+            } else if (call.name == 'list_goals') {
+              result = jsonEncode({'goals': access.goals.map(goalTools.describe).toList()});
+            } else if (access.money == CoachMoney.totals && call.name == 'money_summary') {
+              result = jsonEncode({'summary': access.totals(clock())});
             } else {
-              result = await execute(call);
-              if (scope != null && call.name == 'customize_today' && jsonDecode(result)['ok'] == true) {
+              result = await _dispatch(call);
+              if (call.name == 'customize_today' && jsonDecode(result)['ok'] == true) {
                 result = '{"ok":true}';
               }
             }
-            if (scope != null) result = scope.redactPeople(result);
+            result = access.toolResult(result);
           } catch (e) {
-            result = jsonEncode({'error': e.toString()});
+            result = jsonEncode({'error': access.redactPeople(e.toString())});
           }
           onToolResult?.call(call, result);
           return result;

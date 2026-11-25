@@ -43,7 +43,8 @@ class AppTools {
   final AppState state;
   final void Function(ToolActivity activity)? onActivity;
   final DateTime Function() clock;
-  AppTools(this.state, {this.onActivity, DateTime Function()? clock}) : clock = clock ?? DateTime.now;
+  final bool Function(String id)? visibleHabit;
+  AppTools(this.state, {this.onActivity, this.visibleHabit, DateTime Function()? clock}) : clock = clock ?? DateTime.now;
 
   DateTime _day(Object? s) {
     final d = s is String ? DateTime.tryParse(s) : null;
@@ -101,7 +102,7 @@ class AppTools {
             if (log == null) continue;
             if (log.wakeAt != null) wake++;
             prayers += log.prayers.length;
-            habits += log.habits.values.where((e) => e.done).length;
+            habits += log.habits.entries.where((e) => (visibleHabit?.call(e.key) ?? true) && e.value.done).length;
           }
           return {'days': days, 'wakeUpsLogged': wake, 'prayersDone': prayers, 'habitCheckIns': habits};
         }

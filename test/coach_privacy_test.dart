@@ -120,6 +120,77 @@ void main() {
     expect(jsonEncode(asks.last), isNot(contains('Help with this debt')));
   });
 
+  test('planner sharing excludes unshared goal check-ins and cannot remove a private pin', () async {
+    final s = await seeded();
+    s.settings.todayPinned = ['goal-j'];
+    await s.logHabit(DateTime.now(), 'h', HabitEntry(done: true));
+    final requests = <Map<String, dynamic>>[];
+    final chat = scripted(s, [
+      [toolCallDelta('get_stats', {})],
+      [toolCallDelta('customize_today', {'pin': ['wake']})],
+      reply('Done.'),
+    ], requests)..share(money: CoachMoney.none, planner: true, otherGoals: {});
+    await chat.send('Show activity', review: (_) => fail('Private pins should be protected'));
+    expect(s.settings.todayPinned, ['goal-j']);
+    final stats = jsonDecode(chat.items.firstWhere((i) => i.toolName == 'get_stats').result!);
+    expect(stats['last7']['habitCheckIns'], 0);
+    expect(jsonEncode(requests), isNot(contains('goal-j')));
+  });
+
+  test('habit undo preserves concurrent field edits and expires when the record leaves scope', () async {
+    final s = await seeded();
+    final chat = scripted(s, [
+      [toolCallDelta('update_habit', {'id': 'h', 'title': 'New title'})],
+      reply('Updated.'),
+      [toolCallDelta('update_habit', {'id': 'h', 'title': 'Later title'})],
+      reply('Updated again.'),
+    ], [])..openGoal('j');
+    await chat.send('Rename practice', review: (_) async => true);
+    await s.upsertHabit(s.habits.single.copy()..unit = 'local edit');
+    final first = chat.items.singleWhere((i) => i.kind == 'tool');
+    await chat.undo(first, first.activities.single);
+    expect(s.habits.single.title, 'Interview rehearsal');
+    expect(s.habits.single.unit, 'local edit');
+    await chat.send('Rename again', review: (_) async => true);
+    final last = chat.items.lastWhere((i) => i.kind == 'tool');
+    s.goals.last.habitIds.clear();
+    s.goals.first.habitIds.add('h');
+    await chat.undo(last, last.activities.single);
+    expect(s.habits.single.title, 'Later title');
+  });
+
+  test('undoing a logged metric preserves practice notes and later metrics', () async {
+    final s = await seeded();
+    final chat = scripted(s, [
+      [toolCallDelta('log_habit', {'id': 'h', 'date': '2026-11-25', 'metrics': {'pages': 2}})],
+      reply('Recorded.'),
+    ], [])..openGoal('j');
+    await chat.send('Record two pages', review: (_) async => true);
+    final day = DateTime(2026, 11, 25);
+    final entry = s.habitEntry(day, 'h').copy()..notes = 'Local note';
+    entry.metrics['seconds'] = 30;
+    await s.logHabit(day, 'h', entry);
+    final receipt = chat.items.singleWhere((i) => i.kind == 'tool');
+    await chat.undo(receipt, receipt.activities.single);
+    expect(s.habitEntry(day, 'h').metrics, {'seconds': 30});
+    expect(s.habitEntry(day, 'h').notes, 'Local note');
+  });
+
+  test('a malformed item in a reviewed plan is rejected before creating any tasks', () async {
+    final s = await seeded();
+    final chat = scripted(s, [
+      [toolCallDelta('create_goal', {
+        'title': 'Study', 'end_date': '2026-12-01',
+        'tasks': [{'title': 'Read first'}, {'title': 'Read next', 'minutes': 'invalid'}],
+      })],
+      reply('Please correct the plan.'),
+    ], []);
+    await chat.send('Build my plan', review: (_) async => true);
+    expect(s.tasks, isEmpty);
+    expect(s.goals, hasLength(2));
+    expect(chat.items.firstWhere((i) => i.kind == 'tool').result, contains('Invalid plan'));
+  });
+
   test('a failed final reply retains the task receipt and retry is text-only after restart', () async {
     final s = await seeded();
     var step = 0;
@@ -199,4 +270,63 @@ void main() {
     expect(s.settings.themeMode, original);
     expect(s.settings.wakeTime, later);
   });
+  testWidgets('cross-screen requests with a key stage editable drafts in their own threads', (tester) async {
+    final s = await seeded();
+    final asks = <Map<String, dynamic>>[];
+    final chat = scripted(s, [reply('Got it.')], asks)..openGoal('j');
+    chat.setDraft('Private earlier draft');
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ChatScreen(state: s, chat: chat))));
+    s.chatPrompt.value = const ChatRequest('Detailed source passage', display: 'Short label', goalId: 'q');
+    await tester.pump();
+    expect(chat.goalId, 'q');
+    expect(asks, isEmpty);
+    final input = find.byKey(const Key('chat-input'));
+    expect(tester.widget<TextField>(input).controller!.text, 'Detailed source passage');
+    await tester.enterText(input, 'Edited passage question');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('chat-send')));
+    await tester.pumpAndSettle();
+    expect(asks, hasLength(1));
+    expect(jsonEncode(asks.single), contains('Edited passage question'));
+    expect(jsonEncode(asks.single), isNot(contains('Detailed source passage')));
+    expect(jsonEncode(asks.single), isNot(contains('Private earlier draft')));
+    s.chatPrompt.value = const ChatRequest('General question');
+    await tester.pump();
+    expect(chat.goalId, isNull);
+    expect(chat.draft, 'General question');
+    expect(chat.history, isEmpty);
+    expect(asks, hasLength(1));
+  });
+
+  testWidgets('saved history and failed drafts can be opened, edited and deleted without credentials', (tester) async {
+    final s = await seeded();
+    final chat = scripted(s, [reply('Kept on this phone.')], [])..openGoal('q');
+    await chat.send('First question');
+    final id = chat.threadId;
+    await s.setApiKey('');
+    await chat.send('Unsent follow-up');
+    chat.newChat();
+    final offline = AgUiChat(s);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: ChatScreen(state: s, chat: offline))));
+    await tester.tap(find.byTooltip('History'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ValueKey('thread-$id')));
+    await tester.pumpAndSettle();
+    expect(find.text('Quran plan'), findsOneWidget);
+    expect(find.textContaining('Kept on this phone.'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+    expect(find.text('Settings'), findsOneWidget);
+    final input = find.byKey(const Key('chat-input'));
+    expect(tester.widget<TextField>(input).controller!.text, 'Unsent follow-up');
+    await tester.enterText(input, 'Edited offline');
+    await tester.pump();
+    expect(AgUiChat(s).draft, 'Edited offline');
+    await tester.tap(find.byTooltip('History'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Delete chat'));
+    await tester.pumpAndSettle();
+    expect(find.text('No past chats yet.'), findsOneWidget);
+    expect(AgUiChat(s).threads, isEmpty);
+  });
+
 }
