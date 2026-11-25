@@ -77,7 +77,7 @@ class _DayEditorState extends State<DayEditor> {
         final habits = state.activeHabits.where((h) => h.isScheduledOn(day)).toList();
         final tasks = state.tasks.where((t) => taskCountsOn(t, day)).toList();
         final times = prayerTimesFor(state.settings, day).times;
-        final score = dayScore(day, state.settings, state.logs, habits: state.habits, tasks: state.tasks);
+        final score = dayScore(day, state.settings, state.logs, habits: state.habits, tasks: state.tasks, goals: state.goals);
         final wake = wakeResult(log, state.settings);
         return ConstrainedBox(
           constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.85),

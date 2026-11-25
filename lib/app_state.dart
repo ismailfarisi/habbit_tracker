@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'habits/habit.dart';
 import 'logic/stats.dart';
+import 'logic/tracking.dart' as tracking;
 import 'logic/tasks.dart';
 import 'models.dart';
 import 'services/focus_guard.dart';
@@ -95,7 +96,7 @@ class AppState extends ChangeNotifier implements TaskBackend {
 
   Future<void> _reschedule() async {
     await notifications.reschedule(settings, logs, tasks, habits: habits);
-    await HomeWidgetService.publish(settings, logs, habits: habits, tasks: tasks);
+    await HomeWidgetService.publish(settings, logs, habits: habits, tasks: tasks, goals: goals);
     try {
       await FocusGuard.instance.configure(settings);
     } on PlatformException catch (e) {
@@ -162,6 +163,10 @@ class AppState extends ChangeNotifier implements TaskBackend {
 
   // ---------- Habits ----------
   List<HabitDef> get activeHabits => habits.where((h) => !h.archived).toList();
+
+  bool tracksItem(String id, {bool task = false}) => tracking.tracksItem(settings, goals, id, task: task);
+  List<HabitDef> get trackedHabits => activeHabits.where((h) => tracksItem(h.id)).toList();
+  List<Task> get trackedTasks => tasks.where((t) => tracksItem(t.id, task: true)).toList();
 
   HabitDef? habitById(String id) {
     for (final h in habits) {
@@ -448,7 +453,11 @@ class AppState extends ChangeNotifier implements TaskBackend {
   }
 
   Future<void> updateSettings(void Function(Settings s) change) async {
+    final hiddenBefore = List.of(settings.todayHidden);
     change(settings);
+    for (final id in ['wake', 'prayers']) {
+      if (hiddenBefore.contains(id) && settings.tracks(id)) settings.trackingSince[id] = dayKey(DateTime.now());
+    }
     notifyListeners();
     await storage.saveSettings(settings);
     await _reschedule();

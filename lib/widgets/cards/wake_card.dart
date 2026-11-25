@@ -42,14 +42,7 @@ class _WakeCardState extends State<WakeCard> {
   }
 
   void _onRequest() {
-    final req = state.notifications.wakeChallengeRequest;
-    final day = req.value;
-    if (day == null || !mounted) return;
-    req.value = null;
-    final today = _now;
-    if (day != dayKey(today) || state.settings.wakeChallenge == WakeChallenge.off) return;
-    if (state.logFor(today).wakeAt != null) return;
-    openWakeChallenge(context, state);
+    if (mounted) openRequestedWake(context, state, _now);
   }
 
   String _jm(DateTime t) => DateFormat.jm().format(t);
@@ -117,4 +110,15 @@ class _WakeCardState extends State<WakeCard> {
       ],
     );
   }
+}
+
+/// The notification must also work when the Wake card is collapsed on Today.
+void openRequestedWake(BuildContext context, AppState state, DateTime today) {
+  final req = state.notifications.wakeChallengeRequest;
+  final day = req.value;
+  if (day == null) return;
+  req.value = null;
+  if (!state.settings.tracks('wake') || day != dayKey(today) ||
+      state.settings.wakeChallenge == WakeChallenge.off || state.logFor(today).wakeAt != null) return;
+  openWakeChallenge(context, state);
 }

@@ -30,7 +30,7 @@ List<MissedItem> missedYesterday(AppState state, DateTime now) {
   final log = state.logFor(day);
   final usedBefore = state.logs.keys.any((k) => k.compareTo(dayKey(now)) < 0);
   return [
-    if (usedBefore && log.wakeAt == null)
+    if (usedBefore && state.settings.tracksOn('wake', day) && log.wakeAt == null)
       MissedItem(
         id: 'wake',
         icon: Icons.wb_sunny_outlined,
@@ -41,7 +41,7 @@ List<MissedItem> missedYesterday(AppState state, DateTime now) {
           if (picked != null) await state.setWake(day, DateTime(day.year, day.month, day.day, picked.hour, picked.minute));
         },
       ),
-    if (usedBefore)
+    if (usedBefore && state.settings.tracksOn('prayers', day))
       for (final p in prayerNames)
         if (!log.prayers.contains(p))
           MissedItem(
@@ -52,7 +52,7 @@ List<MissedItem> missedYesterday(AppState state, DateTime now) {
             fix: (_) => state.setPrayerStatus(day, p, prayerOnTime),
           ),
     for (final h in state.activeHabits)
-      if (h.isScheduledOn(day) && !habitDone(log.habits[h.id], h))
+      if (state.tracksItem(h.id) && h.isScheduledOn(day) && !habitDone(log.habits[h.id], h))
         MissedItem(
           id: 'habit:${h.id}',
           emoji: h.emoji,
@@ -61,7 +61,7 @@ List<MissedItem> missedYesterday(AppState state, DateTime now) {
           fix: (_) => state.logHabit(day, h.id, state.habitEntry(day, h.id).copy()..done = true),
         ),
     for (final t in state.tasks)
-      if (taskCountsOn(t, day) && !t.isDoneOn(day))
+      if (state.tracksItem(t.id, task: true) && taskCountsOn(t, day) && !t.isDoneOn(day))
         MissedItem(
           id: 'task:${t.id}',
           icon: Icons.task_alt,

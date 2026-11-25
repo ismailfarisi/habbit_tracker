@@ -60,6 +60,15 @@ class MoneyTodayCard extends StatelessWidget {
       onTitleTap: () => openMoney(context, state),
       trailing: CountBadge(logged ? f.fmt(f.spentOn(now)) : 'Not logged'),
       children: [
+        for (final debt in f.debts.where((d) => !d.archived && d.due != null &&
+            ymd(d.due!) == ymd(now) && f.debtLeft(d) > 0))
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(debt.iOwe ? 'Pay ${debt.person}' : 'Payment from ${debt.person}'),
+            subtitle: Text('${f.fmt(f.debtLeft(debt))} due today'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => showMoneySheet(context, state, income: !debt.iOwe, category: 'Debt', debtId: debt.id),
+          ),
         if (budget > 0) ...[
           BudgetBar(spent: m.spent, limit: budget, label: 'This month', f: f),
           const SizedBox(height: 8),

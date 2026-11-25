@@ -20,6 +20,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:home_widget/home_widget.dart';
 
 import '../habits/habit.dart';
+import '../goals/goal.dart';
 import '../logic/prayer_status.dart';
 import '../logic/stats.dart';
 import '../models.dart';
@@ -66,9 +67,10 @@ WidgetSlot widgetSlotAt(
   DateTime at, {
   List<HabitDef> habits = const [],
   List<Task> tasks = const [],
+  List<Goal> goals = const [],
 }) {
   final day = dateOnly(at);
-  final score = dayScore(day, s, logs, habits: habits, tasks: tasks);
+  final score = dayScore(day, s, logs, habits: habits, tasks: tasks, goals: goals);
   final done = logs[dayKey(day)]?.prayers ?? const <String>{};
   final times = prayerTimesFor(s, day).times.entries.toList();
   final started = times.where((e) => !e.value.isAfter(at)).toList();
@@ -93,6 +95,7 @@ List<WidgetSlot> widgetSlots(
   DateTime now, {
   List<HabitDef> habits = const [],
   List<Task> tasks = const [],
+  List<Goal> goals = const [],
 }) {
   final today = dateOnly(now), tomorrow = DateTime(now.year, now.month, now.day + 1);
   final starts = <DateTime>{
@@ -102,7 +105,7 @@ List<WidgetSlot> widgetSlots(
     ...prayerTimesFor(s, tomorrow).times.values,
   }.where((t) => !t.isBefore(now)).toList()
     ..sort();
-  return [for (final t in starts) widgetSlotAt(s, logs, t, habits: habits, tasks: tasks)];
+  return [for (final t in starts) widgetSlotAt(s, logs, t, habits: habits, tasks: tasks, goals: goals)];
 }
 
 /// The JSON the native widget reads: the slots plus when they run out.
@@ -135,11 +138,12 @@ class HomeWidgetService {
     Map<String, DayLog> logs, {
     List<HabitDef> habits = const [],
     List<Task> tasks = const [],
+  List<Goal> goals = const [],
     DateTime? now,
   }) async {
     if (!enabled) return;
     final at = now ?? DateTime.now();
-    final slots = widgetSlots(s, logs, at, habits: habits, tasks: tasks);
+    final slots = widgetSlots(s, logs, at, habits: habits, tasks: tasks, goals: goals);
     try {
       if (!_registered) {
         await HomeWidget.registerInteractivityCallback(homeWidgetCallback);
@@ -179,5 +183,6 @@ Future<void> homeWidgetCallback(Uri? uri) async {
     storage.loadLogs(),
     habits: storage.loadHabits(),
     tasks: storage.loadTasks(),
+    goals: storage.loadGoals(),
   );
 }

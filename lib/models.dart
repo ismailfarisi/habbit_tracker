@@ -104,6 +104,22 @@ class Settings {
   /// Today cards shown first while unfinished, in this order.
   List<String> todayPinned;
 
+  bool showMoneyShortcut;
+
+  /// Optional setup prompts dismissed on Today.
+  List<String> dismissedTodaySetup;
+
+  /// First date to score a built-in after the user opts into it.
+  Map<String, String> trackingSince;
+
+  bool tracks(String id) => !todayHidden.contains(id);
+
+  bool tracksOn(String id, DateTime day) {
+    if (!tracks(id)) return false;
+    final start = DateTime.tryParse(trackingSince[id] ?? '');
+    return start == null || !DateTime(day.year, day.month, day.day).isBefore(start);
+  }
+
   /// Legacy (v1): only read when migrating the old articulation trainer
   /// into the "Articulation practice" habit.
   TimeOfDay trainingTime;
@@ -180,6 +196,9 @@ class Settings {
     this.wakeAlarmLoud = true,
     List<String>? todayHidden,
     List<String>? todayPinned,
+    this.showMoneyShortcut = false,
+    List<String>? dismissedTodaySetup,
+    Map<String, String>? trackingSince,
     this.trainingTime = const TimeOfDay(hour: 7, minute: 0),
     this.trainingGoalMin = 15,
     this.model = 'openai/gpt-4o-mini',
@@ -206,6 +225,8 @@ class Settings {
     this.focusStrict = false,
   }) : todayHidden = todayHidden ?? [],
        todayPinned = todayPinned ?? [],
+       dismissedTodaySetup = dismissedTodaySetup ?? [],
+       trackingSince = trackingSince ?? {},
        manualTimes = manualTimes ?? Map.of(defaultManualTimes),
        focusApps = focusApps ?? [];
 
@@ -237,6 +258,9 @@ class Settings {
     'wakeAlarmLoud': wakeAlarmLoud,
     'todayHidden': todayHidden,
     'todayPinned': todayPinned,
+    'showMoneyShortcut': showMoneyShortcut,
+    'dismissedTodaySetup': dismissedTodaySetup,
+    'trackingSince': trackingSince,
     'trainingTime': fmtHm(trainingTime),
     'trainingGoalMin': trainingGoalMin,
     'model': model,
@@ -296,6 +320,9 @@ class Settings {
       wakeAlarmLoud: j['wakeAlarmLoud'] as bool? ?? true,
       todayHidden: [for (final v in (j['todayHidden'] as List? ?? const [])) '$v'],
       todayPinned: [for (final v in (j['todayPinned'] as List? ?? const [])) '$v'],
+      showMoneyShortcut: j['showMoneyShortcut'] == true,
+      dismissedTodaySetup: [for (final v in (j['dismissedTodaySetup'] as List? ?? const [])) '$v'],
+      trackingSince: {for (final e in (j['trackingSince'] as Map? ?? const {}).entries) '${e.key}': '${e.value}'},
       trainingTime: parseHm(j['trainingTime'] as String? ?? '', fallback: d.trainingTime),
       trainingGoalMin: (j['trainingGoalMin'] as num?)?.toInt() ?? d.trainingGoalMin,
       model: (j['model'] as String?)?.trim().isNotEmpty == true ? j['model'] as String : d.model,
