@@ -1,9 +1,13 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:habit_tracker/logic/stats.dart';
+import 'package:habit_tracker/habits/habit.dart';
+import 'dart:ui' show Tristate;
 import 'package:habit_tracker/models.dart';
+import 'package:habit_tracker/quran/quran.dart';
 import 'package:habit_tracker/screens/calendar_screen.dart';
 import 'package:habit_tracker/screens/chat_screen.dart';
 
@@ -64,4 +68,69 @@ void main() {
     expect(find.textContaining('1 of 5 prayers'), findsOneWidget);
     expect(find.byKey(const Key('cal-edit-day')), findsOneWidget);
   });
+  testWidgets('month navigation clamps selection and exposes one complete day label', (tester) async {
+    final s = await loadState();
+    final today = DateTime(2032, 1, 31);
+    await tester.pumpWidget(MaterialApp(home: CalendarScreen(state: s, clock: () => today)));
+    await tester.tap(find.byTooltip('Next month'));
+    await tester.pumpAndSettle();
+    final cell = find.byKey(const ValueKey('cal-2032-02-29'));
+    final data = tester.getSemantics(cell).getSemanticsData();
+    expect(data.label, contains('Sunday, February 29, 2032'));
+    expect(data.label, contains('0 planned tasks'));
+    expect(data.label, contains('Forecast'));
+    expect(data.flagsCollection.isSelected, Tristate.isTrue);
+    expect(tester.getSize(cell).shortestSide, greaterThanOrEqualTo(48));
+    await tester.tap(find.text('Agenda'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sunday, February 29, 2032'), findsOneWidget);
+    await tester.tap(find.text('Today'));
+    await tester.pumpAndSettle();
+    expect(find.text('Saturday, January 31, 2032'), findsOneWidget);
+  });
+
+  for (final brightness in Brightness.values) {
+    testWidgets('320dp $brightness agenda keeps future tasks and habit steps read-only', (tester) async {
+      final s = await loadState();
+      final day = DateTime(2032, 1, 31);
+      QuranText.cache = QuranText.parse(File('assets/quran/quran-uthmani.txt').readAsStringSync());
+      final task = await s.addTask(title: 'Business plan', repeat: Repeat.daily);
+      await s.updateTask(task, (t) => t.guide = const TaskGuide(steps: ['Contact supplier'], sessions: ['Survey', 'Order']));
+      final h = await s.upsertHabit(HabitDef(id: 'q', title: 'Al-Mulk', guide: const TaskGuide(
+        steps: ['Recite'], quran: QuranRef(67, 1, 30, mode: 'memorise', perDay: 2),
+      )));
+      tester.view.physicalSize = const Size(320, 820);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(brightness: brightness),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(1.4)), child: child!,
+        ),
+        home: CalendarScreen(state: s, clock: () => day),
+      ));
+      await tester.tap(find.byTooltip('Next day'));
+      await tester.pumpAndSettle();
+      expect(find.text('Business plan').hitTestable(), findsOneWidget);
+      expect(tester.widget<Checkbox>(find.byType(Checkbox)).onChanged, isNull);
+      await tester.tap(find.text('Business plan'));
+      await tester.pumpAndSettle();
+      expect(find.text('Order'), findsOneWidget);
+      expect(tester.widget<CheckboxListTile>(find.byKey(const ValueKey('step-0'))).onChanged, isNull);
+      await tester.tap(find.text('1. Contact supplier'));
+      expect(find.byKey(const Key('guide-done')), findsNothing);
+      expect(s.storage.loadTasks().single.stepsDone, isEmpty);
+      expect(s.storage.loadTasks().single.doneDates, isEmpty);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('Al-Mulk').first);
+      await tester.pumpAndSettle();
+      expect(find.text('Al-Mulk 3–4'), findsOneWidget);
+      await tester.tap(find.text('1. Recite'));
+      expect(s.storage.loadLogs(), isEmpty);
+      expect(s.quranFor(h, day, today: day)!.from, 1);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
 }

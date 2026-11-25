@@ -36,14 +36,14 @@ List<GoalDayItem> goalPlanFor(AppState s, Goal g, DateTime day, {DateTime? today
   final items = <GoalDayItem>[];
   for (final h in s.habits.where((h) => g.habitIds.contains(h.id))) {
     if (!h.isScheduledOn(d)) continue;
-    final q = s.quranFor(h, d);
+    final q = s.quranFor(h, d, today: today);
     items.add(
       GoalDayItem(
         h.title,
         detail: [
           if (q != null) passageLabel(q.surah, q.from, q.to),
-          _sessionLabel(s.sessionForHabit(h, d)),
-          if ((h.guide?.sessions ?? const []).isNotEmpty && s.sessionForHabit(h, d) == null) _allPlanned,
+          _sessionLabel(s.sessionForHabit(h, d, today: today)),
+          if ((h.guide?.sessions ?? const []).isNotEmpty && s.sessionForHabit(h, d, today: today) == null) _allPlanned,
         ].where((e) => e.isNotEmpty).join(' · '),
         done: habitDone(s.habitEntry(d, h.id), h),
         habit: h,
@@ -52,14 +52,14 @@ List<GoalDayItem> goalPlanFor(AppState s, Goal g, DateTime day, {DateTime? today
   }
   final tasks = s.tasks.where((t) => g.taskIds.contains(t.id)).toList();
   for (final t in tasksForDay(tasks, d, today: today ?? dateOnly(DateTime.now()))) {
-    final q = s.quranForTask(t, d);
+    final q = s.quranForTask(t, d, today: today);
     items.add(
       GoalDayItem(
         t.title,
         detail: [
           if (q != null) passageLabel(q.surah, q.from, q.to),
-          _sessionLabel(s.sessionForTask(t, d)),
-          if (t.isRepeating && (t.guide?.sessions ?? const []).isNotEmpty && s.sessionForTask(t, d) == null) _allPlanned,
+          _sessionLabel(s.sessionForTask(t, d, today: today)),
+          if (t.isRepeating && (t.guide?.sessions ?? const []).isNotEmpty && s.sessionForTask(t, d, today: today) == null) _allPlanned,
         ].where((e) => e.isNotEmpty).join(' · '),
         done: t.isDoneOn(d),
         task: t,

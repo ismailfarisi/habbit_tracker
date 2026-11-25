@@ -18,11 +18,11 @@ class TaskGuideScreen extends StatelessWidget {
   final AppState state;
   final String? taskId;
   final String? habitId;
-  final DateTime? day;
-  const TaskGuideScreen({super.key, required this.state, this.taskId, this.habitId, this.day});
+  final DateTime? day, today;
+  const TaskGuideScreen({super.key, required this.state, this.taskId, this.habitId, this.day, this.today});
 
-  static Route<void> route(AppState state, {String? taskId, String? habitId, DateTime? day}) => MaterialPageRoute<void>(
-    builder: (_) => TaskGuideScreen(state: state, taskId: taskId, habitId: habitId, day: day),
+  static Route<void> route(AppState state, {String? taskId, String? habitId, DateTime? day, DateTime? today}) => MaterialPageRoute<void>(
+    builder: (_) => TaskGuideScreen(state: state, taskId: taskId, habitId: habitId, day: day, today: today),
   );
 
   @override
@@ -30,8 +30,10 @@ class TaskGuideScreen extends StatelessWidget {
     return ListenableBuilder(
       listenable: state,
       builder: (context, _) {
-        final now = day ?? DateTime.now();
-        final today = dayKey(now);
+        final asOf = today ?? DateTime.now();
+        final now = day ?? asOf;
+        final key = dayKey(now);
+        final isToday = DateUtils.isSameDay(now, asOf);
         final task = taskId == null ? null : state.taskById(taskId!);
         final habit = habitId == null ? null : state.habitById(habitId!);
         if (task == null && habit == null) {
@@ -39,19 +41,20 @@ class TaskGuideScreen extends StatelessWidget {
         }
         final entry = habit == null ? null : state.habitEntry(now, habit.id);
         final g = task?.guide ?? habit?.guide ?? const TaskGuide();
-        final quran = habit != null ? state.quranFor(habit, now) : state.quranForTask(task!, now);
+        final quran = habit != null ? state.quranFor(habit, now, today: asOf) : state.quranForTask(task!, now, today: asOf);
         final t = Theme.of(context);
         final ticked = task != null
-            ? task.stepsDone[today] ?? <int>{}
+            ? task.stepsDone[key] ?? <int>{}
             : {for (final v in (entry!.data['steps'] as List?) ?? const []) if (v is num) v.toInt()};
         final done = task != null ? task.isDoneOn(now) : habitDone(entry, habit!);
         final goal = state.goalFor(task?.id ?? habit!.id);
-        final future = dateOnly(now).isAfter(dateOnly(DateTime.now()));
+        final future = isForecastDay(now, today: asOf);
+        final dateLabel = DateFormat.MMMEd().format(now);
         final notes = task?.notes ?? '';
         void tick(int i, bool on) {
           if (task != null) {
             state.updateTask(task, (x) {
-              final set = x.stepsDone[today] ??= <int>{};
+              final set = x.stepsDone[key] ??= <int>{};
               on ? set.add(i) : set.remove(i);
             });
           } else {
@@ -62,7 +65,7 @@ class TaskGuideScreen extends StatelessWidget {
         }
 
         void markDone() => task != null
-            ? state.updateTask(task, (x) => x.doneDates.add(today))
+            ? state.updateTask(task, (x) => x.doneDates.add(key))
             : state.logHabit(now, habit!.id, entry!.copy()..done = true);
 
         return Scaffold(
@@ -71,7 +74,7 @@ class TaskGuideScreen extends StatelessWidget {
             actions: [
               if (task != null)
                 IconButton(
-                  tooltip: 'Edit task',
+                  tooltip: 'Edit plan',
                   icon: const Icon(Icons.edit_outlined),
                   onPressed: () => showTaskEditor(context, state, task: task),
                 ),
@@ -80,6 +83,9 @@ class TaskGuideScreen extends StatelessWidget {
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             children: [
+              if (!isToday)
+                Text('${future ? 'Forecast' : 'Log'} · ${DateFormat.yMMMMEEEEd().format(now)}',
+                    style: t.textTheme.titleMedium),
               if (goal != null)
                 Align(
                   alignment: Alignment.centerLeft,
@@ -101,7 +107,7 @@ class TaskGuideScreen extends StatelessWidget {
                   ].join(' · '),
                   style: t.textTheme.bodyMedium?.copyWith(color: t.colorScheme.onSurfaceVariant),
                 ),
-              if ((habit != null ? state.sessionForHabit(habit, now) : state.sessionForTask(task!, now)) case final s?) ...[
+              if ((habit != null ? state.sessionForHabit(habit, now, today: asOf) : state.sessionForTask(task!, now, today: asOf)) case final s?) ...[
                 const SizedBox(height: 12),
                 Container(
                   key: const Key('guide-session'),
@@ -114,7 +120,7 @@ class TaskGuideScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${future ? 'Planned for ${DateFormat.MMMEd().format(now)}' : 'Today'} · session ${s.$1} of ${s.$2}',
+                        '${isToday ? 'Today' : dateLabel} · session ${s.$1} of ${s.$2}',
                         style: t.textTheme.labelMedium?.copyWith(color: t.colorScheme.onSecondaryContainer),
                       ),
                       const SizedBox(height: 4),
@@ -134,7 +140,7 @@ class TaskGuideScreen extends StatelessWidget {
                     controlAffinity: ListTileControlAffinity.leading,
                     value: ticked.contains(i),
                     title: Text('${i + 1}. $s'),
-                    onChanged: (v) => tick(i, v == true),
+                    onChanged: future ? null : (v) => tick(i, v == true),
                   ),
               ],
               if (g.doneWhen.isNotEmpty) ...[
@@ -159,14 +165,14 @@ class TaskGuideScreen extends StatelessWidget {
                 const SizedBox(height: 16),
                 if (habit != null || task!.isRepeating)
                   Text(
-                    future ? 'Portion for ${DateFormat.MMMEd().format(now)}' : "Today's portion",
+                    isToday ? "Today's portion" : 'Portion for $dateLabel',
                     style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
                   ),
                 if (habit != null || task!.isRepeating) const SizedBox(height: 6),
                 QuranPractice(
                   portion: quran,
                   whole: habit != null ? habit.guide?.quran : state.quranPlanForTask(task!),
-                  newLabel: future ? 'New on ${DateFormat.MMMEd().format(now)}' : 'New today',
+                  newLabel: isToday ? 'New today' : 'New on $dateLabel',
                 ),
               ],
               const SizedBox(height: 20),
@@ -180,7 +186,7 @@ class TaskGuideScreen extends StatelessWidget {
                       children: [
                         Icon(Icons.check_circle, color: t.colorScheme.primary),
                         const SizedBox(width: 8),
-                        const Expanded(child: Text('Done for today. Well done for showing up.')),
+                        Expanded(child: Text(isToday ? 'Done for today. Well done for showing up.' : 'Done on $dateLabel.')),
                       ],
                     )
                   : FilledButton.icon(

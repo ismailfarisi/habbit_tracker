@@ -273,24 +273,26 @@ class TaskTile extends StatelessWidget {
   final AppState state;
   final Task task;
   final DateTime day;
-  const TaskTile({super.key, required this.state, required this.task, required this.day});
+  final DateTime? today;
+  const TaskTile({super.key, required this.state, required this.task, required this.day, this.today});
 
   @override
   Widget build(BuildContext context) {
     final c = Theme.of(context).colorScheme;
     final done = task.isDoneOn(day);
     final overdue = isOverdue(task, day);
-    final q = state.quranForTask(task, day);
+    final future = isForecastDay(day, today: today);
+    final q = state.quranForTask(task, day, today: today);
     final subtitle = [
       if (q != null) passageLabel(q.surah, q.from, q.to),
-      if (state.sessionForTask(task, day) case final s?) 'Session ${s.$1}/${s.$2}: ${s.$3}',
+      if (state.sessionForTask(task, day, today: today) case final s?) 'Session ${s.$1}/${s.$2}: ${s.$3}',
       if (overdue) 'Overdue · ${task.date}' else task.describeSchedule(),
       if (task.notes.isNotEmpty) task.notes,
     ].join(' · ');
     return ListTile(
       contentPadding: EdgeInsets.zero,
       dense: true,
-      leading: Checkbox.adaptive(value: done, onChanged: (v) => state.setTaskDone(task, day, v ?? false)),
+      leading: Checkbox.adaptive(value: done, onChanged: future ? null : (v) => state.setTaskDone(task, day, v ?? false)),
       title: Text(
         task.title,
         style: TextStyle(
@@ -301,14 +303,14 @@ class TaskTile extends StatelessWidget {
       ),
       subtitle: Text(
         subtitle,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
         style: TextStyle(color: overdue ? c.error : null),
       ),
-      trailing: task.createdByAi ? Icon(Icons.auto_awesome, size: 16, color: c.primary) : null,
+      trailing: future
+          ? IconButton(tooltip: 'Edit plan', onPressed: () => showTaskEditor(context, state, task: task), icon: const Icon(Icons.edit_outlined))
+          : task.createdByAi ? Icon(Icons.auto_awesome, size: 16, color: c.primary) : null,
       onTap: () => task.guide == null
           ? showTaskEditor(context, state, task: task)
-          : Navigator.of(context).push(TaskGuideScreen.route(state, taskId: task.id, day: day)),
+          : Navigator.of(context).push(TaskGuideScreen.route(state, taskId: task.id, day: day, today: today)),
     );
   }
 }

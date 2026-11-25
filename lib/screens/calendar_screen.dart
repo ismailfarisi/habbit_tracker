@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -15,9 +17,9 @@ import '../widgets/task_editor.dart';
 /// What one calendar day holds: how much of the wake-up, prayers, habits and
 /// tasks was done, and the goal milestones due.
 class CalendarDay {
-  final int done, total, tasks;
+  final int done, total, tasks, habits;
   final List<Milestone> milestones;
-  const CalendarDay(this.done, this.total, this.tasks, this.milestones);
+  const CalendarDay(this.done, this.total, this.tasks, this.milestones, {this.habits = 0});
   double get fraction => total == 0 ? 0 : done / total;
 }
 
@@ -26,12 +28,13 @@ CalendarDay calendarDay(AppState s, DateTime day, DateTime today) {
   final past = !d.isAfter(dateOnly(today));
   final log = s.logs[dayKey(d)];
   final tasks = tasksForDay(s.tasks, d, today: today);
+  final habits = s.activeHabits.where((h) => h.isScheduledOn(d)).toList();
   var done = 0, total = 0;
   if (past) {
     total += 1 + prayerNames.length;
     if (log?.wakeAt != null) done++;
     done += prayerNames.where((p) => log?.prayers.contains(p) ?? false).length;
-    for (final h in s.habits.where((h) => !h.archived && h.isScheduledOn(d))) {
+    for (final h in habits) {
       total++;
       if (habitDone(log?.habits[h.id], h)) done++;
     }
@@ -43,7 +46,7 @@ CalendarDay calendarDay(AppState s, DateTime day, DateTime today) {
     for (final g in s.goals.where((g) => !g.archived))
       for (final m in g.milestones)
         if (m.due == key) m,
-  ]);
+  ], habits: habits.length);
 }
 
 /// A month at a glance: each past day shaded by how much was done, dots for
@@ -59,10 +62,18 @@ class CalendarScreen extends StatefulWidget {
 
 class _CalendarScreenState extends State<CalendarScreen> {
   late DateTime _today = dateOnly((widget.clock ?? DateTime.now)());
-  late DateTime _month = DateTime(_today.year, _today.month);
   late DateTime _selected = _today;
+  bool? _agendaChoice;
 
-  void _shift(int months) => setState(() => _month = DateTime(_month.year, _month.month + months));
+  void _shift(int delta, bool agenda) => setState(() {
+    if (agenda) {
+      _selected = DateTime(_selected.year, _selected.month, _selected.day + delta);
+    } else {
+      final month = DateTime(_selected.year, _selected.month + delta);
+      final day = math.min(_selected.day, DateUtils.getDaysInMonth(month.year, month.month));
+      _selected = DateTime(month.year, month.month, day);
+    }
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -76,7 +87,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
           TextButton(
             onPressed: () => setState(() {
               _today = dateOnly((widget.clock ?? DateTime.now)());
-              _month = DateTime(_today.year, _today.month);
               _selected = _today;
             }),
             child: const Text('Today'),
@@ -86,46 +96,85 @@ class _CalendarScreenState extends State<CalendarScreen> {
       body: ListenableBuilder(
         listenable: state,
         builder: (context, _) {
-          final first = _month;
-          final lead = (first.weekday - 1) % 7;
-          final days = DateUtils.getDaysInMonth(first.year, first.month);
-          const names = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+          final first = DateTime(_selected.year, _selected.month);
+          final scale = MediaQuery.textScalerOf(context);
+          final agenda = _agendaChoice ?? (MediaQuery.sizeOf(context).width < 600 || scale.scale(14) > 20);
+          final unit = agenda ? 'day' : 'month';
           return ListView(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
             children: [
+              Align(
+                child: SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(value: false, label: Text('Month')),
+                    ButtonSegment(value: true, label: Text('Agenda')),
+                  ],
+                  selected: {agenda},
+                  onSelectionChanged: (v) => setState(() => _agendaChoice = v.single),
+                ),
+              ),
               Row(
                 children: [
-                  IconButton(tooltip: 'Previous month', onPressed: () => _shift(-1), icon: const Icon(Icons.chevron_left)),
+                  IconButton(tooltip: 'Previous $unit', onPressed: () => _shift(-1, agenda), icon: const Icon(Icons.chevron_left)),
                   Expanded(
                     child: Text(
-                      DateFormat.yMMMM().format(first),
+                      agenda ? DateFormat.MMMEd().format(_selected) : DateFormat.yMMMM().format(first),
                       textAlign: TextAlign.center,
                       style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                     ),
                   ),
-                  IconButton(tooltip: 'Next month', onPressed: () => _shift(1), icon: const Icon(Icons.chevron_right)),
+                  IconButton(tooltip: 'Next $unit', onPressed: () => _shift(1, agenda), icon: const Icon(Icons.chevron_right)),
                 ],
               ),
-              Row(
-                children: [
-                  for (final n in names)
-                    Expanded(
-                      child: Center(child: Text(n, style: t.textTheme.labelSmall?.copyWith(color: c.onSurfaceVariant))),
+              if (!agenda) ...[
+                LayoutBuilder(builder: (context, constraints) {
+                  final width = math.max(constraints.maxWidth, 7.0 * math.max(48.0, scale.scale(32)));
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: width,
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              for (final name in const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'])
+                                Expanded(child: Center(child: Text(name, style: t.textTheme.labelSmall))),
+                            ],
+                          ),
+                          GridView.count(
+                            crossAxisCount: 7,
+                            shrinkWrap: true,
+                            primary: false,
+                            physics: const NeverScrollableScrollPhysics(),
+                            mainAxisExtent: math.max(52, scale.scale(18) + 28),
+                            children: [
+                              for (var i = 1; i < first.weekday; i++) const SizedBox.shrink(),
+                              for (var d = 1; d <= DateUtils.getDaysInMonth(first.year, first.month); d++)
+                                _cell(context, DateTime(first.year, first.month, d)),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              GridView.count(
-                crossAxisCount: 7,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                childAspectRatio: 0.9,
-                children: [
-                  for (var i = 0; i < lead; i++) const SizedBox.shrink(),
-                  for (var d = 1; d <= days; d++) _cell(context, DateTime(first.year, first.month, d)),
-                ],
-              ),
-              const SizedBox(height: 12),
+                  );
+                }),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Wrap(
+                    spacing: 12,
+                    children: [
+                      for (final (icon, label) in const [
+                        (Icons.circle, 'Planned'), (Icons.flag, 'Milestone'), (Icons.check, 'Progress logged'),
+                      ])
+                        Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(icon, size: 12, color: c.onSurfaceVariant),
+                          const SizedBox(width: 4),
+                          Text(label, style: t.textTheme.bodySmall),
+                        ]),
+                    ],
+                  ),
+                ),
+              ],
               _DayDetails(key: ValueKey(_selected), state: state, day: _selected, today: _today),
             ],
           );
@@ -139,42 +188,44 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final info = calendarDay(widget.state, d, _today);
     final selected = DateUtils.isSameDay(d, _selected);
     final isToday = DateUtils.isSameDay(d, _today);
-    final fill = info.total == 0 ? Colors.transparent : Color.lerp(c.surfaceContainerHighest, c.primary, info.fraction)!;
-    final onFill = info.fraction > 0.55 ? c.onPrimary : c.onSurface;
-    return Padding(
-      padding: const EdgeInsets.all(2),
+    final fill = selected ? c.primaryContainer : info.done > 0 ? c.secondaryContainer : c.surfaceContainerLow;
+    final ink = selected ? c.onPrimaryContainer : info.done > 0 ? c.onSecondaryContainer : c.onSurface;
+    final markers = [
+      if (info.tasks + info.habits > 0) Icons.circle,
+      if (info.milestones.isNotEmpty) Icons.flag,
+      if (info.done > 0) Icons.check,
+    ];
+    void select() => setState(() => _selected = d);
+    return Semantics(
+      key: ValueKey('cal-${dayKey(d)}'),
+      excludeSemantics: true,
+      button: true,
+      selected: selected,
+      onTap: select,
+      label: [
+        DateFormat.yMMMMEEEEd().format(d),
+        if (isToday) 'Today',
+        '${info.tasks} planned tasks', '${info.habits} planned habits',
+        '${info.milestones.length} milestones',
+        if (info.total > 0) '${info.done} of ${info.total} done' else 'Forecast',
+      ].join(', '),
       child: InkWell(
-        key: ValueKey('cal-${dayKey(d)}'),
+        onTap: select,
         borderRadius: BorderRadius.circular(10),
-        onTap: () => setState(() => _selected = d),
         child: Container(
+          margin: const EdgeInsets.all(2),
           decoration: BoxDecoration(
             color: fill,
             borderRadius: BorderRadius.circular(10),
-            border: selected
-                ? Border.all(color: c.primary, width: 2)
-                : isToday
-                ? Border.all(color: c.outline)
-                : null,
+            border: selected || isToday ? Border.all(color: selected ? c.primary : c.outline, width: selected ? 2 : 1) : null,
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text('${d.day}', style: TextStyle(color: onFill, fontWeight: isToday ? FontWeight.w700 : null)),
-              const SizedBox(height: 2),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (info.tasks > 0)
-                    Container(
-                      width: 5,
-                      height: 5,
-                      margin: const EdgeInsets.symmetric(horizontal: 1),
-                      decoration: BoxDecoration(color: info.fraction > 0.55 ? c.onPrimary : c.primary, shape: BoxShape.circle),
-                    ),
-                  if (info.milestones.isNotEmpty) Icon(Icons.flag, size: 10, color: c.tertiary),
-                ],
-              ),
+              Text('${d.day}', style: TextStyle(color: ink, fontWeight: isToday ? FontWeight.w700 : null)),
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                for (final icon in markers) Icon(icon, size: icon == Icons.circle ? 6 : 12, color: ink),
+              ]),
             ],
           ),
         ),
@@ -201,6 +252,22 @@ class _DayDetails extends StatelessWidget {
       padding: const EdgeInsets.only(top: 12, bottom: 2),
       child: Text(s, style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
     );
+    final groups = <Goal?, List<Widget>>{};
+    for (final h in habits) {
+      (groups[state.goalFor(h.id)] ??= []).add(_habitRow(context, h, log, past));
+    }
+    for (final task in tasks) {
+      (groups[state.goalFor(task.id)] ??= []).add(TaskTile(state: state, task: task, day: day, today: today));
+    }
+    for (final g in state.goals.where((g) => !g.archived)) {
+      for (final m in g.milestones.where((m) => m.due == dayKey(day))) {
+        (groups[g] ??= []).add(ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(m.done ? Icons.flag : Icons.outlined_flag),
+          title: Text('Milestone: ${m.title}'),
+        ));
+      }
+    }
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -226,17 +293,13 @@ class _DayDetails extends StatelessWidget {
               ],
             ),
             if (past && info.total > 0) Text('${info.done} of ${info.total} done', style: muted),
-            for (final m in info.milestones)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Row(
-                  children: [
-                    Icon(m.done ? Icons.flag : Icons.outlined_flag, size: 18, color: t.colorScheme.tertiary),
-                    const SizedBox(width: 6),
-                    Expanded(child: Text('Milestone: ${m.title}')),
-                  ],
-                ),
-              ),
+            if (!past)
+              Text('Forecast · A missed session moves later portions and sessions back.', style: muted),
+            for (final g in [...groups.keys.whereType<Goal>(), if (groups.containsKey(null)) null]) ...[
+              heading(g?.title ?? (groups.length == 1 ? 'Schedule' : 'Other plans')),
+              ...groups[g]!,
+            ],
+            if (groups.isEmpty) Text(past ? 'No tasks or habits scheduled.' : 'Nothing planned yet.', style: muted),
             if (past) ...[
               heading('Wake-up and prayers'),
               Text(
@@ -246,13 +309,6 @@ class _DayDetails extends StatelessWidget {
                 ].join(' · '),
               ),
             ],
-            if (habits.isNotEmpty) ...[
-              heading('Habits'),
-              for (final h in habits) _habitRow(context, h, log, past),
-            ],
-            heading('Tasks'),
-            if (tasks.isEmpty) Text(past ? 'No tasks that day.' : 'Nothing planned yet.', style: muted),
-            for (final x in tasks) TaskTile(state: state, task: x, day: day),
             if (!past)
               Align(
                 alignment: Alignment.centerLeft,
@@ -271,7 +327,7 @@ class _DayDetails extends StatelessWidget {
 
   Widget _habitRow(BuildContext context, HabitDef h, DayLog? log, bool past) {
     final done = habitDone(log?.habits[h.id], h);
-    final q = state.quranFor(h, day);
+    final q = state.quranFor(h, day, today: today);
     return ListTile(
       contentPadding: EdgeInsets.zero,
       dense: true,
@@ -281,9 +337,9 @@ class _DayDetails extends StatelessWidget {
         color: done ? Theme.of(context).colorScheme.primary : null,
       ),
       title: Text('${h.emoji} ${h.title}'),
-      subtitle: done || (q == null && state.sessionForHabit(h, day) == null) ? null : Text(goalHabitSubtitle(state, h, day)),
+      subtitle: done || (q == null && state.sessionForHabit(h, day, today: today) == null) ? null : Text(goalHabitSubtitle(state, h, day, today: today)),
       trailing: h.guide == null ? null : const Icon(Icons.chevron_right),
-      onTap: h.guide == null ? null : () => Navigator.of(context).push(TaskGuideScreen.route(state, habitId: h.id, day: day)),
+      onTap: h.guide == null ? null : () => Navigator.of(context).push(TaskGuideScreen.route(state, habitId: h.id, day: day, today: today)),
     );
   }
 }
