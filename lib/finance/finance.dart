@@ -132,6 +132,34 @@ class MoneyEntry {
   );
 }
 
+class FinanceReminder {
+  DateTime? enabledOn;
+  DateTime? snoozeFrom, snoozeTo;
+  bool get enabled => enabledOn != null;
+
+  void setEnabled(bool enabled, DateTime today) {
+    enabledOn = enabled ? DateTime(today.year, today.month, today.day) : null;
+    snoozeFrom = null;
+    snoozeTo = null;
+  }
+
+  Map<String, dynamic> toJson() => {
+    if (enabledOn != null) 'enabledOn': ymd(enabledOn!),
+    if (snoozeFrom != null) 'snoozeFrom': ymd(snoozeFrom!),
+    if (snoozeTo != null) 'snoozeTo': ymd(snoozeTo!),
+  };
+
+  FinanceReminder();
+
+  FinanceReminder.fromJson(Object? data) {
+    if (data is Map) {
+      enabledOn = _date(data['enabledOn']);
+      snoozeFrom = _date(data['snoozeFrom']);
+      snoozeTo = _date(data['snoozeTo']);
+    }
+  }
+}
+
 class SavingsPot {
   final String id;
   String name;
@@ -140,6 +168,8 @@ class SavingsPot {
   DateTime? by;
   String? goalId;
   bool archived;
+
+  FinanceReminder reminder = FinanceReminder();
 
   SavingsPot({
     String? id,
@@ -152,6 +182,7 @@ class SavingsPot {
   }) : id = id ?? 'p${_id()}';
 
   Map<String, dynamic> toJson() => {
+    if (reminder.enabled) 'reminder': reminder.toJson(),
     'id': id,
     'name': name,
     'emoji': emoji,
@@ -169,7 +200,7 @@ class SavingsPot {
     by: _date(j['by']),
     goalId: j['goalId'] as String?,
     archived: j['archived'] == true,
-  );
+  )..reminder = FinanceReminder.fromJson(j['reminder']);
 }
 
 class Debt {
@@ -183,6 +214,8 @@ class Debt {
   String note;
   bool archived;
 
+  FinanceReminder reminder = FinanceReminder();
+
   Debt({
     String? id,
     required this.person,
@@ -194,6 +227,7 @@ class Debt {
   }) : id = id ?? 'd${_id()}';
 
   Map<String, dynamic> toJson() => {
+    if (reminder.enabled) 'reminder': reminder.toJson(),
     'id': id,
     'person': person,
     'amount': amount,
@@ -211,7 +245,7 @@ class Debt {
     due: _date(j['due']),
     note: j['note'] as String? ?? '',
     archived: j['archived'] == true,
-  );
+  )..reminder = FinanceReminder.fromJson(j['reminder']);
 }
 
 const goldNisabGrams = 85.0;
@@ -241,6 +275,8 @@ class ZakatInfo {
   DateTime? lastPaid;
   DateTime? valuedOn;
 
+  FinanceReminder reminder = FinanceReminder();
+
   ZakatInfo({
     this.nisabBasis = 'silver',
     this.goldPricePerGram = 0,
@@ -260,6 +296,7 @@ class ZakatInfo {
   });
 
   Map<String, dynamic> toJson() => {
+    if (reminder.enabled) 'reminder': reminder.toJson(),
     'nisabBasis': nisabBasis,
     'goldPricePerGram': goldPricePerGram,
     'silverPricePerGram': silverPricePerGram,
@@ -295,7 +332,7 @@ class ZakatInfo {
       hijriDay: (j['hijriDay'] as num?)?.toInt(),
       valuedOn: _date(j['valuedOn']),
       lastPaid: _date(j['lastPaid']),
-    );
+    )..reminder = FinanceReminder.fromJson(j['reminder']);
   }
 }
 
@@ -374,6 +411,16 @@ class MonthSummary {
   int get left => income - spent - saved + withdrawn - debtOut + debtIn;
 }
 
+class RecurringExpense {
+  final String id, name, category;
+  final int amount;
+  RecurringExpense({String? id, required this.name, required this.category, required this.amount})
+      : id = id ?? 'r${_id()}';
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'category': category, 'amount': amount};
+  factory RecurringExpense.fromJson(Map<String, dynamic> j) => RecurringExpense(id: j['id'] as String?,
+    name: j['name'] as String, category: j['category'] as String, amount: (j['amount'] as num).toInt());
+}
+
 class _Ledger {
   String currency;
   List<MoneyEntry> entries;
@@ -395,16 +442,22 @@ class _Ledger {
        budgets = budgets ?? {},
        pots = pots ?? [],
        debts = debts ?? [],
-       zakat = zakat ?? ZakatInfo();
+       zakat = zakat ?? ZakatInfo() {
+    locked = hasAmounts;
+  }
 
+  final List<RecurringExpense> recurring = [];
+  final List<String> customCategories = [];
   bool locked = false;
-  bool get hasAmounts => entries.isNotEmpty || budgets.isNotEmpty || pots.isNotEmpty || debts.isNotEmpty ||
+  bool get hasAmounts => recurring.isNotEmpty || entries.isNotEmpty || budgets.isNotEmpty || pots.isNotEmpty || debts.isNotEmpty ||
       [zakat.cash, zakat.investments, zakat.businessStock, zakat.receivables, zakat.debtsDue,
         zakat.goldGrams, zakat.silverGrams, zakat.goldPricePerGram, zakat.silverPricePerGram].any((n) => n != 0);
 
 
   Map<String, dynamic> toJson() => {
     'currency': currency,
+    if (recurring.isNotEmpty) 'recurring': recurring.map((r) => r.toJson()).toList(),
+    if (customCategories.isNotEmpty) 'customCategories': customCategories,
     if (locked || hasAmounts) 'currencyLocked': true,
     'entries': entries.map((e) => e.toJson()).toList(),
     'budgets': budgets,
@@ -417,7 +470,7 @@ class _Ledger {
     List<T> list<T>(String k, T Function(Map<String, dynamic>) f) => [
       for (final e in (j[k] as List? ?? const [])) f((e as Map).cast<String, dynamic>()),
     ];
-    return _Ledger(
+    final ledger = _Ledger(
       currency: j['currency'] as String? ?? 'USD',
       entries: list('entries', MoneyEntry.fromJson),
       budgets: {
@@ -426,7 +479,11 @@ class _Ledger {
       pots: list('pots', SavingsPot.fromJson),
       debts: list('debts', Debt.fromJson),
       zakat: j['zakat'] is Map ? ZakatInfo.fromJson((j['zakat'] as Map).cast()) : null,
-    )..locked = j['currencyLocked'] == true;
+    )
+      ..recurring.addAll(list('recurring', RecurringExpense.fromJson))
+      ..customCategories.addAll((j['customCategories'] as List? ?? const []).whereType<String>());
+    ledger.locked = j['currencyLocked'] == true || ledger.hasAmounts;
+    return ledger;
   }
 
 }
@@ -440,6 +497,9 @@ class Finance {
       : _active = _Ledger(currency: currency, entries: entries, budgets: budgets, pots: pots, debts: debts, zakat: zakat);
 
   Finance._(this._active);
+  List<RecurringExpense> get recurring => _active.recurring;
+  List<String> get customCategories => _active.customCategories;
+  List<String> get expenseCategories => {...spendCategories, ...customCategories}.toList();
   String get currency => _active.currency;
   bool get currencyLocked => _active.locked || _active.hasAmounts;
   bool get isEmpty => !_active.hasAmounts;
@@ -457,7 +517,9 @@ class Finance {
   }
 
   Set<String> get ledgerCurrencies => {currency, ..._others.keys};
-  Iterable<Finance> get ledgers => [Finance._(_active), ..._others.values.map(Finance._)];
+  /// A stable view for actions such as Undo that can outlive a ledger switch.
+  Finance get activeLedger => Finance._(_active);
+  Iterable<Finance> get ledgers => [activeLedger, ..._others.values.map(Finance._)];
 
   /// Explicit user action. Previous balances remain in their original units.
   void openLedger(String code) {
@@ -531,6 +593,41 @@ class Finance {
     return MonthSummary(income, spent, saved, sadaqah, by, withdrawn, debtOut, debtIn);
   }
 
+  int potChangeInMonth(String id, DateTime month) => inMonth(month).where((e) => e.potId == id)
+      .fold(0, (sum, e) => sum + (e.income ? -e.amount : e.amount));
+
+  /// Equal installments from the start of this month through the target month.
+  int monthlyContribution(SavingsPot pot, DateTime today) {
+    if (pot.by == null) return 0;
+    final remaining = pot.target - potSaved(pot.id) + potChangeInMonth(pot.id, today);
+    if (remaining <= 0 || pot.target <= potSaved(pot.id)) return 0;
+    final months = (pot.by!.year - today.year) * 12 + pot.by!.month - today.month + 1;
+    return months <= 1 ? remaining : (remaining + months - 1) ~/ months;
+  }
+
+  int contributionLeftThisMonth(SavingsPot pot, DateTime today) {
+    final left = monthlyContribution(pot, today) - potChangeInMonth(pot.id, today);
+    return left.clamp(0, pot.target);
+  }
+
+  /// Reserves the larger of the category budget or expected recurring bills.
+  /// Spending already logged in that category has already reduced cash flow.
+  int afterPlannedExpenses(DateTime day) {
+    final m = month(day);
+    final expected = <String, int>{};
+    for (final bill in recurring) {
+      expected.update(bill.category, (v) => v + bill.amount, ifAbsent: () => bill.amount);
+    }
+    var cash = m.left;
+    for (final category in {...budgets.keys, ...expected.keys}) {
+      final limit = budgets[category] ?? 0;
+      final bills = expected[category] ?? 0;
+      final remaining = (limit > bills ? limit : bills) - (m.byCategory[category] ?? 0);
+      if (remaining > 0) cash -= remaining;
+    }
+    return cash;
+  }
+
   List<MoneyEntry> ledgerEntries({DateTime? month, String? category, String? goalId}) {
     final items = month == null ? entries : inMonth(month);
     final ids = {for (final p in pots.where((p) => p.goalId == goalId)) p.id};
@@ -575,6 +672,8 @@ class Finance {
     b.writeln(
       '- This month: income ${fmt(m.income)}, spent ${fmt(m.spent)}, saved ${fmt(m.saved)}, sadaqah ${fmt(m.sadaqah)}.',
     );
+    b.writeln('- Net cash flow ${fmt(m.left)}. After remaining budgets and expected bills: ${fmt(afterPlannedExpenses(now))}.');
+    if (customCategories.isNotEmpty) b.writeln('- Custom spending categories: ${customCategories.join(', ')}.');
     b.writeln('- Spent today: ${fmt(spentOn(now))}. Sadaqah this week: ${fmt(sadaqahInWeek(now))}.');
     if (budgets.isNotEmpty) {
       b.writeln(

@@ -128,6 +128,19 @@ void main() {
       expect(priced['valuation_date'], '2026-11-25');
     });
 
+    test('Undo targets its original ledger after a switch', () async {
+      await tools.execute(call('set_budget', {'category': 'Food', 'amount': 500}));
+      await s.updateFinance((f) => f.openLedger('KWD'));
+      await s.setBudget('Food', 1000);
+      await acts.last.undo!();
+      expect(s.finance.budgets['Food'], 1000);
+      await s.updateFinance((f) => f.openLedger('AED'));
+      expect(s.finance.budgets, isEmpty);
+      expect(jsonDecode(await tools.execute(call('log_money',
+        {'amount': 12, 'category': 'Food', 'currency': 'KWD'})))['error'], contains('AED'));
+      expect(s.finance.entries, isEmpty);
+    });
+
     test('money_summary and set_currency', () async {
       await tools.execute(call('log_money', {'amount': 20, 'category': 'Sadaqah'}));
       final r = jsonDecode(await tools.execute(call('money_summary', {})));
@@ -275,6 +288,39 @@ void main() {
       await tester.pumpAndSettle();
       expect(s.habits.where((h) => h.templateId == 'no-spend'), hasLength(1));
       expect(find.byKey(const Key('money-habit-no-spend')), findsNothing);
+    });
+
+    testWidgets('correct the 31st entry from the ledger without changing its ID', (tester) async {
+      final s = (await tester.runAsync(state))!;
+      await s.updateFinance((f) {
+        f.currency = 'AED';
+        for (var i = 0; i < 31; i++) {
+          f.entries.add(MoneyEntry(at: DateTime(2025, 1, i + 1), amount: 100, category: 'Food', note: 'Receipt ${i + 1}'));
+        }
+      });
+      final id = s.finance.entries.first.id;
+      await pump(tester, LedgerScreen(state: s));
+      await tester.scrollUntilVisible(find.text('Receipt 1'), 350);
+      await tester.tap(find.text('Receipt 1'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('money-amount')), '2.50');
+      await tester.tap(find.byKey(const Key('money-save')));
+      await tester.pumpAndSettle();
+      expect(s.finance.entries, hasLength(31));
+      expect(s.finance.entries.first.id, id);
+      expect(s.finance.month(DateTime(2025, 1)).spent, 3250);
+    });
+
+    testWidgets('unpriced gold hides the paid shortcut even with silver nisab priced', (tester) async {
+      final s = (await tester.runAsync(state))!;
+      await s.updateFinance((f) => f.zakat = ZakatInfo(cash: 1000000, goldGrams: 100, silverPricePerGram: 300));
+      await pump(tester, ZakatScreen(state: s));
+      expect(find.text('Estimate incomplete'), findsOneWidget);
+      expect(find.textContaining('Missing price per gram: gold'), findsOneWidget);
+      expect(find.textContaining('I paid'), findsNothing);
+      await tester.enterText(find.byKey(const Key('zakat-gold-price')), '50');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('I paid'), findsOneWidget);
     });
 
     testWidgets('Today shows the Money card once money is logged', (tester) async {

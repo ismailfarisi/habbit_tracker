@@ -13,10 +13,12 @@ import '../widgets/ask_chat.dart';
 import '../widgets/cards/section_card.dart';
 import '../widgets/document_viewer.dart';
 import 'finance.dart';
+import 'finance_agenda.dart';
 import 'money_resources.dart';
 import 'ledger_csv.dart';
 
 part 'ledger_screen.dart';
+part 'money_planning.dart';
 
 void openMoney(BuildContext context, AppState state) =>
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => MoneyScreen(state: state)));
@@ -170,8 +172,17 @@ class MoneyScreen extends StatelessWidget {
                   askChat(state, 'Help me plan my money this month: a budget, savings and sadaqah.', context: context),
             ),
             PopupMenuButton<String>(
-              onSelected: (v) => v == 'currency' ? pickCurrency(context, state) : null,
-              itemBuilder: (_) => [PopupMenuItem(value: 'currency', child: Text('Currency · ${f.currency}'))],
+              onSelected: (v) {
+                if (v == 'currency') {
+                  pickCurrency(context, state);
+                } else {
+                  Navigator.push(context, MaterialPageRoute<void>(builder: (_) => _FinanceReminders(state: state)));
+                }
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem(value: 'currency', child: Text('Currency · ${f.currency}')),
+                const PopupMenuItem(value: 'reminders', child: Text('Personal reminders')),
+              ],
             ),
           ],
         ),
@@ -248,6 +259,10 @@ class _BudgetsCard extends StatelessWidget {
       icon: Icons.pie_chart_outline,
       trailing: TextButton(style: compactButton, onPressed: () => _editBudget(context), child: const Text('Set')),
       children: [
+        TextButton.icon(
+          onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => _MonthlyPlan(state: state))),
+          icon: const Icon(Icons.calendar_month_outlined), label: const Text('Plan this month'),
+        ),
         if (f.budgets.isEmpty)
           const _Hint('Give a category a monthly limit, e.g. Food 1,200. A bar shows what is left.'),
         for (final e in f.budgets.entries)
@@ -269,7 +284,7 @@ class _BudgetsCard extends StatelessWidget {
 
   Future<void> _editBudget(BuildContext context, {String? category}) async {
     final f = state.finance;
-    var cat = category ?? spendCategories.firstWhere((c) => !f.budgets.containsKey(c), orElse: () => 'Food');
+    var cat = category ?? f.expenseCategories.firstWhere((c) => !f.budgets.containsKey(c), orElse: () => 'Food');
     final ctl = TextEditingController(text: f.budgets[cat] == null ? '' : '${toMajor(f.budgets[cat]!, f.currency)}');
     final res = await showDialog<int>(
       context: context,
@@ -281,7 +296,7 @@ class _BudgetsCard extends StatelessWidget {
             children: [
               DropdownButtonFormField<String>(
                 initialValue: cat,
-                items: [for (final c in spendCategories) DropdownMenuItem(value: c, child: Text(c))],
+                items: [for (final c in {...f.expenseCategories, cat}) DropdownMenuItem(value: c, child: Text(c))],
                 onChanged: (v) => set(() => cat = v ?? cat),
               ),
               TextField(
@@ -358,8 +373,7 @@ class _PotsCard extends StatelessWidget {
     final left = p.target - f.potSaved(p.id);
     if (p.by == null || left <= 0) return left <= 0 ? ' · reached 🎉' : '';
     final now = DateTime.now();
-    final months = (p.by!.year - now.year) * 12 + p.by!.month - now.month;
-    return months <= 0 ? '' : ' · ${f.fmt((left / months).ceil())}/month';
+    return ' · ${f.fmt(f.monthlyContribution(p, now))}/month';
   }
 }
 
@@ -368,10 +382,12 @@ Future<void> editPot(BuildContext context, AppState state, {SavingsPot? pot}) as
   final name = TextEditingController(text: pot?.name ?? '');
   final target = TextEditingController(text: pot == null ? '' : '${toMajor(pot.target, f.currency)}');
   var by = pot?.by;
+  var goalId = pot?.goalId;
   final res = await showDialog<String>(
     context: context,
     builder: (c) => StatefulBuilder(
       builder: (c, set) => AlertDialog(
+        scrollable: true,
         title: Text(pot == null ? 'New savings pot' : 'Edit pot'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -393,13 +409,25 @@ Future<void> editPot(BuildContext context, AppState state, {SavingsPot? pot}) as
               onTap: () async {
                 final d = await showDatePicker(
                   context: c,
-                  firstDate: DateTime.now(),
+                  firstDate: by != null && by!.isBefore(DateTime.now()) ? by! : DateTime.now(),
                   lastDate: DateTime(DateTime.now().year + 30),
                   initialDate: by ?? DateTime.now().add(const Duration(days: 365)),
                 );
                 if (d != null) set(() => by = d);
               },
             ),
+            if (state.goals.isNotEmpty || goalId != null)
+              DropdownButtonFormField<String>(
+                initialValue: goalId, isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Linked goal'),
+                items: [
+                  const DropdownMenuItem(child: Text('No goal')),
+                  for (final g in state.goals) DropdownMenuItem(value: g.id, child: Text(g.title)),
+                  if (goalId != null && state.goalById(goalId!) == null)
+                    DropdownMenuItem(value: goalId, child: const Text('Previous goal')),
+                ],
+                onChanged: (v) => set(() => goalId = v),
+              ),
           ],
         ),
         actions: [
@@ -417,7 +445,8 @@ Future<void> editPot(BuildContext context, AppState state, {SavingsPot? pot}) as
     (pot ?? SavingsPot(name: '', target: 0))
       ..name = name.text.trim()
       ..target = amount
-      ..by = by,
+      ..by = by
+      ..goalId = goalId,
   );
 }
 
@@ -737,11 +766,13 @@ class _ZakatScreenState extends State<ZakatScreen> {
             if ((r.due ?? 0) > 0)
               TextButton(
                 onPressed: () async {
-                  await _save(pop: false);
-                  await widget.state.addMoney(
-                    MoneyEntry(at: DateTime.now(), amount: r.due!, category: 'Zakat', note: 'Zakat'),
-                  );
-                  await widget.state.updateFinance((f) => f.zakat.lastPaid = DateTime.now());
+                  if (_saved) return;
+                  _saved = true;
+                  final entry = MoneyEntry(at: DateTime.now(), amount: r.due!, category: 'Zakat', note: 'Zakat');
+                  await widget.state.updateFinance((f) {
+                    f.zakat = ZakatInfo.fromJson(z.toJson());
+                    f.entries.add(entry);
+                  });
                   if (context.mounted) Navigator.pop(context);
                 },
                 child: Text('I paid ${f.fmt(r.due!)}: log it'),
@@ -966,7 +997,7 @@ class _MoneySheetState extends State<_MoneySheet> {
   @override
   Widget build(BuildContext context) {
     final f = widget.state.finance;
-    final cats = income ? incomeCategories : spendCategories;
+    final cats = income ? incomeCategories : f.expenseCategories;
     final title = widget.potId != null
         ? f.pot(widget.potId!)?.name ?? 'Savings transfer'
         : widget.debtId != null

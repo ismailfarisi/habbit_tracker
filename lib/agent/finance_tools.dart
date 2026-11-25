@@ -15,7 +15,11 @@ Map<String, dynamic> _fn(String name, String description, Map<String, dynamic> p
   'function': {
     'name': name,
     'description': description,
-    'parameters': {'type': 'object', 'properties': props, 'required': required},
+    'parameters': {'type': 'object', 'properties': {
+      ...props,
+      if (const {'log_money', 'set_budget', 'create_savings_pot', 'add_debt', 'update_zakat'}.contains(name))
+        'currency': {'type': 'string', 'description': 'If the user specifies a currency, pass its ISO code. It must match the active ledger.'},
+    }, 'required': required},
   },
 };
 
@@ -67,7 +71,7 @@ final financeToolDefinitions = <Map<String, dynamic>>[
     'set_budget',
     'Set or remove (amount 0) a monthly limit for a spending category.',
     {
-      'category': {'type': 'string', 'enum': spendCategories},
+      'category': {'type': 'string', 'description': 'A spending category in the current ledger'},
       'amount': _amount,
     },
     ['category', 'amount'],
@@ -167,12 +171,16 @@ class FinanceTools {
 
   Future<String> execute(ToolCall call) async {
     final a = call.arguments.trim().isEmpty ? <String, dynamic>{} : jsonDecode(call.arguments) as Map<String, dynamic>;
+    final ledger = f.activeLedger;
+    if (a['currency'] is String && (a['currency'] as String).toUpperCase() != f.currency) {
+      return _err('This ledger uses ${f.currency}. Choose the matching ledger in Money.');
+    }
     switch (call.name) {
       case 'log_money':
         final amount = _minor(a['amount']);
         if (amount == null || amount == 0) return _err('amount must be a positive number');
         final income = a['income'] == true;
-        final cats = income ? incomeCategories : spendCategories;
+        final cats = income ? incomeCategories : f.expenseCategories;
         final cat = cats.firstWhere(
           (c) => c.toLowerCase() == '${a['category']}'.toLowerCase(),
           orElse: () => cats.last,
@@ -196,21 +204,23 @@ class FinanceTools {
         await state.addMoney(e);
         onActivity?.call(
           ToolActivity(
-            '${income ? 'Received' : 'Spent'} ${f.fmt(amount)} · ${potId != null ? f.pot(potId)!.name : e.category}',
-            undo: () => state.removeMoney(e.id),
+            '${e.kind == EntryKind.savings ? 'Transferred' : e.income ? 'Received' : 'Spent'} ${f.fmt(amount)} · ${potId != null ? f.pot(potId)!.name : e.category}',
+            undo: () => state.updateFinance((_) => ledger.entries.removeWhere((x) => x.id == e.id)),
           ),
         );
         return jsonEncode({'ok': true, 'id': e.id, 'spent_today': f.fmt(f.spentOn(now))});
       case 'set_budget':
         final cat = a['category'] as String?;
         final amount = _minor(a['amount']);
-        if (!spendCategories.contains(cat) || amount == null) return _err('category and amount are required');
+        if (!f.expenseCategories.contains(cat) || amount == null) return _err('category and amount are required');
         final prev = f.budgets[cat];
         await state.setBudget(cat!, amount);
         onActivity?.call(
           ToolActivity(
             amount == 0 ? 'Removed the $cat budget' : '$cat budget ${f.fmt(amount)}/month',
-            undo: () => state.setBudget(cat, prev),
+            undo: () => state.updateFinance((_) {
+              if (prev == null) { ledger.budgets.remove(cat); } else { ledger.budgets[cat] = prev; }
+            }),
           ),
         );
         return jsonEncode({'ok': true});
@@ -228,7 +238,10 @@ class FinanceTools {
           goalId: goalId,
         );
         await state.upsertPot(p);
-        onActivity?.call(ToolActivity('Savings pot "${p.name}" · ${f.fmt(target)}', undo: () => state.deletePot(p.id)));
+        onActivity?.call(ToolActivity('Savings pot "${p.name}" · ${f.fmt(target)}', undo: () => state.updateFinance((_) {
+          ledger.pots.removeWhere((x) => x.id == p.id);
+          for (final e in ledger.entries.where((e) => e.potId == p.id)) { e.potId = null; }
+        })));
         return jsonEncode({'ok': true, 'id': p.id});
       case 'add_debt':
         final amount = _minor(a['amount']);
@@ -245,7 +258,10 @@ class FinanceTools {
         onActivity?.call(
           ToolActivity(
             d.iOwe ? 'Debt to $person · ${f.fmt(amount)}' : '$person owes you ${f.fmt(amount)}',
-            undo: () => state.deleteDebt(d.id),
+            undo: () => state.updateFinance((_) {
+              ledger.debts.removeWhere((x) => x.id == d.id);
+              for (final e in ledger.entries.where((e) => e.debtId == d.id)) { e.debtId = null; }
+            }),
           ),
         );
         return jsonEncode({'ok': true, 'id': d.id});
@@ -279,7 +295,7 @@ class FinanceTools {
         onActivity?.call(
           ToolActivity(
             r.complete ? 'Zakat: ${r.aboveNisab ? '${f.fmt(r.due!)} due' : 'below the nisab'}' : 'Zakat estimate incomplete',
-            undo: () => state.updateFinance((x) => x.zakat = prev),
+            undo: () => state.updateFinance((_) => ledger.zakat = prev),
           ),
         );
         return jsonEncode({
