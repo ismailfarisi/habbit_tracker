@@ -13,7 +13,9 @@ library;
 
 import 'package:intl/intl.dart';
 
+import '../goals/goal.dart';
 import '../habits/habit.dart';
+import 'tracking.dart';
 import '../models.dart';
 import 'stats.dart';
 import 'tasks.dart';
@@ -75,6 +77,12 @@ class WeeklyReview {
   final List<ReviewItem> items;
   final DayScore week;
   final DayScore previousWeek;
+
+  /// Days with any practice (including partial sessions) out of distinct
+  /// scheduled days, across the user's selected trackers.
+  final DayScore practiceDays;
+  final DateTime? returnedOn;
+  final DateTime? lastPractice;
   final ReviewItem? best;
 
   /// Null when nothing was missed.
@@ -89,6 +97,9 @@ class WeeklyReview {
     required this.items,
     required this.week,
     required this.previousWeek,
+    required this.practiceDays,
+    this.returnedOn,
+    this.lastPractice,
     this.best,
     this.worst,
     this.pattern,
@@ -138,29 +149,34 @@ WeeklyReview weeklyReview({
   required Map<String, DayLog> logs,
   List<HabitDef> habits = const [],
   List<Task> tasks = const [],
+  List<Goal> goals = const [],
   DateTime? today,
   int days = 7,
   int patternDays = 28,
 }) {
   final end = dateOnly(today ?? DateTime.now());
   final first = firstLogDay(logs);
-  bool builtInOn(DateTime d) => first != null && !d.isBefore(first);
-  final active = habits.where((h) => !h.archived).toList();
-  final routines = tasks.where((t) => t.isRepeating).toList();
+  bool builtInOn(String id, DateTime d) =>
+      settings.tracksOn(id, d) && (first != null && !d.isBefore(first) || d == end);
+  final active = habits.where((h) => !h.archived && tracksItem(settings, goals, h.id)).toList();
+  final routines = tasks.where((t) => t.isRepeating && tracksItem(settings, goals, t.id, task: true)).toList();
 
   final trackers = <_Tracker>[
-    _Tracker('wake', 'Wake on time', ReviewItemKind.wake, builtInOn, (d) => wakeDone(logs[dayKey(d)], settings)),
-    for (final p in prayerNames)
+    if (settings.tracks('wake'))
+      _Tracker('wake', 'Wake on time', ReviewItemKind.wake, (d) => builtInOn('wake', d),
+        (d) => wakeDone(logs[dayKey(d)], settings), participated: (d) => logs[dayKey(d)]?.wakeAt != null),
+    if (settings.tracks('prayers')) for (final p in prayerNames)
       _Tracker(
         'prayer:$p',
         p,
         ReviewItemKind.prayer,
-        builtInOn,
+        (d) => builtInOn('prayers', d),
         (d) => logs[dayKey(d)]?.prayers.contains(p) ?? false,
         late: (d) => switch (logs[dayKey(d)]?.prayerStatus[p]) { prayerLate || prayerQada => true, _ => false },
       ),
     for (final h in active)
-      _Tracker('habit:${h.id}', h.title, ReviewItemKind.habit, h.isScheduledOn, (d) => habitDoneOn(logs, h, d)),
+      _Tracker('habit:${h.id}', h.title, ReviewItemKind.habit, h.isScheduledOn, (d) => habitDoneOn(logs, h, d),
+        participated: (d) => practisedHabit(logs[dayKey(d)]?.habits[h.id], h)),
     for (final t in routines)
       _Tracker('task:${t.id}', t.title, ReviewItemKind.task, (d) => taskCountsOn(t, d), t.isDoneOn),
   ];
@@ -187,6 +203,36 @@ WeeklyReview weeklyReview({
   }
 
   final pattern = _findPattern(trackers, end, patternDays);
+  var plannedDays = 0, practisedDays = 0;
+  DateTime? lastPractice, returnedOn;
+  var missedPlannedDay = false;
+  final cutoff = dayKey(DateTime(end.year, end.month, end.day - days - 6));
+  final olderEntries = {...logs.keys, for (final t in routines) ...t.doneDates};
+  var practisedBefore = olderEntries.any((key) {
+    if (key.compareTo(cutoff) >= 0) return false;
+    final day = DateTime.tryParse(key);
+    return day != null && trackers.any((t) => t.scheduled(day) && (t.participated ?? t.done)(day));
+  });
+  // Include the previous week to recognise a return across the week boundary.
+  for (var i = days + 6; i >= 0; i--) {
+    final d = DateTime(end.year, end.month, end.day - i);
+    final planned = trackers.where((t) => t.scheduled(d));
+    if (planned.isEmpty) continue;
+    final practised = planned.any((t) => (t.participated ?? t.done)(d));
+    if (i == 0 && !practised) continue; // Today is still open.
+    if (i < days) plannedDays++;
+    if (practised) {
+      if (i < days) {
+        practisedDays++;
+        if (practisedBefore && missedPlannedDay) returnedOn = d;
+        lastPractice = d;
+      }
+      missedPlannedDay = false;
+      practisedBefore = true;
+    } else {
+      missedPlannedDay = true;
+    }
+  }
   return WeeklyReview(
     start: DateTime(end.year, end.month, end.day - days + 1),
     end: end,
@@ -194,6 +240,9 @@ WeeklyReview weeklyReview({
     items: items,
     week: sum(items),
     previousWeek: sum(previous),
+    practiceDays: DayScore(practisedDays, plannedDays),
+    returnedOn: returnedOn,
+    lastPractice: lastPractice,
     best: best,
     worst: worst,
     pattern: pattern,
@@ -208,7 +257,8 @@ class _Tracker {
   final DayTest scheduled;
   final DayTest done;
   final DayTest? late;
-  _Tracker(this.id, this.label, this.kind, this.scheduled, this.done, {this.late});
+  final DayTest? participated;
+  _Tracker(this.id, this.label, this.kind, this.scheduled, this.done, {this.late, this.participated});
 
   ReviewItem score(DateTime end, int days, {bool endIsToday = true}) {
     var n = 0, total = 0, lateDays = 0;

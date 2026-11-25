@@ -72,6 +72,11 @@ double habitProgress(HabitEntry? entry, HabitDef def) {
   return (have / target).clamp(0, 1).toDouble();
 }
 
+/// A logged practice counts as showing up even below the day's target.
+bool practisedHabit(HabitEntry? entry, HabitDef def) => entry != null &&
+    (habitDone(entry, def) || habitProgress(entry, def) > 0 ||
+      entry.sessions.isNotEmpty || entry.metrics.isNotEmpty);
+
 bool habitDoneOn(Map<String, DayLog> logs, HabitDef def, DateTime day) =>
     habitDone(logs[dayKey(day)]?.habits[def.id], def);
 
@@ -308,6 +313,7 @@ StreakInfo perfectDayStreak(
   final end = dateOnly(today ?? DateTime.now());
   return streakInfo(
     done: (d) => dayScore(d, s, logs, habits: habits, tasks: tasks, goals: goals).perfect,
+    scheduled: (d) => dayScore(d, s, logs, habits: habits, tasks: tasks, goals: goals).total > 0,
     start: _firstLogDay(logs, end),
     today: end,
     freezesPerMonth: s.freezesPerMonth,

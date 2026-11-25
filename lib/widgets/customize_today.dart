@@ -115,8 +115,9 @@ class _CustomizeTodayState extends State<_CustomizeToday> {
                               pinned.remove(id);
                               if (action == 'pin') pinned.insert(0, id);
                               if (action == 'up') pinned.insert(index - 1, id);
-                              if (action == 'down')
+                              if (action == 'down') {
                                 pinned.insert(index + 1, id);
+                              }
                             }),
                             itemBuilder: (_) => [
                               if (index < 0)

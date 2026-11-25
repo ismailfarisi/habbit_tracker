@@ -66,6 +66,26 @@ void main() {
 
   Finder inRow(String key, Finder f) => find.descendant(of: find.byKey(ValueKey(key)), matching: f);
 
+  test('tracking choices survive backup and exclude paused dates without losing earlier days', () async {
+    final today = dateOnly(DateTime.now());
+    DateTime ago(int days) => DateTime(today.year, today.month, today.day - days);
+    await state.setWake(ago(5), ago(5));
+    await state.updateSettings((s) => s.todayHidden.add('wake'));
+    expect(state.settings.tracksOn('wake', ago(5)), isFalse);
+    await state.updateSettings((s) {
+      // Simulate the opt-out having happened three days ago.
+      final history = s.trackingHistory['wake']!;
+      history.remove(dayKey(today));
+      history[dayKey(ago(3))] = false;
+      s.todayHidden.remove('wake');
+    });
+    final restored = Settings.fromJson(state.settings.toJson());
+    expect(restored.tracksOn('wake', ago(5)), isTrue);
+    expect(restored.tracksOn('wake', ago(2)), isFalse);
+    expect(restored.tracksOn('wake', today), isTrue);
+    expect(restored.tracksOn('prayers', ago(5)), isTrue);
+  });
+
   group('todayItems ordering', () {
     test('wake comes back in the evening until bedtime is logged', () async {
       await state.setWake(now, DateTime(2026, 5, 5, 5));

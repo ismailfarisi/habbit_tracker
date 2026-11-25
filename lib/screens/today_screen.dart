@@ -270,9 +270,9 @@ class _TodayScreenState extends State<TodayScreen> {
           ...pending.skip(1).where((i) => i != money),
         ];
         final done = items.where((i) => i.done).toList();
-        final resume = state.logs.isNotEmpty && missedYesterday(state, now).isNotEmpty;
+        final resume = missedYesterday(state, now).isNotEmpty;
         final hasReminder = s.tracks('wake') || s.tracks('prayers') ||
-            state.activeHabits.any((h) => h.reminder != null) || state.tasks.any((t) => t.time != null && !t.isOneOffDone);
+            state.trackedHabits.any((h) => h.reminder != null) || state.trackedTasks.any((t) => t.time != null && !t.isOneOffDone);
         final theme = Theme.of(context);
         return ListView(
           padding: const EdgeInsets.all(16),

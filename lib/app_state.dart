@@ -452,7 +452,13 @@ class AppState extends ChangeNotifier implements TaskBackend {
     final hiddenBefore = List.of(settings.todayHidden);
     change(settings);
     for (final id in ['wake', 'prayers']) {
-      if (hiddenBefore.contains(id) && settings.tracks(id)) settings.trackingSince[id] = dayKey(DateTime.now());
+      final wasTracked = !hiddenBefore.contains(id);
+      if (wasTracked == settings.tracks(id)) continue;
+      final history = settings.trackingHistory.putIfAbsent(id, () {
+        final first = logs.keys.toList()..sort();
+        return {if (wasTracked && first.isNotEmpty) first.first: true};
+      });
+      history[dayKey(DateTime.now())] = settings.tracks(id);
     }
     notifyListeners();
     await storage.saveSettings(settings);
