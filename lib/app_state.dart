@@ -214,6 +214,19 @@ class AppState extends ChangeNotifier implements TaskBackend {
     await _commit();
   }
 
+  Future<void> saveQuranPractice(DateTime day, String passageKey, QuranPracticeLog practice, {DateTime? today}) async {
+    if (isForecastDay(day, today: today)) return;
+    _mutableDay(day).quranPractice[passageKey] = practice;
+    await _commit(reschedule: false);
+  }
+
+  Future<void> toggleQuranBookmark(int surah, int ayah) async {
+    final key = '$surah:$ayah';
+    if (!settings.quranBookmarks.remove(key)) settings.quranBookmarks.add(key);
+    notifyListeners();
+    await storage.saveSettings(settings);
+  }
+
   Future<void> applyNotificationAction(String payload) async {
     if (applyTaskDoneAction(payload, tasks)) {
       await _commitTasks();
